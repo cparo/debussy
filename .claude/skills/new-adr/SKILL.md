@@ -9,6 +9,8 @@ An ADR records *why*; the architecture section it links records the resulting *r
 ("Documentation Boundaries") says which belongs where. Finish every step: a record with only half
 its parts is worse than none.
 
+0. **Branch from the latest `main`.** ADR numbers are assigned per branch, so two open ADR PRs
+   collide. If one is still open, stack on its branch instead.
 1. **Name who decided.** A human's name, `agent, ratified by <name>` once a human has approved
    it, or `agent, unratified`. The answer to a `flag-risk` question is the human's decision.
 2. **Find the section.** Pick the `docs/architecture/<file>.md` heading the decision's rule belongs
