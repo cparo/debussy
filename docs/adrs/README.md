@@ -38,4 +38,8 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0012](0012-undo-is-unlimited-per-session-and-named-versions.md) | Undo is unlimited per session and named versions persist earlier states | Accepted | [Undo history](../architecture/project.md#undo-history) |
 | [ADR-0013](0013-a-project-is-a-bundle-directory-with-versioned.md) | A project is a bundle directory with versioned JSON metadata | Accepted | [Project bundle](../architecture/project.md#project-bundle) |
 | [ADR-0014](0014-project-audio-is-stored-as-mono-32-bit-float-wav.md) | Project audio is stored as mono 32-bit float WAV | Accepted | [Stored audio](../architecture/project.md#stored-audio) |
+| [ADR-0015](0015-routing-is-one-general-processing-graph-per.md) | Routing is one general processing graph per project | Accepted | [Processing graph](../architecture/signal-graph.md#processing-graph) |
+| [ADR-0016](0016-feedback-loops-must-pass-through-a-fixed-delay.md) | Feedback loops must pass through a fixed-delay node | Accepted | [Feedback loops](../architecture/signal-graph.md#feedback-loops) |
+| [ADR-0017](0017-signals-are-mono-or-stereo-only.md) | Signals are mono or stereo only | Accepted | [Channel layouts](../architecture/signal-graph.md#channel-layouts) |
+| [ADR-0018](0018-panning-uses-a-3-db-constant-power-law.md) | Panning uses a -3 dB constant-power law | Accepted | [Panning](../architecture/signal-graph.md#panning) |
 
