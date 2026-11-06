@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cparo/debussy"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# CLAUDE.md "Error Handling": no `.unwrap()` or `.expect()` in library code or tests.
+unwrap_used = "warn"
+expect_used = "warn"

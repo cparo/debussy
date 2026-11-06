@@ -2,7 +2,7 @@
 
 A digital audio workstation designed as a basic-but-powerful tool for amateur musicians.
 
-## Whos is this for?
+## Who is this for?
 
 Our first and primary user is a "home studio" musician who will use this software to record and
 process audio from live band performances and solo tracking sessions.
