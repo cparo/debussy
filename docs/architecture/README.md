@@ -66,6 +66,11 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 
 <!-- BEGIN GENERATED INDEX: run `cargo xtask generate-architecture-index` -->
 
+- [Audio Engine](engine.md)
+  - [Sample format](engine.md#sample-format)
+  - [Sample rate](engine.md#sample-rate)
+  - [Buffer size](engine.md#buffer-size)
+  - [Audio storage](engine.md#audio-storage)
 - [Licensing](licensing.md)
   - [Project licence](licensing.md#project-licence)
   - [Dependency licences](licensing.md#dependency-licences)
