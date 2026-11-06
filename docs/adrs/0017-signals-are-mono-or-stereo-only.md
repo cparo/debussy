@@ -1,6 +1,6 @@
 # ADR-0017 — Signals are mono or stereo only
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0030
 - **Decided by:** Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** —
