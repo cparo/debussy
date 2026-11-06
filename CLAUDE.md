@@ -37,11 +37,10 @@ when you are about to:
 
 ## Documentation Boundaries
 
-Five documents carry project knowledge. Writing into the wrong one is the most common way this
-project's documentation degrades — the architectural specification, once a single file, reached 1166 lines that way before being split.
-Every kind of document also has a line budget that `cargo xtask check` enforces (the table is in
-`crates/xtask/src/budget.rs`): when a file hits its budget, split it by topic; do not raise the limit
-to fit more in.
+The documents listed in the table below carry project knowledge. Writing into the wrong one would
+degrade the usability of this project's documentation. Every kind of document also has a line
+budget that `cargo xtask check` enforces (the table is in `crates/xtask/src/budget.rs`): when a
+file hits its budget, split it by topic; do not raise the limit to fit more in.
 
 | Document | Answers | Written when |
 |---|---|---|

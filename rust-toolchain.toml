@@ -1,0 +1,6 @@
+# The development toolchain, pinned exactly. Raising this pin does not raise the MSRV, which is
+# `rust-version` in the workspace Cargo.toml; CI builds on both.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
