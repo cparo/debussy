@@ -24,3 +24,14 @@ block's duration ([ADR-0007](../adrs/0007-the-engine-targets-a-128-frame-default
 Project audio is stored on disk and streamed during playback; memory holds only bounded caches and
 read-ahead buffers. Disk reads happen off the real-time thread, which receives filled,
 preallocated buffers. The engine must support at least 32 tracks and projects several hours long ([ADR-0008](../adrs/0008-project-audio-is-streamed-from-disk.md)).
+
+## Real-time thread
+
+Code reachable from the audio callback must be tested inside the real-time guard, which fails the
+test on any heap allocation or deallocation on the guarded thread. The guard lives in its own
+test-support crate, which is the only place its `unsafe` global allocator may exist, and is used
+only as a dev-dependency.
+
+Each crate containing real-time code must carry a `clippy.toml` whose `disallowed-types` and
+`disallowed-methods` ban locks (`Mutex`, `RwLock`, `Condvar`), file and network I/O, sleeping,
+and printing ([ADR-0010](../adrs/0010-real-time-code-is-checked-by-an-allocator-guard.md)).
