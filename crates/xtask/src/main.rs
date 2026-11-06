@@ -9,8 +9,11 @@ mod adr;
 mod arch_index;
 mod budget;
 mod citations;
+mod crate_rules;
 mod hooks;
+mod json;
 mod markdown;
+mod metadata;
 mod repo;
 
 use std::path::Path;
@@ -22,8 +25,9 @@ const USAGE: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
-  check                          Check docs: line budgets, docs/architecture/ citations and
-                                 links, the ADR index, and the architecture table of contents
+  check                          Check docs (line budgets, docs/architecture/ citations and
+                                 links, the ADR index, the architecture table of contents) and
+                                 the crate tier and dependency rules
   generate-architecture-index    Regenerate the table of contents in docs/architecture/README.md
   new-adr \"<decision>\" --decided-by <who> [--section <docs/architecture/file.md#anchor>]
           [--issue <number>] [--date <YYYY-MM-DD>]
@@ -151,7 +155,7 @@ fn parse_new_adr(args: &[String]) -> Result<adr::NewAdr> {
     Ok(options)
 }
 
-/// Runs every documentation check and prints the problems. Returns whether all passed.
+/// Runs every documentation check and the crate rules check, and prints the problems. Returns whether all passed.
 fn check(root: &Path) -> Result<bool> {
     let files = repo::files(root)?;
     let mut problems = Vec::new();
@@ -159,18 +163,19 @@ fn check(root: &Path) -> Result<bool> {
     problems.extend(citations::check(root, &files)?);
     problems.extend(adr::check(root, &files)?);
     problems.extend(arch_index::check(root, &files)?);
+    problems.extend(crate_rules::check(root, &files)?);
     for problem in &problems {
         eprintln!("{problem}");
     }
     if problems.is_empty() {
-        println!("docs check passed");
+        println!("check passed");
     } else {
-        eprintln!("docs check failed: {} problem(s)", problems.len());
+        eprintln!("check failed: {} problem(s)", problems.len());
     }
     Ok(problems.is_empty())
 }
 
-/// The commit gate: the docs check, then formatting, then clippy. Stops at the first failure.
+/// The commit gate: the check, then formatting, then clippy. Stops at the first failure.
 fn precommit(root: &Path) -> Result<ExitCode> {
     if !check(root)? {
         return Ok(ExitCode::FAILURE);

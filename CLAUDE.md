@@ -84,7 +84,8 @@ Rules:
   `docs/architecture/`:
   `cargo xtask generate-architecture-index`
 - Create an ADR (the `new-adr` skill's mechanical step): `cargo xtask new-adr`
-- Check docs (line budgets, `docs/architecture/` heading citations, ADR index): `cargo xtask check`
+- Check docs and crate rules (line budgets, `docs/architecture/` heading citations, ADR index,
+  crate tiers and dependencies): `cargo xtask check`
 - Commit gate (that check, then `cargo fmt --check`, then clippy): `cargo xtask precommit` — run
   automatically by the `pre-commit` git hook. Install the hooks once per clone with
   `cargo xtask install-hooks`; a Claude Code hook blocks commits until they are installed, and

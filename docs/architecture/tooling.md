@@ -9,6 +9,10 @@ installation) live in `crates/xtask` and run as `cargo xtask <command>`.
 
 Line budgets for each kind of document are set in `crates/xtask/src/budget.rs`.
 
+`cargo xtask check` also enforces `docs/architecture/crates.md` "Dependency rules" on every
+crate's direct dependencies, dev- and build-dependencies included. Each crate's kind is set in
+`crates/xtask/src/crate_rules.rs`; a workspace crate missing from it fails the check.
+
 ## Commit gate
 
 Every commit must pass `cargo xtask precommit`, run by the git `pre-commit` hook that
