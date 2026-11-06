@@ -39,3 +39,5 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
   "Real-time thread".
 - `unsafe` code is allowed only in `macos_platform` and `realtime_guard`. Every other crate sets
   `#![forbid(unsafe_code)]` ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen-crates-in.md)).
+- The one exception is `audio_buffers`' queue module: the crate sets `#![deny(unsafe_code)]` and
+  only that module allows it ([ADR-0028](../adrs/0028-unsafe-is-allowed-in-audio-buffers-queue-module.md)).
