@@ -15,5 +15,9 @@ Every commit must pass `cargo xtask precommit`, run by the git `pre-commit` hook
 `cargo xtask install-hooks` installs. A Claude Code hook in `.claude/hooks/` blocks agent commits
 until the git hook is installed, and blocks attempts to bypass it.
 
+The Claude Code hook is a Python 3 script using only the standard library. It inspects only the
+commands a Bash call would run (quoted text and heredoc bodies are not commands), and its
+`--self-test` cases run in CI ([ADR-0027](../adrs/0027-the-commit-guard-parses-shell-commands-with-python.md)).
+
 CI runs the same gate, and additionally builds and tests on both the MSRV and the pinned toolchain
 and runs `cargo deny check`.

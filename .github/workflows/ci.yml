@@ -22,6 +22,7 @@ jobs:
       # rust-toolchain.toml selects and installs the pinned toolchain with rustfmt and clippy.
       - run: cargo xtask precommit
       - run: cargo test --workspace
+      - run: python3 -I .claude/hooks/guard_git_commit.py --self-test
 
   msrv:
     name: MSRV (1.85)
