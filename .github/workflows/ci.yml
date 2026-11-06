@@ -1,0 +1,40 @@
+# The commit gate, plus the MSRV build and dependency policy.
+# See docs/architecture/tooling.md "Commit gate".
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: Gate (pinned toolchain)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml selects and installs the pinned toolchain with rustfmt and clippy.
+      - run: cargo xtask precommit
+      - run: cargo test --workspace
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.85 --profile minimal
+      - run: cargo +1.85 test --workspace
+
+  deny:
+    name: Dependencies (cargo deny)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install cargo-deny --locked --version 0.20.2
+      - run: cargo deny check

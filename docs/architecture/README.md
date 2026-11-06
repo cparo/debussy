@@ -2,12 +2,12 @@
 
 This is an overview of how this application is built.
 
-For the reasons _behind_ our design choices, see our [ADRs](../../adrs/README.md).
+For the reasons _behind_ our design choices, see our [ADRs](../adrs/README.md).
 
 "Must", "should", and "may" are used according to the conventions defined by the Network Working
 Group and IETF. In short:
 * "Must" means an absolute requirement.
-* "Should" means a recommentation which may be ignored - but only if discussed with or flagged for
+* "Should" means a recommendation which may be ignored - but only if discussed with or flagged for
   explicit review by a human.
 * "May" means an option which can be exercised when it makes sense to do so.
 
@@ -26,12 +26,12 @@ documented.
 
 For example:
 * project_persistence (a logical subsystem)
-* audio_fitlers (a collection of modules of a similar shape and purpose)
+* audio_filters (a collection of modules of a similar shape and purpose)
 
 Changes to the functionality provided by any of these crates should not require changes elsewhere
 in order to apply and test those changes.
 
-Cases where new functionality is introduced may lead to creating additional changes in other crates
+Cases where new functionality is introduced may lead to creating additional changes in other
 crates in order to _make use_ of that new functionality - but these additional changes should be
 made in separate commits, with each such commit passing our build-time tests.
 
@@ -57,12 +57,24 @@ For example: "low-pass-equalizer", "audio-track"
 
 ### Give implementation details names that describe what they do
 
-Implementation deatails behind a crate's interface boundary can have more "technical" names, but
+Implementation details behind a crate's interface boundary can have more "technical" names, but
 should be oriented toward quickly describing the structure or algorithm they represent.
 
 For example: "butterworth-filter", "audio-track-storage-chunk"
 
 ## Modules
 
-<!-- TODO: Create an xtask script to generate and maintain a table-of-content here corresponding
-     to the other documents under this directory and their headings. -->
+<!-- BEGIN GENERATED INDEX: run `cargo xtask generate-architecture-index` -->
+
+- [Licensing](licensing.md)
+  - [Project licence](licensing.md#project-licence)
+  - [Dependency licences](licensing.md#dependency-licences)
+- [Platform Integration](platform.md)
+  - [Patent-encumbered codecs](platform.md#patent-encumbered-codecs)
+- [Developer Tooling](tooling.md)
+  - [Repository tasks (xtask)](tooling.md#repository-tasks-xtask)
+  - [Commit gate](tooling.md#commit-gate)
+- [User Interface](user-interface.md)
+  - [UI toolkit](user-interface.md#ui-toolkit)
+
+<!-- END GENERATED INDEX -->
