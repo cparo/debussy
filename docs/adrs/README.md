@@ -32,4 +32,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0006](0006-each-project-has-one-fixed-sample-rate.md) | Each project has one fixed sample rate | Accepted | [Sample rate](../architecture/engine.md#sample-rate) |
 | [ADR-0007](0007-the-engine-targets-a-128-frame-default-buffer.md) | The engine targets a 128-frame default buffer | Accepted | [Buffer size](../architecture/engine.md#buffer-size) |
 | [ADR-0008](0008-project-audio-is-streamed-from-disk.md) | Project audio is streamed from disk | Accepted | [Audio storage](../architecture/engine.md#audio-storage) |
+| [ADR-0009](0009-audio-device-i-o-uses-cpal-behind-our-own.md) | Audio device I/O uses cpal behind our own interface | Accepted | [Audio device I/O](../architecture/platform.md#audio-device-io) |
+| [ADR-0010](0010-real-time-code-is-checked-by-an-allocator-guard.md) | Real-time code is checked by an allocator guard and clippy bans | Accepted | [Real-time thread](../architecture/engine.md#real-time-thread) |
 
