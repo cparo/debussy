@@ -1,7 +1,7 @@
 # ADR-0001 — Debussy is licensed MIT OR Apache-2.0 and accepts only permissively licensed dependencies
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** —
 - **Architecture:** [Project licence](../architecture/licensing.md#project-licence)
