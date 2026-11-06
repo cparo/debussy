@@ -1,9 +1,10 @@
 # Platform Integration
 
-## Patent-encumbered codecs
+## Compressed audio codecs
 
-MP3 and AAC must be encoded and decoded through Apple's AudioToolbox framework, from inside the
-macOS platform crate. No crate that implements either codec may be added ([ADR-0004](../adrs/0004-mp3-and-aac-go-through-apple-audiotoolbox.md)).
+MP3 decoding, and AAC and FLAC encoding and decoding, must go through Apple's AudioToolbox
+framework, from inside the macOS platform crate. No crate implementing these codecs may be added.
+MP3 export is not offered ([ADR-0024](../adrs/0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md)).
 
 ## Audio device I/O
 

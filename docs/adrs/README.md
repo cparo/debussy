@@ -27,7 +27,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0001](0001-debussy-is-licensed-mit-or-apache-2-0-and-accepts.md) | Debussy is licensed MIT OR Apache-2.0 and accepts only permissively licensed dependencies | Accepted | [Project licence](../architecture/licensing.md#project-licence) |
 | [ADR-0002](0002-repository-tasks-are-built-in-house-on-std-and.md) | Repository tasks are built in-house on std and anyhow | Accepted | [Repository tasks (xtask)](../architecture/tooling.md#repository-tasks-xtask) |
 | [ADR-0003](0003-the-user-interface-is-built-with-iced.md) | The user interface is built with iced | Accepted | [UI toolkit](../architecture/user-interface.md#ui-toolkit) |
-| [ADR-0004](0004-mp3-and-aac-go-through-apple-audiotoolbox.md) | MP3 and AAC go through Apple AudioToolbox | Accepted | [Patent-encumbered codecs](../architecture/platform.md#patent-encumbered-codecs) |
+| [ADR-0004](0004-mp3-and-aac-go-through-apple-audiotoolbox.md) | MP3 and AAC go through Apple AudioToolbox | Superseded by ADR-0024 | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
 | [ADR-0005](0005-the-engine-processes-audio-as-32-bit-float.md) | The engine processes audio as 32-bit float throughout | Accepted | [Sample format](../architecture/engine.md#sample-format) |
 | [ADR-0006](0006-each-project-has-one-fixed-sample-rate.md) | Each project has one fixed sample rate | Accepted | [Sample rate](../architecture/engine.md#sample-rate) |
 | [ADR-0007](0007-the-engine-targets-a-128-frame-default-buffer.md) | The engine targets a 128-frame default buffer | Accepted | [Buffer size](../architecture/engine.md#buffer-size) |
@@ -46,4 +46,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0020](0020-ports-and-track-contents-are-typed-so-midi-can-be.md) | Ports and track contents are typed so MIDI can be added later | Accepted | [Port types](../architecture/signal-graph.md#port-types) |
 | [ADR-0021](0021-inputs-can-be-monitored-through-the-software-per.md) | Inputs can be monitored through the software per track | Accepted | [Input monitoring](../architecture/recording.md#input-monitoring) |
 | [ADR-0022](0022-the-engine-compensates-recording-and-effect.md) | The engine compensates recording and effect latency automatically | Accepted | [Recording alignment](../architecture/recording.md#recording-alignment) |
+| [ADR-0023](0023-expired-or-royalty-free-patents-may-be-implemented.md) | Expired or royalty-free patents may be implemented; others need a licensing SDK or review | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0024](0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md) | Compressed codecs go through AudioToolbox and MP3 export is deferred | Accepted | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
+| [ADR-0025](0025-wav-is-built-in-house-and-integer-exports-are.md) | WAV is built in-house and integer exports are dithered | Accepted | [WAV files](../architecture/import-export.md#wav-files) |
 
