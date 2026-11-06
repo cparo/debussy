@@ -15,10 +15,14 @@ one are refused.
 Rendered output must not depend on the buffer size. The engine processes the nodes of a cycle in
 sub-blocks no longer than the shortest feedback delay in that cycle ([ADR-0016](../adrs/0016-feedback-loops-must-pass-through-a-fixed-delay.md)).
 
+A feedback delay is at least 1 ms, stored as a time and rounded up to whole samples at the project
+rate. The UI does not offer shorter values, and a shorter stored or automated value is raised to
+1 ms ([ADR-0031](../adrs/0031-feedback-delays-are-at-least-1-ms.md)).
+
 ## Channel layouts
 
-Every connection carries either a mono or a stereo signal. The project output is a stereo mix; a
-mono mix is derived from it by summing its channels ([ADR-0017](../adrs/0017-signals-are-mono-or-stereo-only.md)).
+Every connection carries either a mono or a stereo signal. The project output is a stereo mix; the
+mono mix is derived from it as `(L + R) × 0.7071` ([ADR-0030](../adrs/0030-signals-are-mono-or-stereo-and-the-mono-mix-is-the.md)).
 
 ## Panning
 
