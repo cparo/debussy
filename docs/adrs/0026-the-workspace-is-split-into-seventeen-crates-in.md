@@ -1,7 +1,7 @@
 # ADR-0026 — The workspace is split into seventeen crates in five dependency tiers
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** —
 - **Architecture:** [Crate map](../architecture/crates.md#crate-map)
@@ -44,4 +44,3 @@ plus `realtime_guard` for tests and `xtask` for tooling.
   its RustDoc.
 - Tier membership is not yet checked by tooling; a `cargo xtask check` rule reading `cargo
   metadata` could enforce the dependency rules later.
-- Decided by the agent; awaiting ratification in review.
