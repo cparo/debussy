@@ -1,7 +1,7 @@
 # ADR-0027 — The commit guard parses shell commands with Python's standard library
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** —
 - **Architecture:** [Commit gate](../architecture/tooling.md#commit-gate)
@@ -38,4 +38,3 @@ core.hooksPath`, and `git config core.hooksPath`. Its `--self-test` cases run in
   runs on every commit.
 - Edge cases it does not see: commands built at runtime (`eval`, variables expanding to `git`),
   and `<<` appearing inside a quoted string, which can hide the lines after it.
-- Decided by the agent; awaiting ratification in review.
