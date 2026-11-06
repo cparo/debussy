@@ -66,6 +66,9 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 
 <!-- BEGIN GENERATED INDEX: run `cargo xtask generate-architecture-index` -->
 
+- [Crates](crates.md)
+  - [Crate map](crates.md#crate-map)
+  - [Dependency rules](crates.md#dependency-rules)
 - [Audio Engine](engine.md)
   - [Sample format](engine.md#sample-format)
   - [Sample rate](engine.md#sample-rate)
