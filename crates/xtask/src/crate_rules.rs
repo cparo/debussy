@@ -83,8 +83,15 @@ const UNSAFE_ALLOWED: &[&str] = &[PLATFORM_CRATE, GUARD_CRATE];
 const REALTIME_THIRD_PARTY: &str = "thiserror";
 /// Name prefixes of third-party crates that only [`PLATFORM_CRATE`] may depend on.
 const PLATFORM_ONLY_PREFIXES: &[&str] = &["cpal", "objc2"];
-/// The attribute every crate outside [`UNSAFE_ALLOWED`] must carry in its root.
+/// The attribute every crate outside [`UNSAFE_ALLOWED`] and [`SCOPED_UNSAFE`] must carry in its
+/// root.
 const FORBID_UNSAFE: &str = "#![forbid(unsafe_code)]";
+/// The attribute a crate in [`SCOPED_UNSAFE`] carries in its root instead.
+const DENY_UNSAFE: &str = "#![deny(unsafe_code)]";
+/// The attribute that opts a module back in to `unsafe`.
+const ALLOW_UNSAFE: &str = "#![allow(unsafe_code)]";
+/// Crates allowed `unsafe` in one module only, and that module's file (ADR-0028).
+const SCOPED_UNSAFE: &[(&str, &str)] = &[("audio_buffers", "src/queue.rs")];
 
 fn kind_of(name: &str) -> Option<Kind> {
     CRATES.iter().find(|(n, _)| *n == name).map(|(_, k)| *k)
@@ -104,6 +111,7 @@ fn check_packages(
     read: &dyn Fn(&str) -> Result<String>,
 ) -> Result<Vec<Problem>> {
     let mut problems = Vec::new();
+    let mut problems_scoped = Vec::new();
     for package in packages {
         let mut report = |message: String| {
             problems.push(Problem::in_file(&package.manifest, message));
@@ -127,16 +135,40 @@ fn check_packages(
             }
         }
 
+        let scoped = SCOPED_UNSAFE.iter().find(|(name, _)| *name == package.name);
         if !UNSAFE_ALLOWED.contains(&package.name.as_str()) {
-            let forbids = match &package.root_source {
-                Some(source) => read(source)?.lines().any(|l| l.trim() == FORBID_UNSAFE),
+            // A scoped crate may also forbid `unsafe` outright, which is stricter.
+            let accepted: &[&str] = if scoped.is_some() {
+                &[DENY_UNSAFE, FORBID_UNSAFE]
+            } else {
+                &[FORBID_UNSAFE]
+            };
+            let required = accepted[0];
+            let has_attribute = match &package.root_source {
+                Some(source) => read(source)?.lines().any(|l| accepted.contains(&l.trim())),
                 None => false,
             };
-            if !forbids {
+            if !has_attribute {
                 report(format!(
-                    "crate root must contain `{FORBID_UNSAFE}`: only {} may contain unsafe code",
+                    "crate root must contain `{required}`: only {} may contain unsafe code \
+                     (docs/architecture/crates.md \"Dependency rules\")",
                     UNSAFE_ALLOWED.join(" and ")
                 ));
+            }
+        }
+        if let Some((_, module)) = scoped {
+            let allowed = format!("{}/{module}", package.dir());
+            let prefix = format!("{}/", package.dir());
+            for file in files {
+                if file.starts_with(&prefix) && file.ends_with(".rs") && *file != allowed {
+                    let opts_in = read(file)?.lines().any(|l| l.trim() == ALLOW_UNSAFE);
+                    if opts_in {
+                        problems_scoped.push(Problem::in_file(
+                            file,
+                            format!("only {allowed} may allow unsafe code in this crate"),
+                        ));
+                    }
+                }
             }
         }
 
@@ -199,6 +231,7 @@ fn check_packages(
             }
         }
     }
+    problems.extend(problems_scoped);
     Ok(problems)
 }
 
@@ -419,6 +452,40 @@ mod tests {
         let found = check_packages(&packages, &[], &read)?;
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].path, "crates/wav_files/Cargo.toml");
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_packages_scoped_unsafe_needs_deny_in_root() -> Result<(), Box<dyn Error>> {
+        let packages = [package("audio_buffers", vec![])];
+        let files = vec!["crates/audio_buffers/clippy.toml".to_string()];
+        let neither = |_: &str| Ok("//! No attribute.\n".to_string());
+        let found = check_packages(&packages, &files, &neither)?;
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].message.contains(DENY_UNSAFE));
+        for attribute in [DENY_UNSAFE, FORBID_UNSAFE] {
+            let read = |_: &str| Ok(attribute.to_string());
+            assert_eq!(check_packages(&packages, &files, &read)?, vec![]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_packages_scoped_unsafe_only_in_its_module() -> Result<(), Box<dyn Error>> {
+        let packages = [package("audio_buffers", vec![])];
+        let files: Vec<String> = ["clippy.toml", "src/lib.rs", "src/queue.rs", "src/pool.rs"]
+            .iter()
+            .map(|f| format!("crates/audio_buffers/{f}"))
+            .collect();
+        let read = |path: &str| {
+            Ok(match path {
+                "crates/audio_buffers/src/lib.rs" => DENY_UNSAFE.to_string(),
+                _ => format!("//! A module.\n{ALLOW_UNSAFE}\n"),
+            })
+        };
+        let found = check_packages(&packages, &files, &read)?;
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].path, "crates/audio_buffers/src/pool.rs");
         Ok(())
     }
 
