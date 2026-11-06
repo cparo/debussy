@@ -52,4 +52,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0026](0026-the-workspace-is-split-into-seventeen-crates-in.md) | The workspace is split into seventeen crates in five dependency tiers | Accepted | [Crate map](../architecture/crates.md#crate-map) |
 | [ADR-0027](0027-the-commit-guard-parses-shell-commands-with-python.md) | The commit guard parses shell commands with Python's standard library | Accepted | [Commit gate](../architecture/tooling.md#commit-gate) |
 | [ADR-0028](0028-unsafe-is-allowed-in-audio-buffers-queue-module.md) | `unsafe` is allowed in audio_buffers' queue module only | Accepted | [Dependency rules](../architecture/crates.md#dependency-rules) |
+| [ADR-0029](0029-the-wav-reader-accepts-only-mono-and-stereo-files.md) | The WAV reader accepts only mono and stereo files and bounds every size it reads | Accepted | [WAV files](../architecture/import-export.md#wav-files) |
 
