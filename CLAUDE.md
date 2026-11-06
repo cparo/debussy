@@ -20,9 +20,9 @@ when you are about to:
   license outside `deny.toml`'s allowlist, or to copy code or assets whose license is unknown,
   closed, or copyleft.
   *(tag: `license`)*
-- **Use a codec or algorithm with patent exposure**; see the patent policy in the
-  [architectural specification](docs/architecture/) (not yet written: until it is, treat every
-  codec or algorithm with any patent history as exposed).
+- **Use a codec or algorithm with patent exposure**: one whose patents have not all expired and
+  that its owners have not declared royalty-free (see `docs/architecture/patents.md`
+  "Patent policy").
   *(tag: `patent`)*
 - **Trade security against anything else** (performance, compatibility, convenience), **weaken a
   security default** (validation, limits, headers, TLS, authentication), **add a network-facing
