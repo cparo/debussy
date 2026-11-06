@@ -1,10 +1,10 @@
 # ADR-0004 — MP3 and AAC go through Apple AudioToolbox
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0024](0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md)
 - **Decided by:** Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** —
-- **Architecture:** [Patent-encumbered codecs](../architecture/platform.md#patent-encumbered-codecs)
+- **Architecture:** [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs)
 
 ## Context
 
