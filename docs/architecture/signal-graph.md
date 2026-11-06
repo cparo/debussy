@@ -23,3 +23,20 @@ mono mix is derived from it by summing its channels ([ADR-0017](../adrs/0017-sig
 ## Panning
 
 Mono signals are panned into stereo with a -3 dB constant-power pan law ([ADR-0018](../adrs/0018-panning-uses-a-3-db-constant-power-law.md)).
+
+## Effect nodes
+
+Effects are built-in nodes. The effect node interface must not assume an effect is built in: it
+reports its latency, declares its ports, and exposes its parameters through the same interface a
+third-party plugin wrapper would implement. Third-party plugins are not hosted ([ADR-0019](../adrs/0019-only-built-in-effects-for-now-behind-a-plugin.md)).
+
+## Port types
+
+Every port and connection has a type. Audio is the only type; connections between ports of
+different types are refused. Track contents are typed in the same way: audio clips are the only
+kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
+
+## Delay compensation
+
+Each node reports the latency it adds. The engine delays parallel paths so that signals meeting at
+a node are time-aligned, and reports the total output latency ([ADR-0022](../adrs/0022-the-engine-compensates-recording-and-effect.md)).

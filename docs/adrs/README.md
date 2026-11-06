@@ -42,4 +42,8 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0016](0016-feedback-loops-must-pass-through-a-fixed-delay.md) | Feedback loops must pass through a fixed-delay node | Accepted | [Feedback loops](../architecture/signal-graph.md#feedback-loops) |
 | [ADR-0017](0017-signals-are-mono-or-stereo-only.md) | Signals are mono or stereo only | Accepted | [Channel layouts](../architecture/signal-graph.md#channel-layouts) |
 | [ADR-0018](0018-panning-uses-a-3-db-constant-power-law.md) | Panning uses a -3 dB constant-power law | Accepted | [Panning](../architecture/signal-graph.md#panning) |
+| [ADR-0019](0019-only-built-in-effects-for-now-behind-a-plugin.md) | Only built-in effects for now, behind a plugin-capable node interface | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
+| [ADR-0020](0020-ports-and-track-contents-are-typed-so-midi-can-be.md) | Ports and track contents are typed so MIDI can be added later | Accepted | [Port types](../architecture/signal-graph.md#port-types) |
+| [ADR-0021](0021-inputs-can-be-monitored-through-the-software-per.md) | Inputs can be monitored through the software per track | Accepted | [Input monitoring](../architecture/recording.md#input-monitoring) |
+| [ADR-0022](0022-the-engine-compensates-recording-and-effect.md) | The engine compensates recording and effect latency automatically | Accepted | [Recording alignment](../architecture/recording.md#recording-alignment) |
 
