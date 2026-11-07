@@ -1,0 +1,36 @@
+[package]
+name = "macos_platform"
+description = "platform_interfaces for macOS: cpal audio devices and AudioToolbox codecs."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cpal = "0.18.2"
+objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AudioConverter",
+    "AudioFile",
+    "AudioFormat",
+    "ExtendedAudioFile",
+    "objc2-core-audio-types",
+    "objc2-core-foundation",
+] }
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CoreAudioBaseTypes",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFBase",
+    "CFURL",
+] }
+platform_interfaces = { path = "../platform_interfaces" }
+
+[dev-dependencies]
+wav_files = { path = "../wav_files" }
+
+[lints]
+workspace = true
