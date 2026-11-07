@@ -123,11 +123,15 @@ struct Shared {
 }
 
 impl Shared {
+    /// Records an error that stops the stream. Glitches the stream survives are not errors here:
+    /// an overload or underrun (`Xrun`, which CoreAudio reports whenever the machine falls
+    /// behind) and a default-device change (which only streams following the default device
+    /// see).
     fn on_error(&self, error: &cpal::Error) {
-        let code = if error.kind() == ErrorKind::DeviceNotAvailable {
-            1
-        } else {
-            2
+        let code = match error.kind() {
+            ErrorKind::Xrun | ErrorKind::DeviceChanged => return,
+            ErrorKind::DeviceNotAvailable => 1,
+            _ => 2,
         };
         self.error.store(code, Ordering::Release);
     }
@@ -388,6 +392,18 @@ mod tests {
         assert_eq!(info.sample_rates, vec![44_100, 48_000, 96_000]);
         assert_eq!(info.buffer_frames, (32, 4096));
         assert!(info.is_default);
+    }
+
+    #[test]
+    fn test_on_error_ignores_glitches_the_stream_survives() {
+        let shared = Shared::default();
+        shared.on_error(&ErrorKind::Xrun.into());
+        shared.on_error(&ErrorKind::DeviceChanged.into());
+        assert_eq!(shared.error.load(Ordering::Acquire), 0);
+        shared.on_error(&ErrorKind::StreamInvalidated.into());
+        assert_eq!(shared.error.load(Ordering::Acquire), 2);
+        shared.on_error(&ErrorKind::DeviceNotAvailable.into());
+        assert_eq!(shared.error.load(Ordering::Acquire), 1);
     }
 
     #[test]

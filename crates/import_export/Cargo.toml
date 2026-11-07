@@ -1,0 +1,23 @@
+[package]
+name = "import_export"
+description = "Import (decode, resample, split into mono files) and export (render, dither, encode)."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audio_engine = { path = "../audio_engine" }
+dsp = { path = "../dsp" }
+platform_interfaces = { path = "../platform_interfaces" }
+project_model = { path = "../project_model" }
+signal_graph = { path = "../signal_graph" }
+thiserror = "2.0.21"
+wav_files = { path = "../wav_files" }
+
+[dev-dependencies]
+audio_buffers = { path = "../audio_buffers" }
+
+[lints]
+workspace = true
