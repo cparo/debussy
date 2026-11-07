@@ -109,16 +109,70 @@ impl Graph {
     }
 
     /// Adds a processor, preparing it for the graph's rate and block size.
-    pub fn add_node(&mut self, mut node: Box<dyn Node>) -> NodeId {
+    pub fn add_node(&mut self, node: Box<dyn Node>) -> NodeId {
+        let entry = self.declare(node, &[]);
+        self.insert(entry)
+    }
+
+    /// Replaces processor `id` with `node`, for when its ports, latency or parameters change.
+    /// The id stays. Each connection whose port still exists with the same signal type is kept;
+    /// the others are removed and returned. Each parameter takes the value of the old parameter
+    /// of the same name, clamped to its range; the rest keep their defaults. The new node starts
+    /// with its own state, and the old one is dropped when its plan comes back from the real-time
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], or [`Error::NotAProcessor`] for a source, sink or feedback delay.
+    pub fn replace_node(
+        &mut self,
+        id: NodeId,
+        node: Box<dyn Node>,
+    ) -> Result<Vec<ConnectionId>, Error> {
+        if !matches!(self.entry(id)?.kind, EntryKind::Processor(_)) {
+            return Err(Error::NotAProcessor(id));
+        }
+        let entry = self.declare(node, &self.entry(id)?.parameters);
+        let old = self.nodes.insert(id, entry).ok_or(Error::UnknownNode(id))?;
+        let new = &self.nodes[&id];
+        let fits = |ports: &[Port], old_ports: &[Port], index: usize| {
+            let (port, old_port) = (ports.get(index), old_ports.get(index));
+            matches!((port, old_port), (Some(p), Some(o)) if p.kind == o.kind)
+        };
+        let dropped: Vec<ConnectionId> = self
+            .connections
+            .iter()
+            .filter(|(_, c)| {
+                (c.from == id && !fits(&new.outputs, &old.outputs, c.output))
+                    || (c.to == id && !fits(&new.inputs, &old.inputs, c.input))
+            })
+            .map(|(&connection, _)| connection)
+            .collect();
+        for connection in &dropped {
+            self.connections.remove(connection);
+        }
+        Ok(dropped)
+    }
+
+    /// Prepares a processor for the graph and records what it declares.
+    /// Parameters are read first and given the values of same-named parameters in `previous`,
+    /// so that `prepare` sees them.
+    fn declare(&self, mut node: Box<dyn Node>, previous: &[Parameter]) -> Entry {
+        let parameters = node.parameters();
+        for parameter in &parameters {
+            let name = &parameter.info().name;
+            if let Some(old) = previous.iter().find(|p| &p.info().name == name) {
+                parameter.set(old.get());
+            }
+        }
         node.prepare(self.config.sample_rate, self.config.max_frames);
-        let entry = Entry {
+        Entry {
             inputs: node.inputs(),
             outputs: node.outputs(),
             latency: node.latency(),
-            parameters: node.parameters(),
+            parameters,
             kind: EntryKind::Processor(Some(node)),
-        };
-        self.insert(entry)
+        }
     }
 
     /// Adds a feedback delay of `seconds` with one input and one output of `layout`. A delay
