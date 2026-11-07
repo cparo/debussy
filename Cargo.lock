@@ -199,6 +199,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine_bridge"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "audio_effects",
+ "audio_engine",
+ "dsp",
+ "project_model",
+ "signal_graph",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

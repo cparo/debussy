@@ -1,0 +1,20 @@
+[package]
+name = "engine_bridge"
+description = "The project as the engine runs it: routing synced to the processing graph, and clips as track renderers."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audio_buffers = { path = "../audio_buffers" }
+audio_effects = { path = "../audio_effects" }
+audio_engine = { path = "../audio_engine" }
+dsp = { path = "../dsp" }
+project_model = { path = "../project_model" }
+signal_graph = { path = "../signal_graph" }
+thiserror = "2.0.21"
+
+[lints]
+workspace = true
