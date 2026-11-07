@@ -86,6 +86,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 - [Import and Export](import-export.md)
   - [Formats](import-export.md#formats)
   - [WAV files](import-export.md#wav-files)
+  - [Import](import-export.md#import)
+  - [Export](import-export.md#export)
   - [Export bit depth](import-export.md#export-bit-depth)
 - [Licensing](licensing.md)
   - [Project licence](licensing.md#project-licence)

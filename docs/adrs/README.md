@@ -76,4 +76,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0050](0050-cpal-is-added-and-dependency-audits-cover-apple.md) | cpal is added and dependency audits cover Apple targets only | Accepted | [Dependency licences](../architecture/licensing.md#dependency-licences) |
 | [ADR-0051](0051-audiotoolbox-codecs-use-objc2-bindings-unsafe.md) | AudioToolbox codecs use objc2 bindings, unsafe confined to sys, and checked in-process decoding | Accepted | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
 | [ADR-0052](0052-a-duplex-stream-is-two-cpal-streams-joined-by-a.md) | A duplex stream is two cpal streams joined by a sample ring | Accepted | [Audio device I/O](../architecture/platform.md#audio-device-io) |
+| [ADR-0053](0053-imports-are-named-after-their-file-and-exports-use.md) | Imports are named after their file and exports use a reproducible dither | Accepted | [Import](../architecture/import-export.md#import) |
 
