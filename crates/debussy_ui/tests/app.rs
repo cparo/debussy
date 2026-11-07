@@ -11,9 +11,9 @@ use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_effects::{Control, Mode};
 use audio_engine::{Engine, Processor, Streams, TrackFeeds, TransportState};
-use debussy_ui::{App, Message, Services};
+use debussy_ui::{App, DeviceChoice, ImportedTrack, Message, Services};
 use engine_bridge::Bridge;
-use project_model::{AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId};
+use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
 use signal_graph::{Config, NodeId as GraphNodeId};
 
 /// What the fake services saw.
@@ -22,6 +22,8 @@ struct Calls {
     track_feeds: usize,
     saves: usize,
     waveform: Vec<(String, u64, u64)>,
+    exports: Vec<bool>,
+    device: Option<String>,
 }
 
 struct NoStreams;
@@ -68,6 +70,67 @@ impl Services for Fake {
         self.calls.borrow_mut().saves += 1;
         Ok(())
     }
+
+    fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
+        let file = |name: &str| AudioFile {
+            name: name.into(),
+            frames: 4800,
+        };
+        Ok(vec![
+            ImportedTrack {
+                name: "Keys".into(),
+                layout: Layout::Stereo,
+                source: Source::Stereo {
+                    left: file("keys L.wav"),
+                    right: file("keys R.wav"),
+                },
+                frames: 4800,
+            },
+            ImportedTrack {
+                name: "Bass".into(),
+                layout: Layout::Mono,
+                source: Source::Mono(file("bass.wav")),
+                frames: 4800,
+            },
+        ])
+    }
+
+    fn export(&mut self, _state: &State, mono: bool) -> Result<Option<String>, String> {
+        self.calls.borrow_mut().exports.push(mono);
+        Ok(Some("mix.wav".into()))
+    }
+
+    fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
+        let choices = vec![
+            DeviceChoice {
+                id: "a".into(),
+                name: "Built-in".into(),
+            },
+            DeviceChoice {
+                id: "b".into(),
+                name: "Interface".into(),
+            },
+        ];
+        (
+            choices,
+            Some(
+                self.calls
+                    .borrow()
+                    .device
+                    .clone()
+                    .unwrap_or_else(|| "a".into()),
+            ),
+        )
+    }
+
+    fn audio_error(&mut self) -> Option<String> {
+        None
+    }
+
+    fn set_device(&mut self, id: &str) -> Result<(), String> {
+        self.calls.borrow_mut().device = Some(id.into());
+        Ok(())
+    }
 }
 
 /// A project with one mono track at frame 4096 for 65536 frames, routed through a 1-channel
@@ -76,21 +139,14 @@ impl Services for Fake {
 type Fixture = (App, Processor, Rc<RefCell<Calls>>, NodeId);
 
 fn app() -> Result<Fixture, Box<dyn Error>> {
-    let mut session = Session::new();
+    let mut session = Session::new_project();
     let track = session.add_track("Vocal", Layout::Mono)?;
     let file = AudioFile {
         name: "vox.wav".into(),
         frames: 100_000,
     };
     session.add_clip(track, Clip::new(Source::Mono(file), 0, 65_536, 4096))?;
-    let direct = session.state().connections[0].id;
-    session.apply(project_model::Edit::Disconnect(direct))?;
-    let mixer = session.add_node(NodeKind::Mixer {
-        channels: 1,
-        parameters: BTreeMap::new(),
-    })?;
-    session.connect(Endpoint::Track(track), 0, Endpoint::Node(mixer), 0)?;
-    session.connect(Endpoint::Node(mixer), 0, Endpoint::Output, 0)?;
+    let mixer = session.state().project_mixer().ok_or("no project mixer")?;
     let session = Session::open(session.state().clone(), BTreeMap::new());
     let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512))?;
     let output = bridge.output().ok_or("no output")?;
@@ -247,5 +303,48 @@ fn test_zoom_and_lanes_follow_the_clips() -> Result<(), Box<dyn Error>> {
     assert!(last.1 > 0);
     // The view builds.
     let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_import_adds_one_step_per_file_onto_the_mixer() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::Import);
+    let state = app.session().state();
+    assert_eq!(state.tracks.len(), 3);
+    // Vocal on channel 1, Keys L/R on 2 and 3, Bass on 4.
+    assert!(matches!(
+        state.node(mixer).map(|n| &n.kind),
+        Some(NodeKind::Mixer { channels: 4, .. })
+    ));
+    assert_eq!(state.tracks[1].clips.len(), 1);
+    app.update(Message::Undo);
+    assert_eq!(
+        app.session().state().tracks.len(),
+        2,
+        "each file is one step"
+    );
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    app.update(Message::Export(true));
+    assert_eq!(calls.borrow().exports, vec![true]);
+    assert_eq!(app.status(), Some("Exported mix.wav"));
+    let interface = DeviceChoice {
+        id: "b".into(),
+        name: "Interface".into(),
+    };
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Device(interface.clone()));
+    assert_eq!(calls.borrow().device, None, "no switching while playing");
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    app.update(Message::Device(interface));
+    assert_eq!(calls.borrow().device.as_deref(), Some("b"));
     Ok(())
 }

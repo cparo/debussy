@@ -84,6 +84,84 @@ impl Node for Silence {
     }
 }
 
+/// Which channel of a stereo signal [`Pick`] takes or [`Place`] fills: 0 left, 1 right.
+fn channel_of(right: bool) -> usize {
+    usize::from(right)
+}
+
+/// Takes one channel of a stereo input as a mono output: how a connection from one side of a
+/// stereo port is realised (ADR-0058).
+#[derive(Debug, Clone, Copy)]
+pub struct Pick {
+    right: bool,
+}
+
+impl Pick {
+    /// Takes the left channel, or the right if `right`.
+    pub fn new(right: bool) -> Self {
+        Pick { right }
+    }
+}
+
+impl Node for Pick {
+    fn inputs(&self) -> Vec<Port> {
+        vec![Port::audio("stereo", Layout::Stereo)]
+    }
+
+    fn outputs(&self) -> Vec<Port> {
+        vec![Port::audio("side", Layout::Mono)]
+    }
+
+    fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
+        let input = inputs.channel(0, channel_of(self.right));
+        if let Some(output) = outputs.channel_mut(0, 0) {
+            match input {
+                Some(input) => output.copy_from_slice(&input[..output.len()]),
+                None => output.fill(0.0),
+            }
+        }
+    }
+}
+
+/// Puts a mono input on one channel of a stereo output, the other silent: how a connection into
+/// one side of a stereo port is realised (ADR-0058).
+#[derive(Debug, Clone, Copy)]
+pub struct Place {
+    right: bool,
+}
+
+impl Place {
+    /// Fills the left channel, or the right if `right`.
+    pub fn new(right: bool) -> Self {
+        Place { right }
+    }
+}
+
+impl Node for Place {
+    fn inputs(&self) -> Vec<Port> {
+        vec![Port::audio("side", Layout::Mono)]
+    }
+
+    fn outputs(&self) -> Vec<Port> {
+        vec![Port::audio("stereo", Layout::Stereo)]
+    }
+
+    fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
+        let input = inputs.channel(0, 0);
+        let target = channel_of(self.right);
+        for channel in 0..2 {
+            if let Some(output) = outputs.channel_mut(0, channel) {
+                match input {
+                    Some(input) if channel == target => {
+                        output.copy_from_slice(&input[..output.len()]);
+                    }
+                    _ => output.fill(0.0),
+                }
+            }
+        }
+    }
+}
+
 /// The built-in effect of stable kind id `kind`, ready to add to a graph, or `None` for an id
 /// this build does not know. No effects are built in yet (#58–#62).
 pub fn effect(kind: &str) -> Option<Box<dyn Node>> {

@@ -3,7 +3,7 @@
 
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
-    Space, button, column, container, row, scrollable, slider, text, vertical_slider,
+    Space, button, column, container, pick_list, row, scrollable, slider, text, vertical_slider,
 };
 use iced::{Element, Fill, Length};
 use project_model::{Endpoint, NodeKind};
@@ -55,9 +55,24 @@ impl App {
             button("Redo")
                 .on_press_maybe((!playing && self.session().can_redo()).then_some(Message::Redo)),
             button("Save").on_press(Message::Save),
+            button("Import…").on_press_maybe((!playing).then_some(Message::Import)),
+            button("Export…").on_press(Message::Export(false)),
+            button("Export mono…").on_press(Message::Export(true)),
+            self.device_picker(),
         ]
         .spacing(8)
         .into()
+    }
+
+    fn device_picker(&self) -> Element<'_, Message> {
+        let (choices, current) = &self.devices;
+        let selected = choices
+            .iter()
+            .find(|c| Some(&c.id) == current.as_ref())
+            .cloned();
+        pick_list(choices.clone(), selected, Message::Device)
+            .placeholder("Audio device")
+            .into()
     }
 
     fn tracks(&self) -> Element<'_, Message> {
@@ -90,7 +105,11 @@ impl App {
                     .iter()
                     .find(|c| c.to == Endpoint::Node(node.id) && c.input == channel)
                     .and_then(|c| match c.from {
-                        Endpoint::Track(id) => state.track(id).map(|t| t.name.clone()),
+                        Endpoint::Track(id) => state.track(id).map(|t| match c.from_side {
+                            Some(project_model::Side::Left) => format!("{} L", t.name),
+                            Some(project_model::Side::Right) => format!("{} R", t.name),
+                            None => t.name.clone(),
+                        }),
                         _ => None,
                     })
                     .unwrap_or_else(|| format!("{}", channel + 1));

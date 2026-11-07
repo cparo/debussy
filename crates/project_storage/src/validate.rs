@@ -5,14 +5,28 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use audio_buffers::Layout;
 use project_model::{
-    AudioFile, Clip, ClipId, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Source,
-    State, Track, TrackId,
+    AudioFile, Clip, ClipId, Connection, ConnectionId, Edit, Endpoint, Node, NodeId, NodeKind,
+    Side, Source, State, Track, TrackId,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedEndpoint, SavedFile, SavedLayout, SavedNode,
-    SavedNodeKind, SavedProject, SavedSource, SavedTrack,
+    SavedNodeKind, SavedProject, SavedSide, SavedSource, SavedTrack,
 };
+
+fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
+    side.map(|s| match s {
+        Side::Left => SavedSide::Left,
+        Side::Right => SavedSide::Right,
+    })
+}
+
+fn side_from_saved(side: Option<SavedSide>) -> Option<Side> {
+    side.map(|s| match s {
+        SavedSide::Left => Side::Left,
+        SavedSide::Right => Side::Right,
+    })
+}
 
 /// The project sample rates (`docs/architecture/engine.md` "Sample rate").
 pub const SAMPLE_RATES: [u32; 4] = [44_100, 48_000, 88_200, 96_000];
@@ -60,6 +74,8 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
                 to: endpoint_to_saved(c.to),
                 input: c.input,
                 pan: c.pan,
+                from_side: side_to_saved(c.from_side),
+                to_side: side_to_saved(c.to_side),
             })
             .collect(),
     }
@@ -339,8 +355,19 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
             saved_connection.pan.is_finite() && saved_connection.pan.abs() <= 1.0,
             || format!("connection {id} has pan {}", saved_connection.pan),
         )?;
+        let (from_side, to_side) = (
+            side_from_saved(saved_connection.from_side),
+            side_from_saved(saved_connection.to_side),
+        );
         ensure(
-            ports.insert((from, saved_connection.output, to, saved_connection.input)),
+            ports.insert((
+                from,
+                saved_connection.output,
+                from_side,
+                to,
+                saved_connection.input,
+                to_side,
+            )),
             || format!("connection {id} repeats another"),
         )?;
         let mut connection = Connection::new(
@@ -351,8 +378,13 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
             saved_connection.input,
         );
         connection.pan = saved_connection.pan;
-        connections.push(connection);
+        connections.push(connection.with_sides(from_side, to_side));
     }
     state.connections = connections;
+    // Last, the model's own whole-state check: ports it knows, sides only of stereo ports.
+    let mut probe = State::default();
+    Edit::Restore(state.clone())
+        .apply(&mut probe)
+        .map_err(|e| format!("the routing is invalid: {e}"))?;
     Ok(state)
 }

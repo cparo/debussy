@@ -43,6 +43,12 @@ pub enum Message {
     Redo,
     /// Save the project.
     Save,
+    /// Import files as new tracks, through a file dialog.
+    Import,
+    /// Export the mix, through a file dialog; the mono mix if `true`.
+    Export(bool),
+    /// Use this audio device for input and output.
+    Device(crate::services::DeviceChoice),
     /// A mixer gain or pan slider moved: applied live, recorded on [`Message::Release`].
     Slide {
         /// The mixer node.
@@ -90,6 +96,8 @@ pub struct App {
     /// The tracks the engine's feeds were made from.
     loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
+    /// The audio devices present, and the one in use.
+    pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
     /// The last error or notice, for the status line.
     pub(crate) status: Option<String>,
 }
@@ -115,8 +123,10 @@ impl App {
             lanes: Vec::new(),
             loaded: None,
             live: None,
+            devices: (Vec::new(), None),
             status: None,
         };
+        app.refresh_devices();
         app.refresh_lanes();
         app
     }
@@ -139,6 +149,11 @@ impl App {
     /// The bridge to the running graph.
     pub fn bridge(&self) -> &Bridge {
         &self.bridge
+    }
+
+    /// Shows `message` on the status line.
+    pub fn set_status(&mut self, message: String) {
+        self.status = Some(message);
     }
 
     /// The status line's text, if any.
@@ -173,6 +188,11 @@ impl App {
                 self.engine.collect();
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
+                if let Some(error) = self.services.audio_error() {
+                    // Nothing more can play until another device is chosen.
+                    let _ = self.engine.stop();
+                    self.status = Some(format!("Audio stopped: {error}"));
+                }
             }
             Message::ZoomIn => self.zoom(self.samples_per_column / 2),
             Message::ZoomOut => self.zoom(self.samples_per_column.saturating_mul(2)),
@@ -191,6 +211,21 @@ impl App {
             Message::Save => {
                 let result = self.services.save(&self.session);
                 self.report(result);
+            }
+            Message::Import => self.import(),
+            Message::Export(mono) => match self.services.export(self.session.state(), mono) {
+                Ok(Some(name)) => self.status = Some(format!("Exported {name}")),
+                Ok(None) => {}
+                Err(message) => self.status = Some(message),
+            },
+            Message::Device(choice) => {
+                if self.engine.is_playing() {
+                    self.status = Some("Stop playback to change the audio device.".to_owned());
+                } else {
+                    let result = self.services.set_device(&choice.id);
+                    self.report(result);
+                    self.refresh_devices();
+                }
             }
             Message::Slide {
                 node,
@@ -266,6 +301,35 @@ impl App {
         }
         let result = self.engine.play(self.services.streams());
         self.report(result.map_err(|e| e.to_string()));
+    }
+
+    fn import(&mut self) {
+        if self.engine.is_playing() {
+            self.status = Some("Stop playback to import.".to_owned());
+            return;
+        }
+        let imported = match self.services.import() {
+            Ok(imported) => imported,
+            Err(message) => {
+                self.status = Some(message);
+                return;
+            }
+        };
+        for track in imported {
+            let clip = project_model::Clip::new(track.source, 0, track.frames, 0);
+            let result = self.bridge.edit(&mut self.session, |s| {
+                s.add_track_with_clip(&track.name, track.layout, clip)
+            });
+            if let Err(error) = result {
+                self.status = Some(format!("{}: {error}", track.name));
+            }
+        }
+        self.refresh_lanes();
+    }
+
+    /// Re-reads the device list and the device in use.
+    pub(crate) fn refresh_devices(&mut self) {
+        self.devices = self.services.devices();
     }
 
     fn history(&mut self, undo: bool) {

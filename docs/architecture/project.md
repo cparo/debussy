@@ -57,6 +57,16 @@ A mixer is its own node kind, saved as its channel count with its non-default pa
 keyed by name (see `docs/architecture/signal-graph.md` "Mixer"). Its channel count only grows; the
 model checks its ports and refuses to drop a connected channel when an undo shrinks it ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)).
 
+A connection end at a stereo port may name its left or right side, carrying that channel as a
+mono signal; the model refuses a side of a port it knows to be mono. In the running graph a sided
+output is taken through a node that picks the channel, and a sided input is fed through a node
+that places the signal on that side ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)).
+
+A new project has one mixer feeding the output: the project mixer. A new track joins it in the
+same undo step: a mono track on the lowest free channel, a stereo track's left and right on two
+channels panned hard left and right, adding channels as needed; the channels' other values are
+reset. A project without a project mixer connects new tracks straight to the output ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)).
+
 The running graph follows the model through `engine_bridge`. After every change, including undo,
 redo, version restore and load, the bridge builds the new routing into a scratch graph to apply
 `signal_graph`'s rules. Only if that succeeds does it change the running graph, by the fewest calls
@@ -84,7 +94,9 @@ A reader must refuse a `format_version` newer than it supports and must migrate 
 `project.json` and version files are JSON of the format types in `project_storage`, not of the
 model's own types. Every field is required except a version's `name` and `saved_at`, which only
 version files carry; unknown fields are refused. The file holds `format_version`, `sample_rate`,
-`tracks` (top first, each with its clips bottom layer first), `nodes` and `connections`. Times are
+`tracks` (top first, each with its clips bottom layer first), `nodes` and `connections`. Since
+format version 2 a connection may carry `from_side` and `to_side` (`left` or `right`); version 1
+files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving
@@ -107,6 +119,13 @@ from −1 to 1. Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-sa
 Audio files in `audio/` that neither the current state nor any version uses are deleted when a
 project is opened and when it is closed, never while it is open, so undo can always reach its
 audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+
+## Application settings
+
+The application keeps per-machine settings, outside any project, in
+`~/Library/Application Support/Debussy/settings.json`: a `format_version` (1) and the chosen audio
+device's id. The file is written crash-safely and read as untrusted input; a missing, newer or
+invalid file gives the defaults ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).
 
 ## Stored audio
 

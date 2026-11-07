@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use audio_buffers::Layout;
-use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, State, TrackId};
+use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State, TrackId};
 
 /// A model element that becomes a graph node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,13 +68,28 @@ pub(crate) struct ConnectionTarget {
     pub to: Key,
     pub input: usize,
     pub pan: f32,
+    pub from_side: Option<Side>,
+    pub to_side: Option<Side>,
 }
 
 impl ConnectionTarget {
-    /// Whether `other` joins the same ports (pan aside).
+    /// Whether `other` joins the same ports and sides (pan aside).
     pub(crate) fn same_ports(&self, other: &ConnectionTarget) -> bool {
-        (self.from, self.output, self.to, self.input)
-            == (other.from, other.output, other.to, other.input)
+        (
+            self.from,
+            self.output,
+            self.from_side,
+            self.to,
+            self.input,
+            self.to_side,
+        ) == (
+            other.from,
+            other.output,
+            other.from_side,
+            other.to,
+            other.input,
+            other.to_side,
+        )
     }
 }
 
@@ -100,6 +115,8 @@ impl Target {
                         to: c.to.into(),
                         input: c.input,
                         pan: c.pan,
+                        from_side: c.from_side,
+                        to_side: c.to_side,
                     },
                 )
             })
