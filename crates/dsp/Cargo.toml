@@ -1,0 +1,16 @@
+[package]
+name = "dsp"
+description = "Signal-processing primitives for the real-time core: dither, pan law, fold-down, gain."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
+
+[lints]
+workspace = true
