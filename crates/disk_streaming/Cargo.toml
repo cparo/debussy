@@ -1,0 +1,19 @@
+[package]
+name = "disk_streaming"
+description = "Read-ahead of project audio from disk into buffers for the real-time engine."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audio_buffers = { path = "../audio_buffers" }
+thiserror = "2.0.21"
+wav_files = { path = "../wav_files" }
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
+
+[lints]
+workspace = true
