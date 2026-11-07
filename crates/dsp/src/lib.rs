@@ -10,15 +10,21 @@
 //! - `noise`: [`Noise`], a seeded pseudo-random generator for dither.
 //! - `dither`: [`Ditherer`], TPDF dither and quantisation to 16 or 24 bits (ADR-0025).
 //! - `level`: gain in decibels, the −3 dB pan law (ADR-0018) and the mono fold-down (ADR-0030).
+//! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
+//! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
 mod dither;
+mod error;
 mod level;
 mod noise;
+mod resample;
 
 pub use dither::{Depth, Ditherer};
+pub use error::Error;
 pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
 pub use noise::Noise;
+pub use resample::{MAX_PHASES, Quality, Resampler};
