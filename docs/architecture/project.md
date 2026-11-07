@@ -15,10 +15,21 @@ most recently placed or moved plays and covers the one beneath, with a short aut
 at each edge. Each completed gesture is one undoable command; selection, zoom and scrolling are not
 edits ([ADR-0037](../adrs/0037-overlapping-clips-the-later-covers-with-a-short.md)).
 
+A track is mono or stereo, fixed when it is created. A mono track's clips reference one stored
+file; a stereo track's clips reference a left and a right mono file, read at one offset and
+length. A track keeps its clips in layer order: a clip that is added, moved, or given a new
+position goes to the top layer, and a trim, gain or fade change keeps its layer. A clip keeps its
+id when it moves between tracks. Mixer and routing state is not part of the editing model ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
+
 ## Undo history
 
 Every edit is a reversible command in an in-memory history of unlimited depth. The history belongs
 to the editing session and is discarded when the project closes; it is never persisted ([ADR-0012](../adrs/0012-undo-is-unlimited-per-session-and-named-versions.md)).
+
+Applying an edit returns the edit that reverses it exactly; a refused edit changes nothing. A
+gesture of several changes is one batch edit. Saving a named version is not an edit. Ids are never
+reused within a session. Randomized edit sequences in tests come from a seeded in-house generator
+([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
 
 ## Named versions
 

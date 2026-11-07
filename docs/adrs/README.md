@@ -65,4 +65,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0039](0039-the-fft-is-radix-2-cooley-tukey-with-real-input.md) | The FFT is radix-2 Cooley-Tukey with real-input packing and a Hann-windowed STFT | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0040](0040-sources-and-sinks-are-graph-nodes-declarations-are.md) | Sources and sinks are graph nodes, declarations are fixed when a node is added, and loop-closing connections are not compensated | Accepted | [Delay compensation](../architecture/signal-graph.md#delay-compensation) |
 | [ADR-0041](0041-replacing-a-node-keeps-its-id-compatible.md) | Replacing a node keeps its id, compatible connections and parameter values by name | Accepted | [Processing graph](../architecture/signal-graph.md#processing-graph) |
+| [ADR-0042](0042-tracks-have-a-fixed-layout-with-paired-mono-files.md) | Tracks have a fixed layout with paired mono files for stereo, clips stack in layers, and edits return their inverse | Accepted | [Editing model](../architecture/project.md#editing-model) |
 
