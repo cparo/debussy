@@ -1,0 +1,15 @@
+[package]
+name = "project_model"
+description = "Tracks, clips, edits as undoable commands, and named versions."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audio_buffers = { path = "../audio_buffers" }
+thiserror = "2.0.21"
+
+[lints]
+workspace = true

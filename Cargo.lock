@@ -52,6 +52,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "project_model"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "thiserror",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
