@@ -4,9 +4,38 @@
 use std::collections::BTreeMap;
 
 use audio_analysis::Bucket;
+use audio_buffers::Layout;
 use audio_engine::{Streams, TrackFeeds};
-use project_model::{Session, State, TrackId};
+use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
+
+/// A file the user imported, stored and ready to become a track.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedTrack {
+    /// A name for the track: the file's name.
+    pub name: String,
+    /// Mono or stereo.
+    pub layout: Layout,
+    /// The stored audio.
+    pub source: Source,
+    /// Its length, in frames at the project rate.
+    pub frames: u64,
+}
+
+/// An audio device the user can choose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceChoice {
+    /// The platform's id for it.
+    pub id: String,
+    /// Its name, for display.
+    pub name: String,
+}
+
+impl std::fmt::Display for DeviceChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
 
 /// I/O and platform services, implemented by the application with `disk_streaming`,
 /// `project_storage` and the waveform cache, and by fakes in tests. Called on the UI thread.
@@ -43,4 +72,35 @@ pub trait Services {
     ///
     /// A message for the status line.
     fn save(&mut self, session: &Session) -> Result<(), String>;
+
+    /// Asks the user for files to import, then imports and summarises them. An empty list if
+    /// the user cancelled.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; files imported before the failure are still returned
+    /// in the message's place only if none failed.
+    fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
+
+    /// Asks the user where to export, then renders `state` there, as the mono mix if `mono`.
+    /// The file's name, or `None` if the user cancelled.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn export(&mut self, state: &State, mono: bool) -> Result<Option<String>, String>;
+
+    /// The audio devices present, and the one in use.
+    fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>);
+
+    /// An error that has stopped the audio device since the last call, such as it being
+    /// unplugged.
+    fn audio_error(&mut self) -> Option<String>;
+
+    /// Switches to the device with `id`, remembering the choice. Called only while stopped.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; the previous device stays in use.
+    fn set_device(&mut self, id: &str) -> Result<(), String>;
 }

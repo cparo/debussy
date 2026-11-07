@@ -14,7 +14,7 @@ engine's control side. It reaches I/O and the platform only through its `Service
 saving. Its update logic runs without a window, so it is tested directly ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
 
 The first screens are the transport bar (play, pause, stop, rewind, mono listening, zoom,
-scroll, undo, redo, save), one waveform lane per track drawn from the stored files' summaries
+scroll, undo, redo, save, import, export, export mono, and the audio device), one waveform lane per track drawn from the stored files' summaries
 (the top clip shown where clips overlap), and a strip per mixer channel with gain, pan, mute and
 solo ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
 
@@ -31,3 +31,16 @@ transport is playing ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and
 through the default output device, which must run at the project rate. With `--export` it renders
 the project to a file and exits instead. Command-line import and export stand in until the
 interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).
+
+## Files and devices
+
+Import and export use the system's file dialogs through `rfd`, used only in `debussy`. Each
+imported file becomes a track holding one clip of the whole file at the start, as one undo step.
+Import is refused while playing.
+
+One audio device is chosen for both input and output. The choice is remembered in the application
+settings; at launch a remembered device that is gone falls back to the system default output. The
+device can be changed only while stopped: the engine's real-time side is handed back from the old
+stream and handed to the new one without being rebuilt, and if the new device fails to open the
+old one is reopened. An audio device that stops with an error stops playback and is reported on
+the status line ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).

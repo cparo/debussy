@@ -107,6 +107,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Saving](project.md#saving)
   - [Loading](project.md#loading)
   - [Cleanup](project.md#cleanup)
+  - [Application settings](project.md#application-settings)
   - [Stored audio](project.md#stored-audio)
 - [Recording](recording.md)
   - [Input monitoring](recording.md#input-monitoring)
@@ -128,5 +129,6 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Interface structure](user-interface.md#interface-structure)
   - [Gestures](user-interface.md#gestures)
   - [Application startup](user-interface.md#application-startup)
+  - [Files and devices](user-interface.md#files-and-devices)
 
 <!-- END GENERATED INDEX -->

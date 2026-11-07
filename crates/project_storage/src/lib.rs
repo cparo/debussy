@@ -12,6 +12,7 @@
 //! - `validate`: conversion to and from `project_model`, with every check and limit.
 //! - `migrate`: load limits on the text, the format version, and migrations.
 //! - `bundle`: [`Bundle`]: the directory, crash-safe writes, version stamps, cleanup.
+//! - `settings`: [`AppSettings`], the application's settings outside any project.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -20,12 +21,14 @@ mod bundle;
 mod error;
 mod format;
 mod migrate;
+mod settings;
 mod validate;
 
 pub use bundle::{Bundle, MAX_FILE_BYTES, MAX_VERSIONS};
 pub use error::Error;
 pub use format::FORMAT_VERSION;
 pub use migrate::MAX_DEPTH;
+pub use settings::{AppSettings, SETTINGS_VERSION};
 pub use validate::{
     MAX_CLIPS, MAX_CONNECTIONS, MAX_FILE_NAME_BYTES, MAX_MIXER_CHANNELS, MAX_NAME_BYTES, MAX_NODES,
     MAX_PARAMETERS, MAX_TRACKS, SAMPLE_RATES,

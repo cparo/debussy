@@ -44,9 +44,9 @@ pub struct Bundle {
 }
 
 impl Bundle {
-    /// Makes a new bundle at `path` (normally `<name>.debussy`) for an empty project at
-    /// `sample_rate`, with its `audio/`, `versions/` and `cache/` directories and a
-    /// `project.json`.
+    /// Makes a new bundle at `path` (normally `<name>.debussy`) for a new project at
+    /// `sample_rate` (no tracks and a project mixer, ADR-0058), with its `audio/`, `versions/`
+    /// and `cache/` directories and a `project.json`.
     ///
     /// # Errors
     ///
@@ -67,7 +67,7 @@ impl Bundle {
             sample_rate,
             versions: BTreeMap::new(),
         };
-        bundle.save(&Session::new())?;
+        bundle.save(&Session::new_project())?;
         Ok(bundle)
     }
 

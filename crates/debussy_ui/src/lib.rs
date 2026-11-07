@@ -22,7 +22,7 @@ mod waveform;
 use std::sync::Mutex;
 
 pub use app::{App, MAX_SAMPLES_PER_COLUMN, Message};
-pub use services::Services;
+pub use services::{DeviceChoice, ImportedTrack, Services};
 pub use waveform::{LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN};
 
 /// Opens the main window over `app` and runs until it closes.

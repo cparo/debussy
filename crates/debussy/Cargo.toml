@@ -20,6 +20,7 @@ macos_platform = { path = "../macos_platform" }
 platform_interfaces = { path = "../platform_interfaces" }
 project_model = { path = "../project_model" }
 project_storage = { path = "../project_storage" }
+rfd = { version = "=0.17.2", default-features = false }
 signal_graph = { path = "../signal_graph" }
 wav_files = { path = "../wav_files" }
 
