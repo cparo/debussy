@@ -25,6 +25,20 @@ Project audio is stored on disk and streamed during playback; memory holds only 
 read-ahead buffers. Disk reads happen off the real-time thread, which receives filled,
 preallocated buffers. The engine must support at least 32 tracks and projects several hours long ([ADR-0008](../adrs/0008-project-audio-is-streamed-from-disk.md)).
 
+## Disk streaming
+
+One non-real-time reader thread keeps 2 seconds of each playing track's audio read ahead of the
+playhead, serving tracks in earliest-deadline order. Blocks reach the real-time thread through the
+lock-free queues of `audio_buffers`.
+
+When the transport starts or jumps, playback begins only once every track has 100 ms buffered at
+the new position; until then the real-time thread outputs silence and never waits. Loop starts are
+read ahead so a loop wraps without a gap.
+
+A buffer that is late plays as silence. The real-time thread counts each underrun in a per-track
+atomic counter, and the UI shows a non-modal notice naming the track. Underruns never stop the
+transport or recording ([ADR-0034](../adrs/0034-disk-streaming-reads-2-s-ahead-on-one-thread.md)).
+
 ## Real-time thread
 
 Code reachable from the audio callback must be tested inside the real-time guard, which fails the
