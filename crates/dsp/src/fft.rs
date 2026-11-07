@@ -234,7 +234,7 @@ impl RealFft {
         check_len(self.bins(), output.len())?;
         let half = self.size / 2;
         // Pack even samples as real parts and odd samples as imaginary parts.
-        for (z, pair) in self.scratch.iter_mut().zip(input.chunks_exact(2)) {
+        for (z, pair) in self.scratch.iter_mut().zip(input.as_chunks::<2>().0) {
             *z = Complex::new(pair[0], pair[1]);
         }
         self.half.transform(&mut self.scratch);
@@ -277,7 +277,12 @@ impl RealFft {
         }
         self.half.transform(&mut self.scratch);
         let scale = 1.0 / half as f32;
-        for (pair, z) in output.chunks_exact_mut(2).zip(self.scratch.iter()) {
+        for (pair, z) in output
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(self.scratch.iter())
+        {
             let z = z.conj().scale(scale);
             pair[0] = z.re;
             pair[1] = z.im;

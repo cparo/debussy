@@ -34,14 +34,15 @@ fn hooks_dir(root: &Path) -> Result<PathBuf> {
 fn install_into(dir: &Path, force: bool) -> Result<PathBuf> {
     fs::create_dir_all(dir)?;
     let path = dir.join("pre-commit");
-    if let Ok(existing) = fs::read_to_string(&path) {
-        if !existing.contains(HOOK_MARKER) && !force {
-            bail!(
-                "{} already exists and was not written by xtask; \
-                 rerun with --force to replace it",
-                path.display()
-            );
-        }
+    if let Ok(existing) = fs::read_to_string(&path)
+        && !existing.contains(HOOK_MARKER)
+        && !force
+    {
+        bail!(
+            "{} already exists and was not written by xtask; \
+             rerun with --force to replace it",
+            path.display()
+        );
     }
     fs::write(&path, PRE_COMMIT)?;
     make_executable(&path)?;

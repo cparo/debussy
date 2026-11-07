@@ -78,4 +78,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0052](0052-a-duplex-stream-is-two-cpal-streams-joined-by-a.md) | A duplex stream is two cpal streams joined by a sample ring | Accepted | [Audio device I/O](../architecture/platform.md#audio-device-io) |
 | [ADR-0053](0053-imports-are-named-after-their-file-and-exports-use.md) | Imports are named after their file and exports use a reproducible dither | Accepted | [Import](../architecture/import-export.md#import) |
 | [ADR-0054](0054-a-new-engine-bridge-crate-keeps-the-running-graph.md) | A new engine_bridge crate keeps the running graph in step by diffing checked states | Accepted | [Routing](../architecture/project.md#routing) |
+| [ADR-0055](0055-iced-0-14-is-added-the-msrv-rises-to-1-90-and-cc0.md) | iced 0.14 is added, the MSRV rises to 1.90, and CC0 is allowed | Accepted | [UI toolkit](../architecture/user-interface.md#ui-toolkit) |
+| [ADR-0056](0056-the-interface-owns-the-session-and-reaches-i-o.md) | The interface owns the session and reaches I/O through a Services trait | Accepted | [Interface structure](../architecture/user-interface.md#interface-structure) |
 

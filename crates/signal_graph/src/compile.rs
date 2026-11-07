@@ -160,11 +160,10 @@ pub(crate) fn compile(
     for (slot, entry) in slots.iter_mut().zip(nodes.values_mut()) {
         if let (Kind::Node(target), EntryKind::Processor(pending)) =
             (&mut slot.kind, &mut entry.kind)
+            && pending.is_some()
         {
-            if pending.is_some() {
-                *target = pending.take();
-                slot.carry_from = None;
-            }
+            *target = pending.take();
+            slot.carry_from = None;
         }
     }
     Ok(Plan::new(slots, steps, latency))

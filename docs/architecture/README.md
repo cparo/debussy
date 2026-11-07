@@ -125,5 +125,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Commit gate](tooling.md#commit-gate)
 - [User Interface](user-interface.md)
   - [UI toolkit](user-interface.md#ui-toolkit)
+  - [Interface structure](user-interface.md#interface-structure)
+  - [Gestures](user-interface.md#gestures)
 
 <!-- END GENERATED INDEX -->
