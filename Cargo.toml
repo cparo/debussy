@@ -15,3 +15,8 @@ missing_docs = "warn"
 # CLAUDE.md "Error Handling": no `.unwrap()` or `.expect()` in library code or tests.
 unwrap_used = "warn"
 expect_used = "warn"
+
+# The multi-hour summary test in `audio_analysis` pushes half a billion samples; unoptimised it
+# takes about half a minute. Overflow checks and debug assertions stay on.
+[profile.test.package.audio_analysis]
+opt-level = 3
