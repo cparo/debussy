@@ -58,4 +58,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0032](0032-monitored-input-is-not-delayed-for-delay.md) | Monitored input is not delayed for delay compensation | Accepted | [Input monitoring](../architecture/recording.md#input-monitoring) |
 | [ADR-0033](0033-github-actions-are-pinned-to-commit-shas-and.md) | GitHub Actions are pinned to commit SHAs and updated by Dependabot | Accepted | [Commit gate](../architecture/tooling.md#commit-gate) |
 | [ADR-0035](0035-the-dither-noise-source-is-xorshift64-seeded-by.md) | The dither noise source is xorshift64* seeded by SplitMix64 | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0036](0036-sample-rate-conversion-uses-windowed-sinc-with-two.md) | Sample-rate conversion uses windowed sinc with two quality presets and drift correction | Accepted | [Sample rate](../architecture/engine.md#sample-rate) |
 
