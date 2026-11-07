@@ -61,9 +61,9 @@ fn test_fake_device_runs_callback_under_the_guard() -> Result<(), Box<dyn Error>
     assert!(stream.wait_for_callbacks(10, Duration::from_secs(10)));
     let output = stream.captured_output();
     assert!(output.len() >= 10 * 128 * 2);
-    for (frame, pair) in output.chunks_exact(2).take(1280).enumerate() {
+    for (frame, pair) in output.as_chunks::<2>().0.iter().take(1280).enumerate() {
         let v = (frame % 1000) as f32;
-        assert_eq!(pair, [-v * 0.5, v * 0.5], "frame {frame}");
+        assert_eq!(*pair, [-v * 0.5, v * 0.5], "frame {frame}");
     }
     assert_eq!(stream.latency().input_frames, 64);
     Ok(())

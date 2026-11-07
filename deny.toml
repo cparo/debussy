@@ -10,6 +10,13 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 [advisories]
 version = 2
 yanked = "deny"
+# Unmaintained crates under iced 0.14, accepted by a human (ADR-0055). Revisit when iced drops them.
+ignore = [
+    # paste: a compile-time macro under wgpu's Metal backend; it runs no code in the app.
+    { id = "RUSTSEC-2024-0436", reason = "compile-time only, under iced/wgpu (ADR-0055)" },
+    # ttf-parser: parses system fonts for cosmic-text, never project or imported files.
+    { id = "RUSTSEC-2026-0192", reason = "parses system fonts only, under iced (ADR-0055)" },
+]
 
 [licenses]
 version = 2
@@ -24,6 +31,8 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    # A public-domain dedication; first needed by hexf-parse, through iced's wgpu (ADR-0055).
+    "CC0-1.0",
 ]
 confidence-threshold = 0.93
 # The allowlist is policy, not a record of current dependencies.
