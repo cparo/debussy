@@ -1,0 +1,20 @@
+[package]
+name = "audio_effects"
+description = "The built-in effect nodes, built from dsp: the mixer."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+audio_buffers = { path = "../audio_buffers" }
+dsp = { path = "../dsp" }
+signal_graph = { path = "../signal_graph" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
+
+[lints]
+workspace = true

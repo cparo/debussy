@@ -103,6 +103,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Feedback loops](signal-graph.md#feedback-loops)
   - [Channel layouts](signal-graph.md#channel-layouts)
   - [Panning](signal-graph.md#panning)
+  - [Mixer](signal-graph.md#mixer)
   - [Effect nodes](signal-graph.md#effect-nodes)
   - [Port types](signal-graph.md#port-types)
   - [Delay compensation](signal-graph.md#delay-compensation)
