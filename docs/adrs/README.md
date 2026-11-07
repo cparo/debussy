@@ -71,4 +71,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0045](0045-waveform-summaries-and-spectrogram-overviews-are.md) | Waveform summaries and spectrogram overviews are cached per audio file in disposable binary formats | Accepted | [Analysis cache files](../architecture/analysis.md#analysis-cache-files) |
 | [ADR-0046](0046-the-engine-renders-clips-on-the-reader-thread-and.md) | The engine renders clips on the reader thread and accepts clip edits only while stopped | Accepted | [Clip playback](../architecture/engine.md#clip-playback) |
 | [ADR-0047](0047-audio-engine-defines-its-feeds-and-disk-streaming.md) | audio_engine defines its feeds, and disk_streaming implements them | Accepted | [Clip playback](../architecture/engine.md#clip-playback) |
+| [ADR-0048](0048-project-files-are-serialized-with-serde-and-serde.md) | Project files are serialized with serde and serde_json | Accepted | [Dependency rules](../architecture/crates.md#dependency-rules) |
+| [ADR-0049](0049-saved-projects-use-their-own-format-types-crash.md) | Saved projects use their own format types, crash-safe renames, timestamped versions and checked loads | Accepted | [Saved format](../architecture/project.md#saved-format) |
 
