@@ -60,4 +60,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0034](0034-disk-streaming-reads-2-s-ahead-on-one-thread.md) | Disk streaming reads 2 s ahead on one thread, primes before playing, and reports underruns | Accepted | [Disk streaming](../architecture/engine.md#disk-streaming) |
 | [ADR-0035](0035-the-dither-noise-source-is-xorshift64-seeded-by.md) | The dither noise source is xorshift64* seeded by SplitMix64 | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0036](0036-sample-rate-conversion-is-exact-rational-polyphase.md) | Sample-rate conversion is exact rational polyphase filtering without drift correction | Accepted | [Sample rate](../architecture/engine.md#sample-rate) |
+| [ADR-0037](0037-overlapping-clips-the-later-covers-with-a-short.md) | Overlapping clips: the later covers with a short crossfade; clips have gain and fades; undo is per gesture; time is in frames | Accepted | [Editing model](../architecture/project.md#editing-model) |
+| [ADR-0038](0038-processing-plans-are-swapped-over-queues.md) | Processing plans are swapped over queues, parameters are smoothed atomics, and only cycles run in sub-blocks | Accepted | [Processing graph](../architecture/signal-graph.md#processing-graph) |
+| [ADR-0039](0039-the-fft-is-radix-2-cooley-tukey-with-real-input.md) | The FFT is radix-2 Cooley-Tukey with real-input packing and a Hann-windowed STFT | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 
