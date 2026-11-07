@@ -35,6 +35,9 @@ pub enum Error {
     /// The reader thread could not be started.
     #[error("could not start the reader thread: {0}")]
     Thread(std::io::Error),
+    /// Rendering a track's clips failed.
+    #[error(transparent)]
+    Engine(#[from] audio_engine::Error),
     /// A queue or pool could not be created.
     #[error(transparent)]
     Buffers(#[from] audio_buffers::Error),

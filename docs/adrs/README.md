@@ -69,4 +69,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0043](0043-routing-is-undoable-project-state-tracks-are-bare.md) | Routing is undoable project state: tracks are bare sources, one fixed output, effects by kind id with parameters by name | Accepted | [Routing](../architecture/project.md#routing) |
 | [ADR-0044](0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md) | Mixing is a mixer node with per-channel gain, pan and a mute/solo mode | Accepted | [Mixer](../architecture/signal-graph.md#mixer) |
 | [ADR-0045](0045-waveform-summaries-and-spectrogram-overviews-are.md) | Waveform summaries and spectrogram overviews are cached per audio file in disposable binary formats | Accepted | [Analysis cache files](../architecture/analysis.md#analysis-cache-files) |
+| [ADR-0046](0046-the-engine-renders-clips-on-the-reader-thread-and.md) | The engine renders clips on the reader thread and accepts clip edits only while stopped | Accepted | [Clip playback](../architecture/engine.md#clip-playback) |
+| [ADR-0047](0047-audio-engine-defines-its-feeds-and-disk-streaming.md) | audio_engine defines its feeds, and disk_streaming implements them | Accepted | [Clip playback](../architecture/engine.md#clip-playback) |
 

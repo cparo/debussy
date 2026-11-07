@@ -8,11 +8,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+audio_engine = { path = "../audio_engine" }
 audio_buffers = { path = "../audio_buffers" }
 thiserror = "2.0.21"
 wav_files = { path = "../wav_files" }
 
 [dev-dependencies]
+signal_graph = { path = "../signal_graph" }
 realtime_guard = { path = "../realtime_guard" }
 
 [lints]
