@@ -189,3 +189,41 @@ fn test_commit_when_busy_keeps_the_graph() -> TestResult {
     assert_eq!(output, [0.0, 1.0, 2.0, 3.0]);
     Ok(())
 }
+
+#[test]
+fn test_replace_node_keeps_compatible_connections() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let source = graph.add_source(Layout::Mono);
+    let gain = graph.add_node(Box::new(Gain::new(1.0)?));
+    let sink = graph.add_sink(Layout::Mono);
+    let input = graph.connect(source, 0, gain, 0)?;
+    let output = graph.connect(gain, 0, sink, 0)?;
+    // A counter has an output but no input.
+    let (counter, _) = Counter::new();
+    let dropped = graph.replace_node(gain, Box::new(counter))?;
+    assert_eq!(dropped, [input]);
+    assert!(graph.connection(input).is_none());
+    assert!(graph.connection(output).is_some());
+    assert_eq!(graph.inputs(gain).map(<[_]>::len), Some(0));
+    graph.commit()?;
+    Ok(())
+}
+
+#[test]
+fn test_replace_node_refuses_non_processors() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let sink = graph.add_sink(Layout::Mono);
+    let delay = graph.add_feedback_delay(Layout::Mono, 0.01)?;
+    for id in [sink, delay] {
+        assert_eq!(
+            graph.replace_node(id, Box::new(Gain::new(1.0)?)),
+            Err(Error::NotAProcessor(id))
+        );
+    }
+    graph.remove_node(sink)?;
+    assert_eq!(
+        graph.replace_node(sink, Box::new(Gain::new(1.0)?)),
+        Err(Error::UnknownNode(sink))
+    );
+    Ok(())
+}

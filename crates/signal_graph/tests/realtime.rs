@@ -218,3 +218,42 @@ fn test_begin_block_refuses_oversized_blocks() -> TestResult {
     assert!(result);
     Ok(())
 }
+
+#[test]
+fn test_replace_node_copies_parameter_values() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let source = graph.add_source(Layout::Mono);
+    let gain = graph.add_node(Box::new(Gain::new(1.0)?));
+    let sink = graph.add_sink(Layout::Mono);
+    graph.connect(source, 0, gain, 0)?;
+    graph.connect(gain, 0, sink, 0)?;
+    graph.commit()?;
+    graph.parameters(gain).ok_or("no parameter")?[0].set(0.25);
+    let dropped = graph.replace_node(gain, Box::new(Gain::new(1.0)?))?;
+    assert!(dropped.is_empty());
+    graph.commit()?;
+    // The new node starts at the copied value, with no ramp.
+    let output = render(&mut runner, Some(source), sink, &[1.0; 64], 64)?;
+    assert!(output.iter().all(|&x| x == 0.25));
+    Ok(())
+}
+
+#[test]
+fn test_replaced_node_runs_a_new_instance() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let (counter, old_dropped) = Counter::new();
+    let counter = graph.add_node(Box::new(counter));
+    let sink = graph.add_sink(Layout::Mono);
+    graph.connect(counter, 0, sink, 0)?;
+    graph.commit()?;
+    render(&mut runner, None, sink, &[0.0; 64], 64)?;
+    let (fresh, _) = Counter::new();
+    graph.replace_node(counter, Box::new(fresh))?;
+    graph.commit()?;
+    let output = render(&mut runner, None, sink, &[0.0; 3], 3)?;
+    assert_eq!(output, [0.0, 1.0, 2.0]);
+    assert!(!old_dropped.load(Ordering::SeqCst));
+    graph.collect();
+    assert!(old_dropped.load(Ordering::SeqCst));
+    Ok(())
+}

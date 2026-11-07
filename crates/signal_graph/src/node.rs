@@ -9,10 +9,11 @@ use crate::types::Port;
 /// A processor in the graph. Built-in effects implement it, and a third-party plugin wrapper
 /// could: nothing here assumes the node is built in.
 ///
-/// The graph calls [`Node::inputs`], [`Node::outputs`], [`Node::latency`], [`Node::parameters`]
-/// and [`Node::prepare`] once, off the real-time thread, when the node is added; the answers are
-/// fixed for as long as the node is in the graph. A node whose ports or latency must change is
-/// replaced by a new one. Only [`Node::process`] runs on the real-time thread, and it must not
+/// The graph calls [`Node::parameters`], then [`Node::prepare`], then [`Node::inputs`],
+/// [`Node::outputs`] and [`Node::latency`], once each, off the real-time thread, when the node is
+/// added; between the first two it may set parameter values (see `Graph::replace_node`). The
+/// answers are fixed for as long as the node is in the graph. A node whose ports, latency or
+/// parameters must change is replaced with `Graph::replace_node`. Only [`Node::process`] runs on the real-time thread, and it must not
 /// allocate, free, lock, block or do I/O (`docs/architecture/engine.md` "Real-time thread").
 pub trait Node: Send {
     /// The input ports, in order.

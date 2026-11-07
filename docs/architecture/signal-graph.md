@@ -16,6 +16,11 @@ The engine supplies signals through source nodes and takes them from sink nodes,
 layout. A node's ports, latency and parameters are read when it is added and are fixed while it is
 in the graph; a node whose ports or latency change is replaced ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
 
+Replacing a node keeps its id and every connection whose port index still exists with the same
+signal type; the other connections are removed. Each new parameter takes the value of the old
+parameter of the same name, clamped to its range, before the node is prepared. The new node starts
+with fresh internal state ([ADR-0041](../adrs/0041-replacing-a-node-keeps-its-id-compatible.md)).
+
 ## Feedback loops
 
 A connection that forms a cycle is allowed only if the cycle passes through at least one
