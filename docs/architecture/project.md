@@ -19,7 +19,7 @@ A track is mono or stereo, fixed when it is created. A mono track's clips refere
 file; a stereo track's clips reference a left and a right mono file, read at one offset and
 length. A track keeps its clips in layer order: a clip that is added, moved, or given a new
 position goes to the top layer, and a trim, gain or fade change keeps its layer. A clip keeps its
-id when it moves between tracks. Mixer and routing state is not part of the editing model ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
+id when it moves between tracks ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
 
 ## Undo history
 
@@ -38,6 +38,20 @@ project bundle and reference the same audio files as the state they captured.
 
 A named version can be restored either as the current state, which is itself an undoable edit,
 or into a new project, which copies the audio files it references ([ADR-0012](../adrs/0012-undo-is-unlimited-per-session-and-named-versions.md)).
+
+## Routing
+
+The project's routing is part of its editable state, in the same undo history and named versions as
+its tracks. Each track is a source with one output of the track's layout. Every project has one
+stereo output, which cannot be removed. Other nodes are effects, buses and feedback delays joined
+by connections ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
+
+A new track is connected to the output, panned centre, in the same undo step, and removing a track
+removes its connections. An effect node is saved as a stable kind id with its non-default parameter
+values keyed by name; an unknown kind id is kept and plays as silence. A parameter change is one
+undo step per completed gesture. The model checks that a connection's endpoints exist, that the
+output is never a source and a track never a target, and that no connection is duplicated; effect
+ports and cycles are checked by `signal_graph` before an edit is recorded ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
 
 ## Project bundle
 

@@ -7,6 +7,7 @@ use audio_buffers::Layout;
 
 use crate::edit::Edit;
 use crate::error::Error;
+use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, State, Track};
 use crate::types::{ClipId, TrackId};
 
@@ -34,9 +35,13 @@ impl Session {
     pub fn open(state: State, versions: BTreeMap<String, State>) -> Self {
         let ids = std::iter::once(&state)
             .chain(versions.values())
-            .flat_map(|s| &s.tracks)
-            .flat_map(|track| {
-                std::iter::once(track.id.0).chain(track.clips.iter().map(|(id, _)| id.0))
+            .flat_map(|s| {
+                let tracks = s.tracks.iter().flat_map(|track| {
+                    std::iter::once(track.id.0).chain(track.clips.iter().map(|(id, _)| id.0))
+                });
+                let nodes = s.nodes.iter().map(|node| node.id.0);
+                let connections = s.connections.iter().map(|c| c.id.0);
+                tracks.chain(nodes).chain(connections).collect::<Vec<_>>()
             });
         let next_id = ids.max().map_or(0, |max| max.saturating_add(1));
         Session {
@@ -95,7 +100,8 @@ impl Session {
         ClipId(self.take_id())
     }
 
-    /// Adds an empty track of `layout` after the others.
+    /// Adds an empty track of `layout` after the others, connected to the project output (a
+    /// mono track panned centre), as one step.
     ///
     /// # Errors
     ///
@@ -104,8 +110,111 @@ impl Session {
         let id = self.new_track_id();
         let index = self.state.tracks.len();
         let track = Track::new(id, name, layout);
-        self.apply(Edit::InsertTrack { index, track })?;
+        let connection = Connection::new(
+            self.new_connection_id(),
+            Endpoint::Track(id),
+            0,
+            Endpoint::Output,
+            0,
+        );
+        self.apply(Edit::Batch(vec![
+            Edit::InsertTrack { index, track },
+            Edit::Connect {
+                index: self.state.connections.len(),
+                connection,
+            },
+        ]))?;
         Ok(id)
+    }
+
+    /// Removes a track, its clips and its connections, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`].
+    pub fn remove_track(&mut self, id: TrackId) -> Result<(), Error> {
+        self.state.track(id).ok_or(Error::UnknownTrack(id))?;
+        let mut edits = self.disconnect_all(Endpoint::Track(id));
+        edits.push(Edit::RemoveTrack(id));
+        self.apply(Edit::Batch(edits))
+    }
+
+    /// Adds a routing node.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidValue`] for a non-finite parameter value or a bad delay time.
+    pub fn add_node(&mut self, kind: NodeKind) -> Result<NodeId, Error> {
+        let id = NodeId(self.take_id());
+        let index = self.state.nodes.len();
+        self.apply(Edit::InsertNode {
+            index,
+            node: Node { id, kind },
+        })?;
+        Ok(id)
+    }
+
+    /// Removes a routing node and its connections, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`].
+    pub fn remove_node(&mut self, id: NodeId) -> Result<(), Error> {
+        self.state.node(id).ok_or(Error::UnknownNode(id))?;
+        let mut edits = self.disconnect_all(Endpoint::Node(id));
+        edits.push(Edit::RemoveNode(id));
+        self.apply(Edit::Batch(edits))
+    }
+
+    /// Connects output `output` of `from` to input `input` of `to`, panned centre.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], [`Error::UnknownNode`], [`Error::NoSuchPort`], or
+    /// [`Error::AlreadyConnected`].
+    pub fn connect(
+        &mut self,
+        from: Endpoint,
+        output: usize,
+        to: Endpoint,
+        input: usize,
+    ) -> Result<ConnectionId, Error> {
+        let id = self.new_connection_id();
+        self.apply(Edit::Connect {
+            index: self.state.connections.len(),
+            connection: Connection::new(id, from, output, to, input),
+        })?;
+        Ok(id)
+    }
+
+    /// Records a parameter's value at the end of a gesture; `None` returns it to its default.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], [`Error::WrongNodeKind`], or [`Error::InvalidValue`].
+    pub fn set_parameter(
+        &mut self,
+        node: NodeId,
+        name: &str,
+        value: Option<f32>,
+    ) -> Result<(), Error> {
+        self.apply(Edit::SetParameter {
+            node,
+            name: name.to_owned(),
+            value,
+        })
+    }
+
+    /// Edits that remove every connection of `endpoint`.
+    fn disconnect_all(&self, endpoint: Endpoint) -> Vec<Edit> {
+        self.state
+            .connections_of(endpoint)
+            .map(|c| Edit::Disconnect(c.id))
+            .collect()
+    }
+
+    fn new_connection_id(&mut self) -> ConnectionId {
+        ConnectionId(self.take_id())
     }
 
     /// Adds a clip to a track, on top of any it overlaps.

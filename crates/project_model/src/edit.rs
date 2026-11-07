@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 
 use crate::error::Error;
+use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, State, Track};
 use crate::types::{ClipId, TrackId};
 
@@ -57,6 +58,47 @@ pub enum Edit {
         /// Its new properties.
         clip: Clip,
     },
+    /// Inserts a routing node at `index` in the node list.
+    InsertNode {
+        /// Where it goes; at most the number of nodes.
+        index: usize,
+        /// The node.
+        node: Node,
+    },
+    /// Removes a routing node, which must have no connections.
+    RemoveNode(NodeId),
+    /// Sets an effect parameter, or with `None` returns it to its default.
+    SetParameter {
+        /// The effect node.
+        node: NodeId,
+        /// The parameter's name.
+        name: String,
+        /// The value.
+        value: Option<f32>,
+    },
+    /// Sets a feedback delay's time.
+    SetDelay {
+        /// The feedback-delay node.
+        node: NodeId,
+        /// The time, in seconds.
+        seconds: f64,
+    },
+    /// Adds a connection at `index` in the connection list.
+    Connect {
+        /// Where it goes; at most the number of connections.
+        index: usize,
+        /// The connection.
+        connection: Connection,
+    },
+    /// Removes a connection.
+    Disconnect(ConnectionId),
+    /// Sets where a mono signal entering a stereo input through a connection is panned.
+    SetPan {
+        /// The connection.
+        connection: ConnectionId,
+        /// The pan, −1 to 1.
+        pan: f32,
+    },
     /// Replaces the whole state, as when restoring a named version.
     Restore(State),
     /// Several edits applied in order, as one.
@@ -83,6 +125,7 @@ impl Edit {
             }
             Edit::RemoveTrack(id) => {
                 let index = state.track_index(id)?;
+                check_unconnected(state, Endpoint::Track(id))?;
                 let track = state.tracks.remove(index);
                 Ok(Edit::InsertTrack { index, track })
             }
@@ -128,6 +171,73 @@ impl Edit {
                 clip.check(target.layout)?;
                 let old = std::mem::replace(&mut target.clips[layer].1, clip);
                 Ok(Edit::ReplaceClip { id, clip: old })
+            }
+            Edit::InsertNode { index, node } => {
+                check_index(index, state.nodes.len() + 1)?;
+                if state.node(node.id).is_some() {
+                    return Err(Error::NodeExists(node.id));
+                }
+                routing::check_node(&node)?;
+                let id = node.id;
+                state.nodes.insert(index, node);
+                Ok(Edit::RemoveNode(id))
+            }
+            Edit::RemoveNode(id) => {
+                let index = node_index(state, id)?;
+                check_unconnected(state, Endpoint::Node(id))?;
+                let node = state.nodes.remove(index);
+                Ok(Edit::InsertNode { index, node })
+            }
+            Edit::SetParameter { node, name, value } => {
+                if value.is_some_and(|v| !v.is_finite()) {
+                    return Err(Error::InvalidValue);
+                }
+                let index = node_index(state, node)?;
+                let NodeKind::Effect { parameters, .. } = &mut state.nodes[index].kind else {
+                    return Err(Error::WrongNodeKind(node));
+                };
+                let old = match value {
+                    Some(value) => parameters.insert(name.clone(), value),
+                    None => parameters.remove(&name),
+                };
+                Ok(Edit::SetParameter {
+                    node,
+                    name,
+                    value: old,
+                })
+            }
+            Edit::SetDelay { node, seconds } => {
+                routing::check_delay(seconds)?;
+                let index = node_index(state, node)?;
+                let NodeKind::FeedbackDelay {
+                    seconds: current, ..
+                } = &mut state.nodes[index].kind
+                else {
+                    return Err(Error::WrongNodeKind(node));
+                };
+                let old = std::mem::replace(current, seconds);
+                Ok(Edit::SetDelay { node, seconds: old })
+            }
+            Edit::Connect { index, connection } => {
+                check_index(index, state.connections.len() + 1)?;
+                check_connection(state, &connection)?;
+                let id = connection.id;
+                state.connections.insert(index, connection);
+                Ok(Edit::Disconnect(id))
+            }
+            Edit::Disconnect(id) => {
+                let index = connection_index(state, id)?;
+                let connection = state.connections.remove(index);
+                Ok(Edit::Connect { index, connection })
+            }
+            Edit::SetPan { connection, pan } => {
+                routing::check_pan(pan)?;
+                let index = connection_index(state, connection)?;
+                let old = std::mem::replace(&mut state.connections[index].pan, pan);
+                Ok(Edit::SetPan {
+                    connection,
+                    pan: old,
+                })
             }
             Edit::Restore(new) => {
                 check_state(&new)?;
@@ -189,7 +299,82 @@ fn check_track(track: &Track, taken: &BTreeSet<ClipId>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Checks a whole state: unique track and clip ids, valid clips.
+fn node_index(state: &State, id: NodeId) -> Result<usize, Error> {
+    state
+        .nodes
+        .iter()
+        .position(|node| node.id == id)
+        .ok_or(Error::UnknownNode(id))
+}
+
+fn connection_index(state: &State, id: ConnectionId) -> Result<usize, Error> {
+    state
+        .connections
+        .iter()
+        .position(|c| c.id == id)
+        .ok_or(Error::UnknownConnection(id))
+}
+
+fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
+    match state.connections_of(endpoint).next() {
+        Some(_) => Err(Error::StillConnected(endpoint)),
+        None => Ok(()),
+    }
+}
+
+/// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
+/// not known to the model and are checked by `signal_graph`.
+fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
+    match endpoint {
+        Endpoint::Track(_) => output && port == 0,
+        Endpoint::Output => !output && port == 0,
+        Endpoint::Node(id) => match state.node(id).map(|node| &node.kind) {
+            Some(NodeKind::Effect { .. }) => true,
+            Some(NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. }) => port == 0,
+            None => false,
+        },
+    }
+}
+
+/// Checks a new connection against the state: a fresh id, existing endpoints with such ports,
+/// and no duplicate.
+fn check_connection(state: &State, connection: &Connection) -> Result<(), Error> {
+    if state.connection(connection.id).is_some() {
+        return Err(Error::ConnectionExists(connection.id));
+    }
+    routing::check_pan(connection.pan)?;
+    let ends = [
+        (connection.from, true, connection.output),
+        (connection.to, false, connection.input),
+    ];
+    for (endpoint, output, port) in ends {
+        match endpoint {
+            Endpoint::Track(id) if state.track(id).is_none() => {
+                return Err(Error::UnknownTrack(id));
+            }
+            Endpoint::Node(id) if state.node(id).is_none() => return Err(Error::UnknownNode(id)),
+            _ if !has_port(state, endpoint, output, port) => {
+                return Err(Error::NoSuchPort(endpoint));
+            }
+            _ => {}
+        }
+    }
+    let same = |c: &Connection| {
+        (c.from, c.output, c.to, c.input)
+            == (
+                connection.from,
+                connection.output,
+                connection.to,
+                connection.input,
+            )
+    };
+    if state.connections.iter().any(same) {
+        return Err(Error::AlreadyConnected);
+    }
+    Ok(())
+}
+
+/// Checks a whole state: unique ids, valid clips and nodes, connections that fit.
 fn check_state(state: &State) -> Result<(), Error> {
     let mut tracks = BTreeSet::new();
     let mut clips = BTreeSet::new();
@@ -199,6 +384,22 @@ fn check_state(state: &State) -> Result<(), Error> {
         }
         check_track(track, &clips)?;
         clips.extend(track.clips.iter().map(|(id, _)| *id));
+    }
+    let mut nodes = BTreeSet::new();
+    for node in &state.nodes {
+        if !nodes.insert(node.id) {
+            return Err(Error::NodeExists(node.id));
+        }
+        routing::check_node(node)?;
+    }
+    let mut built = State {
+        tracks: state.tracks.clone(),
+        nodes: state.nodes.clone(),
+        connections: Vec::with_capacity(state.connections.len()),
+    };
+    for connection in &state.connections {
+        check_connection(&built, connection)?;
+        built.connections.push(*connection);
     }
     Ok(())
 }
