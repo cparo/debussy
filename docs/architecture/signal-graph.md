@@ -12,6 +12,15 @@ a second queue, so it is dropped elsewhere. Node parameters are atomic values, r
 and ramped over about 10 ms. Acyclic parts of a plan run once per block; each cycle runs in
 sub-blocks no longer than its shortest feedback delay ([ADR-0038](../adrs/0038-processing-plans-are-swapped-over-queues.md)).
 
+The engine supplies signals through source nodes and takes them from sink nodes, each of a fixed
+layout. A node's ports, latency and parameters are read when it is added and are fixed while it is
+in the graph; a node whose ports or latency change is replaced ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
+
+Replacing a node keeps its id and every connection whose port index still exists with the same
+signal type; the other connections are removed. Each new parameter takes the value of the old
+parameter of the same name, clamped to its range, before the node is prepared. The new node starts
+with fresh internal state ([ADR-0041](../adrs/0041-replacing-a-node-keeps-its-id-compatible.md)).
+
 ## Feedback loops
 
 A connection that forms a cycle is allowed only if the cycle passes through at least one
@@ -25,13 +34,17 @@ A feedback delay is at least 1 ms, stored as a time and rounded up to whole samp
 rate. The UI does not offer shorter values, and a shorter stored or automated value is raised to
 1 ms ([ADR-0031](../adrs/0031-feedback-delays-are-at-least-1-ms.md)).
 
+A feedback delay is at most 10 s. A new length takes effect with the next plan, keeping the delay's
+contents only if its length in frames is unchanged ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
+
 ## Channel layouts
 
 Every connection carries either a mono or a stereo signal. The project output is a stereo mix; the
 mono mix is derived from it as `(L + R) × 0.7071` ([ADR-0030](../adrs/0030-signals-are-mono-or-stereo-and-the-mono-mix-is-the.md)).
 
 Every bus and node input has a fixed layout. A mono signal entering a stereo input is panned
-(centre by default); a stereo signal entering a mono input is folded down ([ADR-0038](../adrs/0038-processing-plans-are-swapped-over-queues.md)).
+(centre by default); a stereo signal entering a mono input is folded down ([ADR-0038](../adrs/0038-processing-plans-are-swapped-over-queues.md)). The pan
+is set per connection ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
 
 ## Panning
 
@@ -53,3 +66,7 @@ kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.
 
 Each node reports the latency it adds. The engine delays parallel paths so that signals meeting at
 a node are time-aligned, and reports the total output latency ([ADR-0022](../adrs/0022-the-engine-compensates-recording-and-effect.md)).
+
+Latency is compensated on every connection except one that closes a feedback loop: a connection
+into a feedback delay from inside the same cycle. Every sink is delayed to the latest arrival at any
+sink, which is the plan's reported latency. Compensation delays start silent in each new plan ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).

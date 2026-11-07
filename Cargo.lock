@@ -65,6 +65,16 @@ name = "realtime_guard"
 version = "0.0.0"
 
 [[package]]
+name = "signal_graph"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "dsp",
+ "realtime_guard",
+ "thiserror",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
