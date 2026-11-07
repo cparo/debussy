@@ -56,4 +56,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0030](0030-signals-are-mono-or-stereo-and-the-mono-mix-is-the.md) | Signals are mono or stereo, and the mono mix is the channel sum scaled by -3 dB | Accepted | [Channel layouts](../architecture/signal-graph.md#channel-layouts) |
 | [ADR-0031](0031-feedback-delays-are-at-least-1-ms.md) | Feedback delays are at least 1 ms | Accepted | [Feedback loops](../architecture/signal-graph.md#feedback-loops) |
 | [ADR-0032](0032-monitored-input-is-not-delayed-for-delay.md) | Monitored input is not delayed for delay compensation | Accepted | [Input monitoring](../architecture/recording.md#input-monitoring) |
+| [ADR-0033](0033-github-actions-are-pinned-to-commit-shas-and.md) | GitHub Actions are pinned to commit SHAs and updated by Dependabot | Accepted | [Commit gate](../architecture/tooling.md#commit-gate) |
 
