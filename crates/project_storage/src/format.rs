@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,6 +114,13 @@ pub(crate) enum SavedEndpoint {
     Node { id: u64 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SavedSide {
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SavedConnection {
@@ -123,4 +130,10 @@ pub(crate) struct SavedConnection {
     pub to: SavedEndpoint,
     pub input: usize,
     pub pan: f32,
+    /// Since version 2: the side of a stereo output taken; absent for the whole port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_side: Option<SavedSide>,
+    /// Since version 2: the side of a stereo input fed; absent for the whole port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_side: Option<SavedSide>,
 }

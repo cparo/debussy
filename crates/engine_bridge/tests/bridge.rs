@@ -1,14 +1,14 @@
 //! The bridge keeps the running graph in step with the model through random edit sequences,
 //! undo and redo; refused edits leave both unchanged; clips become the engine's renderers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::sync::Arc;
 
 use audio_buffers::Layout;
 use audio_engine::{ClipAudio, RenderFeed, TrackFeed, TrackFeeds, render};
 use engine_bridge::{Bridge, Error as BridgeError, render_graph, track_renderers};
-use project_model::{AudioFile, Clip, Edit, Endpoint, NodeKind, Session, Source, State};
+use project_model::{AudioFile, Clip, Edit, Endpoint, NodeKind, Session, Side, Source, State};
 use signal_graph::Config;
 
 fn config() -> Config {
@@ -20,24 +20,33 @@ fn config() -> Config {
 /// ports, with the same pan.
 fn assert_in_step(bridge: &Bridge, state: &State) -> Result<(), Box<dyn Error>> {
     let graph = bridge.graph();
-    let expected_nodes = state.tracks.len() + state.nodes.len() + 1;
+    // Each sided end of a connection adds a helper node and a connection (ADR-0058).
+    let sided: usize = state
+        .connections
+        .iter()
+        .map(|c| usize::from(c.from_side.is_some()) + usize::from(c.to_side.is_some()))
+        .sum();
+    let expected_nodes = state.tracks.len() + state.nodes.len() + 1 + sided;
     assert_eq!(graph.node_ids().count(), expected_nodes, "node count");
-    let mut seen = BTreeSet::new();
     for c in &state.connections {
         let id = bridge.connection(c.id).ok_or("connection not mirrored")?;
         let g = graph
             .connection(id)
             .ok_or("connection missing from graph")?;
-        assert_eq!(Some(g.from), bridge.node(c.from), "from of {}", c.id);
-        assert_eq!(Some(g.to), bridge.node(c.to), "to of {}", c.id);
-        assert_eq!((g.output, g.input), (c.output, c.input));
+        if c.from_side.is_none() {
+            assert_eq!(Some(g.from), bridge.node(c.from), "from of {}", c.id);
+            assert_eq!(g.output, c.output);
+        }
+        if c.to_side.is_none() {
+            assert_eq!(Some(g.to), bridge.node(c.to), "to of {}", c.id);
+            assert_eq!(g.input, c.input);
+        }
         assert_eq!(g.pan, c.pan);
-        seen.insert(id);
     }
     assert_eq!(
         graph.connections().count(),
-        seen.len(),
-        "extra graph connections"
+        state.connections.len() + sided,
+        "graph connection count"
     );
     Ok(())
 }
@@ -374,5 +383,125 @@ fn test_project_renders_through_its_routing() -> Result<(), Box<dyn Error>> {
         assert!((l - (0.25 + mono_side)).abs() < 1e-4, "left {l}");
         assert!((r - (-0.25 + mono_side)).abs() < 1e-4, "right {r}");
     }
+    Ok(())
+}
+
+#[test]
+fn test_stereo_track_through_the_project_mixer_keeps_its_image() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let guitar = bridge.edit(&mut session, |s| s.add_track("guitar", Layout::Stereo))?;
+    let vocal = bridge.edit(&mut session, |s| s.add_track("vocal", Layout::Mono))?;
+    assert_in_step(&bridge, session.state())?;
+    let file = |name: &str| AudioFile {
+        name: name.to_owned(),
+        frames: 512,
+    };
+    session.add_clip(
+        guitar,
+        Clip::new(
+            Source::Stereo {
+                left: file("l.wav"),
+                right: file("r.wav"),
+            },
+            0,
+            512,
+            0,
+        ),
+    )?;
+    session.add_clip(vocal, Clip::new(Source::Mono(file("v.wav")), 0, 512, 0))?;
+    let mut stored = BTreeMap::new();
+    stored.insert("l.wav".to_owned(), vec![0.25; 512]);
+    stored.insert("r.wav".to_owned(), vec![-0.5; 512]);
+    stored.insert("v.wav".to_owned(), vec![0.0; 512]);
+    let stored = Arc::new(stored);
+    let mut graph = render_graph(session.state(), config())?;
+    let (renderers, files) = track_renderers(session.state(), &graph.sources, 48_000)?;
+    let mut tracks: Vec<TrackFeeds> = renderers
+        .into_iter()
+        .map(|t| TrackFeeds {
+            source: t.source,
+            feeds: t
+                .channels
+                .into_iter()
+                .map(|r| {
+                    Box::new(RenderFeed::new(
+                        r,
+                        Memory(Arc::clone(&stored), files.names().to_vec()),
+                        0,
+                    )) as Box<dyn TrackFeed>
+                })
+                .collect(),
+        })
+        .collect();
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    render(
+        &mut graph.runner,
+        graph.output,
+        &mut tracks,
+        512,
+        128,
+        &mut |l, r| {
+            left.extend_from_slice(l);
+            right.extend_from_slice(r);
+            Ok(())
+        },
+    )?;
+    // Left panned hard left and right hard right come out where they went in.
+    for (l, r) in left.iter().zip(&right) {
+        assert!((l - 0.25).abs() < 1e-5, "left {l}");
+        assert!((r + 0.5).abs() < 1e-5, "right {r}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_sided_connections_sync_through_edits_and_undo() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let stereo = bridge.edit(&mut session, |s| s.add_track("s", Layout::Stereo))?;
+    let bus = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Stereo)))?;
+    let mono_bus = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Mono)))?;
+    bridge.edit(&mut session, |s| {
+        s.connect_sides(
+            Endpoint::Track(stereo),
+            0,
+            Some(Side::Right),
+            Endpoint::Node(bus),
+            0,
+            Some(Side::Left),
+        )
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect_sides(
+            Endpoint::Track(stereo),
+            0,
+            Some(Side::Left),
+            Endpoint::Node(mono_bus),
+            0,
+            None,
+        )
+    })?;
+    assert_in_step(&bridge, session.state())?;
+    // Removing the bus removes its connection's helpers too.
+    bridge.edit(&mut session, |s| s.remove_node(bus))?;
+    assert_in_step(&bridge, session.state())?;
+    assert!(bridge.undo(&mut session)?);
+    assert_in_step(&bridge, session.state())?;
+    // The model refuses a side of a mono port it knows.
+    assert!(matches!(
+        bridge.edit(&mut session, |s| {
+            s.connect_sides(
+                Endpoint::Node(mono_bus),
+                0,
+                Some(Side::Left),
+                Endpoint::Output,
+                0,
+                None,
+            )
+        }),
+        Err(BridgeError::Model(project_model::Error::SideOfMonoPort(_)))
+    ));
+    assert_in_step(&bridge, session.state())?;
     Ok(())
 }

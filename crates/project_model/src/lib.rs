@@ -36,7 +36,7 @@ mod types;
 
 pub use edit::Edit;
 pub use error::Error;
-pub use routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
+pub use routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Side};
 pub use session::Session;
 pub use state::{Clip, State, Track};
 pub use types::{AudioFile, ClipId, Source, TrackId};

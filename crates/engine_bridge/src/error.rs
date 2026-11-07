@@ -10,6 +10,9 @@ pub enum Error {
     /// node does not have, an out-of-range delay, or similar. The model is unchanged.
     #[error("the routing was refused: {0}")]
     Refused(signal_graph::Error),
+    /// A connection names the left or right side of a port the graph declares mono.
+    #[error("that port is mono; it has no left or right side")]
+    SideOfMonoPort,
     /// The graph and the model disagree about an element that should exist; a bug, not a user
     /// error.
     #[error("the routing names an element the graph does not have")]

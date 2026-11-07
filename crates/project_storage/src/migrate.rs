@@ -14,9 +14,14 @@ pub const MAX_DEPTH: u64 = 64;
 /// A step from one format version to the next, over the parsed JSON.
 pub(crate) type Migration = fn(Value) -> Result<Value, String>;
 
-/// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`. Version 1 is the first,
-/// so there are none yet.
-const MIGRATIONS: &[Migration] = &[];
+/// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`.
+const MIGRATIONS: &[Migration] = &[one_to_two];
+
+/// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
+/// connection is a whole-port connection, which is what their absence means.
+fn one_to_two(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
 
 /// Parses `text`, read from `path`, as a saved project of this build's format version: checks
 /// its nesting, refuses a newer version, and migrates an older one.
@@ -108,6 +113,14 @@ mod tests {
         r#"{"format_version":1,"sample_rate":48000,"tracks":[],"nodes":[],"connections":[]}"#;
 
     #[test]
+    fn test_parse_migrates_version_one() -> Result<(), Box<dyn StdError>> {
+        let saved = parse(Path::new("p"), V1)?;
+        assert_eq!(saved.format_version, FORMAT_VERSION);
+        assert!(saved.connections.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -115,12 +128,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":2");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":3");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 2,
-                supported: 1,
+                found: 3,
+                supported: 2,
                 ..
             })
         ));
