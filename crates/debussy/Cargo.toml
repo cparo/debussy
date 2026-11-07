@@ -1,0 +1,27 @@
+[package]
+name = "debussy"
+description = "The Debussy application: wires the platform, engine, storage and UI together."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "=1.0.104"
+audio_buffers = { path = "../audio_buffers" }
+audio_analysis = { path = "../audio_analysis" }
+audio_engine = { path = "../audio_engine" }
+debussy_ui = { path = "../debussy_ui" }
+disk_streaming = { path = "../disk_streaming" }
+engine_bridge = { path = "../engine_bridge" }
+import_export = { path = "../import_export" }
+macos_platform = { path = "../macos_platform" }
+platform_interfaces = { path = "../platform_interfaces" }
+project_model = { path = "../project_model" }
+project_storage = { path = "../project_storage" }
+signal_graph = { path = "../signal_graph" }
+wav_files = { path = "../wav_files" }
+
+[lints]
+workspace = true
