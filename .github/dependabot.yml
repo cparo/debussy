@@ -1,0 +1,10 @@
+# Proposes updates to the SHA-pinned actions in .github/workflows/ (ADR-0033). Cargo dependencies
+# are deliberately not managed here: each Cargo.lock change is a buy/build decision for a human.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
