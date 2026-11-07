@@ -50,6 +50,26 @@ is set per connection ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes
 
 Mono signals are panned into stereo with a -3 dB constant-power pan law ([ADR-0018](../adrs/0018-panning-uses-a-3-db-constant-power-law.md)).
 
+## Mixer
+
+A mixer is an ordinary node; a project may have any number of them. A mixer has one or more
+channels, each with one mono input, and one stereo output. Channel N's input is port N − 1, named
+`channel N`; the output is named `main`. A mixer of more channels replaces it with the same id
+(see "Processing graph"); channels are only ever added at the end.
+
+Each channel has three parameters, by name:
+
+| Name | Range | Default | Meaning |
+|---|---|---|---|
+| `channel N gain` | −96 to +12 | 0 | Gain in dB; −96 is silence |
+| `channel N pan` | −1 to 1 | 0 | Pan position, under the pan law in "Panning" |
+| `channel N mode` | 0 to 2 | 0 | 0 plays, 1 is muted, 2 is soloed; read rounded to the nearest whole number |
+
+Mute and solo are one parameter, so a channel is never both. Solo acts within its own mixer: while
+any channel of a mixer is soloed, only its soloed channels play. Gain, pan, mute and solo changes
+ramp like any parameter. A mono mix of a mixer is made by connecting its output to a mono input
+(see "Channel layouts") ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)).
+
 ## Effect nodes
 
 Effects are built-in nodes. The effect node interface must not assume an effect is built in: it

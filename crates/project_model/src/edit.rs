@@ -67,14 +67,23 @@ pub enum Edit {
     },
     /// Removes a routing node, which must have no connections.
     RemoveNode(NodeId),
-    /// Sets an effect parameter, or with `None` returns it to its default.
+    /// Sets an effect or mixer parameter, or with `None` returns it to its default.
     SetParameter {
-        /// The effect node.
+        /// The effect or mixer node.
         node: NodeId,
         /// The parameter's name.
         name: String,
         /// The value.
         value: Option<f32>,
+    },
+    /// Sets a mixer's number of channels. Channels are added at the end; fewer channels, as when
+    /// undoing an addition, are refused while a removed channel is connected. Parameter values
+    /// are kept as they are.
+    SetMixerChannels {
+        /// The mixer node.
+        node: NodeId,
+        /// The number of channels, at least 1.
+        channels: usize,
     },
     /// Sets a feedback delay's time.
     SetDelay {
@@ -193,7 +202,9 @@ impl Edit {
                     return Err(Error::InvalidValue);
                 }
                 let index = node_index(state, node)?;
-                let NodeKind::Effect { parameters, .. } = &mut state.nodes[index].kind else {
+                let (NodeKind::Effect { parameters, .. } | NodeKind::Mixer { parameters, .. }) =
+                    &mut state.nodes[index].kind
+                else {
                     return Err(Error::WrongNodeKind(node));
                 };
                 let old = match value {
@@ -204,6 +215,26 @@ impl Edit {
                     node,
                     name,
                     value: old,
+                })
+            }
+            Edit::SetMixerChannels { node, channels } => {
+                routing::check_channels(channels)?;
+                let endpoint = Endpoint::Node(node);
+                let removed = |c: &Connection| c.to == endpoint && c.input >= channels;
+                if state.connections.iter().any(removed) {
+                    return Err(Error::StillConnected(endpoint));
+                }
+                let index = node_index(state, node)?;
+                let NodeKind::Mixer {
+                    channels: current, ..
+                } = &mut state.nodes[index].kind
+                else {
+                    return Err(Error::WrongNodeKind(node));
+                };
+                let old = std::mem::replace(current, channels);
+                Ok(Edit::SetMixerChannels {
+                    node,
+                    channels: old,
                 })
             }
             Edit::SetDelay { node, seconds } => {
@@ -323,13 +354,18 @@ fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
 }
 
 /// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
-/// not known to the model and are checked by `signal_graph`.
+/// not known to the model and are checked by `signal_graph`; a mixer has an input per channel and
+/// one output.
 fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
         Endpoint::Track(_) => output && port == 0,
         Endpoint::Output => !output && port == 0,
         Endpoint::Node(id) => match state.node(id).map(|node| &node.kind) {
             Some(NodeKind::Effect { .. }) => true,
+            Some(NodeKind::Mixer { channels, .. }) => match output {
+                true => port == 0,
+                false => port < *channels,
+            },
             Some(NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. }) => port == 0,
             None => false,
         },

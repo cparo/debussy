@@ -43,7 +43,7 @@ or into a new project, which copies the audio files it references ([ADR-0012](..
 
 The project's routing is part of its editable state, in the same undo history and named versions as
 its tracks. Each track is a source with one output of the track's layout. Every project has one
-stereo output, which cannot be removed. Other nodes are effects, buses and feedback delays joined
+stereo output, which cannot be removed. Other nodes are effects, mixers, buses and feedback delays joined
 by connections ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
 
 A new track is connected to the output, panned centre, in the same undo step, and removing a track
@@ -52,6 +52,10 @@ values keyed by name; an unknown kind id is kept and plays as silence. A paramet
 undo step per completed gesture. The model checks that a connection's endpoints exist, that the
 output is never a source and a track never a target, and that no connection is duplicated; effect
 ports and cycles are checked by `signal_graph` before an edit is recorded ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
+
+A mixer is its own node kind, saved as its channel count with its non-default parameter values
+keyed by name (see `docs/architecture/signal-graph.md` "Mixer"). Its channel count only grows; the
+model checks its ports and refuses to drop a connected channel when an undo shrinks it ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)).
 
 ## Project bundle
 

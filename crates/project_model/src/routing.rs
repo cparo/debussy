@@ -56,6 +56,14 @@ pub enum NodeKind {
         /// Parameter values by name.
         parameters: BTreeMap<String, f32>,
     },
+    /// A mixer (`docs/architecture/signal-graph.md` "Mixer"): `channels` mono inputs and one
+    /// stereo output, with the parameter values that differ from their defaults, by name.
+    Mixer {
+        /// The number of channels, at least 1.
+        channels: usize,
+        /// Parameter values by name, such as `"channel 1 gain"`.
+        parameters: BTreeMap<String, f32>,
+    },
     /// A bus: one input and one output of `layout`, summing what is connected to it.
     Bus(Layout),
     /// A feedback delay of `seconds`, with one input and one output of `layout`.
@@ -121,12 +129,33 @@ impl Connection {
 /// Checks a node's own values.
 pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
     match &node.kind {
-        NodeKind::Effect { parameters, .. } => match parameters.values().all(|v| v.is_finite()) {
-            true => Ok(()),
-            false => Err(Error::InvalidValue),
-        },
+        NodeKind::Effect { parameters, .. } => check_parameters(parameters),
+        NodeKind::Mixer {
+            channels,
+            parameters,
+        } => {
+            check_channels(*channels)?;
+            check_parameters(parameters)
+        }
         NodeKind::Bus(_) => Ok(()),
         NodeKind::FeedbackDelay { seconds, .. } => check_delay(*seconds),
+    }
+}
+
+/// Checks that every parameter value is finite.
+fn check_parameters(parameters: &BTreeMap<String, f32>) -> Result<(), Error> {
+    match parameters.values().all(|v| v.is_finite()) {
+        true => Ok(()),
+        false => Err(Error::InvalidValue),
+    }
+}
+
+/// Checks a mixer has at least one channel. The upper limit is the mixer node's, checked when the
+/// routing reaches the running graph.
+pub(crate) fn check_channels(channels: usize) -> Result<(), Error> {
+    match channels {
+        0 => Err(Error::InvalidValue),
+        _ => Ok(()),
     }
 }
 
