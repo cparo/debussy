@@ -21,6 +21,9 @@ pub enum Error {
     /// Reading a clip's stored audio failed.
     #[error("reading clip audio failed: {0}")]
     ClipAudio(Box<dyn std::error::Error + Send + Sync>),
+    /// The destination of an offline render failed.
+    #[error("writing the render failed: {0}")]
+    Output(Box<dyn std::error::Error + Send + Sync>),
     /// A clip refers to audio it cannot play.
     #[error("clip {index} is invalid: {reason}")]
     InvalidClip {
