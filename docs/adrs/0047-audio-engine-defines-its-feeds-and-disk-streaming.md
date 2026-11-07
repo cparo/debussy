@@ -1,7 +1,7 @@
 # ADR-0047 — audio_engine defines its feeds, and disk_streaming implements them
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-07
 - **Issue:** #50
 - **Architecture:** [Clip playback](../architecture/engine.md#clip-playback)
