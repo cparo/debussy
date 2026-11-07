@@ -369,6 +369,16 @@ impl Graph {
         self.retired.drain().for_each(drop);
     }
 
+    /// Every node's id, in id order.
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes.keys().copied()
+    }
+
+    /// Every connection, in id order.
+    pub fn connections(&self) -> impl Iterator<Item = (ConnectionId, &Connection)> + '_ {
+        self.connections.iter().map(|(id, c)| (*id, c))
+    }
+
     /// The latency from sources to sinks of the last committed plan, in frames.
     pub fn latency(&self) -> usize {
         self.latency
