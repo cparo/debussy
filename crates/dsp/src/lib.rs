@@ -10,6 +10,8 @@
 //! - `noise`: [`Noise`], a seeded pseudo-random generator for dither.
 //! - `dither`: [`Ditherer`], TPDF dither and quantisation to 16 or 24 bits (ADR-0025).
 //! - `level`: gain in decibels, the −3 dB pan law (ADR-0018) and the mono fold-down (ADR-0030).
+//! - `fft`: [`Fft`] and [`RealFft`], radix-2 transforms, and [`Stft`], Hann-windowed spectra
+//!   (ADR-0039).
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `error`: [`Error`].
 
@@ -17,12 +19,16 @@
 
 mod dither;
 mod error;
+mod fft;
 mod level;
 mod noise;
 mod resample;
 
 pub use dither::{Depth, Ditherer};
 pub use error::Error;
+pub use fft::{
+    Complex, Fft, MAX_SIZE as MAX_FFT_SIZE, MIN_SIZE as MIN_FFT_SIZE, RealFft, Stft, hann,
+};
 pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
