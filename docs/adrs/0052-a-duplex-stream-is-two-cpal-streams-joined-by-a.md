@@ -1,7 +1,7 @@
 # ADR-0052 — A duplex stream is two cpal streams joined by a sample ring
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-07
 - **Issue:** #52
 - **Architecture:** [Audio device I/O](../architecture/platform.md#audio-device-io)
