@@ -1,0 +1,17 @@
+[package]
+name = "platform_interfaces"
+description = "The traits a platform implements: audio devices and compressed-audio codecs."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = "2.0.21"
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
+
+[lints]
+workspace = true
