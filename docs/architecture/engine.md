@@ -13,6 +13,13 @@ in a project is stored at that rate; imported audio is resampled to it once, on 
 output or input device cannot run at the project rate, the engine converts at the device
 boundary ([ADR-0006](../adrs/0006-each-project-has-one-fixed-sample-rate.md)).
 
+Sample-rate conversion uses exact rational polyphase filtering: precomputed phases of one
+Kaiser-windowed sinc, stepped by a phase accumulator, with no coefficient interpolation and a ratio
+fixed when the converter is made. Import uses a preset flat to `0.4535 × f_min` within ±0.01 dB with
+at least 120 dB stopband attenuation; real-time device conversion uses a shorter preset with at
+least 96 dB. There is no clock-drift correction: input and output must share a clock. Every
+converter reports its latency to delay compensation ([ADR-0036](../adrs/0036-sample-rate-conversion-is-exact-rational-polyphase.md)).
+
 ## Buffer size
 
 The engine processes audio in blocks of a user-adjustable size from 32 to 1024 frames, defaulting

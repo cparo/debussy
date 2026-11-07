@@ -31,6 +31,7 @@ name = "dsp"
 version = "0.0.0"
 dependencies = [
  "realtime_guard",
+ "thiserror",
 ]
 
 [[package]]
