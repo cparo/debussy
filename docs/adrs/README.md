@@ -59,4 +59,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0033](0033-github-actions-are-pinned-to-commit-shas-and.md) | GitHub Actions are pinned to commit SHAs and updated by Dependabot | Accepted | [Commit gate](../architecture/tooling.md#commit-gate) |
 | [ADR-0034](0034-disk-streaming-reads-2-s-ahead-on-one-thread.md) | Disk streaming reads 2 s ahead on one thread, primes before playing, and reports underruns | Accepted | [Disk streaming](../architecture/engine.md#disk-streaming) |
 | [ADR-0035](0035-the-dither-noise-source-is-xorshift64-seeded-by.md) | The dither noise source is xorshift64* seeded by SplitMix64 | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0036](0036-sample-rate-conversion-is-exact-rational-polyphase.md) | Sample-rate conversion is exact rational polyphase filtering without drift correction | Accepted | [Sample rate](../architecture/engine.md#sample-rate) |
 
