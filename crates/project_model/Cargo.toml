@@ -1,6 +1,6 @@
 [package]
 name = "project_model"
-description = "Tracks, clips, edits as undoable commands, and named versions."
+description = "Tracks, clips, routing, edits as undoable commands, and named versions."
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 audio_buffers = { path = "../audio_buffers" }
+signal_graph = { path = "../signal_graph" }
 thiserror = "2.0.21"
 
 [lints]

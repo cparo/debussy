@@ -1,5 +1,6 @@
 //! The crate's error type.
 
+use crate::routing::{ConnectionId, Endpoint, NodeId};
 use crate::types::{ClipId, TrackId};
 
 /// Why an edit was refused. A refused edit leaves the project unchanged.
@@ -59,4 +60,32 @@ pub enum Error {
     /// A named version with this name already exists.
     #[error("a version named {0:?} already exists")]
     VersionExists(String),
+    /// No routing node has this id.
+    #[error("no {0}")]
+    UnknownNode(NodeId),
+    /// No connection has this id.
+    #[error("no {0}")]
+    UnknownConnection(ConnectionId),
+    /// A routing node with this id already exists.
+    #[error("{0} already exists")]
+    NodeExists(NodeId),
+    /// A connection with this id already exists.
+    #[error("{0} already exists")]
+    ConnectionExists(ConnectionId),
+    /// The same ports are already connected.
+    #[error("those ports are already connected")]
+    AlreadyConnected,
+    /// A connection out of the project output, into a track, or to a port a track, bus, delay or
+    /// the output does not have.
+    #[error("no such port on {0:?}")]
+    NoSuchPort(Endpoint),
+    /// A track or node that still has connections cannot be removed.
+    #[error("{0:?} still has connections")]
+    StillConnected(Endpoint),
+    /// The node is not of the kind the edit needs.
+    #[error("{0} is not of that kind")]
+    WrongNodeKind(NodeId),
+    /// A parameter value, pan or delay time that is not finite or is out of range.
+    #[error("the value is not finite or is out of range")]
+    InvalidValue,
 }

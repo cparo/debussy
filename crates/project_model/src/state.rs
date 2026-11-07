@@ -3,6 +3,7 @@
 use audio_buffers::Layout;
 
 use crate::error::Error;
+use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId};
 use crate::types::{ClipId, Source, TrackId};
 
 /// A stretch of a source placed on the timeline. All times are frames at the project rate.
@@ -117,14 +118,42 @@ impl Track {
     }
 }
 
-/// The whole editable state of a project: its tracks, in display order.
+/// The whole editable state of a project: its tracks, in display order, and its routing.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
     /// The tracks, top of the arrangement first.
     pub tracks: Vec<Track>,
+    /// The routing nodes besides tracks and the project output.
+    pub nodes: Vec<Node>,
+    /// The connections, in the order they were made.
+    pub connections: Vec<Connection>,
 }
 
 impl State {
+    /// A routing node, by id.
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        self.nodes.iter().find(|node| node.id == id)
+    }
+
+    /// A connection, by id.
+    pub fn connection(&self, id: ConnectionId) -> Option<&Connection> {
+        self.connections.iter().find(|c| c.id == id)
+    }
+
+    /// Whether `endpoint` exists: the output always does.
+    pub fn has_endpoint(&self, endpoint: Endpoint) -> bool {
+        match endpoint {
+            Endpoint::Track(id) => self.track(id).is_some(),
+            Endpoint::Output => true,
+            Endpoint::Node(id) => self.node(id).is_some(),
+        }
+    }
+
+    /// The connections to or from `endpoint`.
+    pub fn connections_of(&self, endpoint: Endpoint) -> impl Iterator<Item = &Connection> {
+        self.connections.iter().filter(move |c| c.touches(endpoint))
+    }
+
     /// A track, by id.
     pub fn track(&self, id: TrackId) -> Option<&Track> {
         self.tracks.iter().find(|track| track.id == id)

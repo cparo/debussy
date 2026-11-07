@@ -4,7 +4,12 @@
 use std::error::Error as StdError;
 
 use audio_buffers::Layout;
-use project_model::{AudioFile, Clip, ClipId, Edit, Session, Source, State, TrackId};
+use std::collections::BTreeMap;
+
+use project_model::{
+    AudioFile, Clip, ClipId, ConnectionId, Edit, Endpoint, NodeId, NodeKind, Session, Source,
+    State, TrackId,
+};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -76,6 +81,40 @@ fn some_track(rng: &mut Rng, state: &State) -> Option<(TrackId, Layout)> {
     })
 }
 
+fn some_node(rng: &mut Rng, state: &State) -> Option<NodeId> {
+    let nodes = &state.nodes;
+    (!nodes.is_empty()).then(|| nodes[rng.index(nodes.len())].id)
+}
+
+fn some_connection(rng: &mut Rng, state: &State) -> Option<ConnectionId> {
+    let connections = &state.connections;
+    (!connections.is_empty()).then(|| connections[rng.index(connections.len())].id)
+}
+
+/// Any endpoint, existing or not, so some connections are refused.
+fn some_endpoint(rng: &mut Rng, state: &State) -> Endpoint {
+    match rng.below(4) {
+        0 => Endpoint::Output,
+        1 => some_track(rng, state).map_or(Endpoint::Output, |(id, _)| Endpoint::Track(id)),
+        2 => some_node(rng, state).map_or(Endpoint::Output, Endpoint::Node),
+        _ => Endpoint::Node(NodeId(rng.below(1_000))),
+    }
+}
+
+fn node_kind(rng: &mut Rng, layout: Layout) -> NodeKind {
+    match rng.below(3) {
+        0 => NodeKind::Bus(layout),
+        1 => NodeKind::FeedbackDelay {
+            layout,
+            seconds: rng.below(12_000) as f64 / 1_000.0,
+        },
+        _ => NodeKind::Effect {
+            kind: "eq".into(),
+            parameters: BTreeMap::new(),
+        },
+    }
+}
+
 fn some_clip(rng: &mut Rng, state: &State) -> Option<ClipId> {
     let clips: Vec<ClipId> = state
         .tracks
@@ -96,7 +135,9 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
     };
     let track = some_track(rng, &state);
     let clip_id = some_clip(rng, &state);
-    let result = match (rng.below(11), track, clip_id) {
+    let node = some_node(rng, &state);
+    let connection = some_connection(rng, &state);
+    let result = match (rng.below(18), track, clip_id) {
         (0, _, _) => session.add_track("t", layout).map(|_| ()),
         (1 | 2, Some((track, layout)), _) => {
             let clip = clip(rng, layout);
@@ -111,7 +152,7 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
             session.set_clip(id, clip(rng, layout))
         }
         (5, _, Some(id)) => session.apply(Edit::RemoveClip(id)),
-        (6, Some((track, _)), _) => session.apply(Edit::RemoveTrack(track)),
+        (6, Some((track, _)), _) => session.remove_track(track),
         (7, Some((track, _)), _) => session.apply(Edit::MoveTrack {
             track,
             index: rng.index(state.tracks.len() + 1),
@@ -130,6 +171,41 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
             let name = format!("v{}", 1 + rng.below(u64::from(*versions)));
             session.restore_version(&name)
         }
+        (11, _, _) => session.add_node(node_kind(rng, layout)).map(|_| ()),
+        (12, _, _) => match node {
+            Some(node) => session.remove_node(node),
+            None => return false,
+        },
+        (13, _, _) => {
+            let (from, to) = (some_endpoint(rng, &state), some_endpoint(rng, &state));
+            let (output, input) = (rng.index(2), rng.index(2));
+            session.connect(from, output, to, input).map(|_| ())
+        }
+        (14, _, _) => match connection {
+            Some(id) => session.apply(Edit::Disconnect(id)),
+            None => return false,
+        },
+        (15, _, _) => match node {
+            Some(node) => {
+                let value = (rng.below(3) > 0).then(|| rng.below(100) as f32 / 10.0);
+                session.set_parameter(node, &format!("p{}", rng.below(3)), value)
+            }
+            None => return false,
+        },
+        (16, _, _) => match connection {
+            Some(connection) => session.apply(Edit::SetPan {
+                connection,
+                pan: rng.below(25) as f32 / 10.0 - 1.2,
+            }),
+            None => return false,
+        },
+        (17, _, _) => match node {
+            Some(node) => session.apply(Edit::SetDelay {
+                node,
+                seconds: rng.below(12_000) as f64 / 1_000.0,
+            }),
+            None => return false,
+        },
         _ => return false,
     };
     result.is_ok()
