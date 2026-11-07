@@ -7,7 +7,7 @@ use audio_buffers::Layout;
 
 use crate::edit::Edit;
 use crate::error::Error;
-use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
+use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Side};
 use crate::state::{Clip, State, Track};
 use crate::types::{ClipId, TrackId};
 
@@ -109,30 +109,151 @@ impl Session {
         ClipId(self.take_id())
     }
 
-    /// Adds an empty track of `layout` after the others, connected to the project output (a
-    /// mono track panned centre), as one step.
+    /// A new project: no tracks, and one mixer feeding the project output, which new tracks
+    /// join (ADR-0058). The history starts empty.
+    pub fn new_project() -> Self {
+        let mut session = Session::new();
+        // Neither can fail on an empty state.
+        if let Ok(mixer) = session.add_node(NodeKind::Mixer {
+            channels: 1,
+            parameters: BTreeMap::new(),
+        }) {
+            let _ = session.connect(Endpoint::Node(mixer), 0, Endpoint::Output, 0);
+        }
+        Session::open(session.state, BTreeMap::new())
+    }
+
+    /// Adds an empty track of `layout` after the others, as one step. With a project mixer
+    /// ([`State::project_mixer`]) it joins it: a mono track on the first free channel, a
+    /// stereo track's left and right on two channels panned hard left and right, adding
+    /// channels as needed (ADR-0058). Without one it connects straight to the project output.
     ///
     /// # Errors
     ///
     /// None in practice; see [`Session::apply`].
     pub fn add_track(&mut self, name: &str, layout: Layout) -> Result<TrackId, Error> {
+        let (id, edits) = self.new_track_edits(name, layout);
+        self.apply(Edit::Batch(edits))?;
+        Ok(id)
+    }
+
+    /// Adds a track as [`Session::add_track`] does, holding `clip`, as one step: an import.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::add_clip`] for a clip that does not fit the track.
+    pub fn add_track_with_clip(
+        &mut self,
+        name: &str,
+        layout: Layout,
+        clip: Clip,
+    ) -> Result<(TrackId, ClipId), Error> {
+        let (id, mut edits) = self.new_track_edits(name, layout);
+        let clip_id = self.new_clip_id();
+        edits.push(Edit::InsertClip {
+            track: id,
+            layer: 0,
+            id: clip_id,
+            clip,
+        });
+        self.apply(Edit::Batch(edits))?;
+        Ok((id, clip_id))
+    }
+
+    /// The edits that add a new track and route it, and its id.
+    fn new_track_edits(&mut self, name: &str, layout: Layout) -> (TrackId, Vec<Edit>) {
         let id = self.new_track_id();
         let index = self.state.tracks.len();
         let track = Track::new(id, name, layout);
-        let connection = Connection::new(
-            self.new_connection_id(),
-            Endpoint::Track(id),
-            0,
-            Endpoint::Output,
-            0,
-        );
-        self.apply(Edit::Batch(vec![
-            Edit::InsertTrack { index, track },
-            Edit::Connect {
-                index: self.state.connections.len(),
-                connection,
-            },
-        ]))?;
+        let mut edits = vec![Edit::InsertTrack { index, track }];
+        // New connections go at the end of the list, one after another.
+        let mut next_index = self.state.connections.len();
+        match self.state.project_mixer() {
+            Some(mixer) => {
+                let sides: &[(Option<Side>, f32)] = match layout {
+                    Layout::Mono => &[(None, 0.0)],
+                    Layout::Stereo => &[(Some(Side::Left), -1.0), (Some(Side::Right), 1.0)],
+                };
+                let mut free = self.state.free_mixer_channels(mixer);
+                let channels = match self.state.node(mixer).map(|n| &n.kind) {
+                    Some(NodeKind::Mixer { channels, .. }) => *channels,
+                    _ => 0,
+                };
+                let missing = sides.len().saturating_sub(free.len());
+                if missing > 0 {
+                    edits.push(Edit::SetMixerChannels {
+                        node: mixer,
+                        channels: channels + missing,
+                    });
+                    free.extend(channels..channels + missing);
+                }
+                for (&(side, pan), &channel) in sides.iter().zip(&free) {
+                    let connection = Connection::new(
+                        self.new_connection_id(),
+                        Endpoint::Track(id),
+                        0,
+                        Endpoint::Node(mixer),
+                        channel,
+                    )
+                    .with_sides(side, None);
+                    edits.push(Edit::Connect {
+                        index: next_index,
+                        connection,
+                    });
+                    next_index += 1;
+                    // A free channel may hold an old value; set the pan this track wants and
+                    // clear the rest.
+                    for control in ["gain", "mode"] {
+                        edits.push(Edit::SetParameter {
+                            node: mixer,
+                            name: format!("channel {} {control}", channel + 1),
+                            value: None,
+                        });
+                    }
+                    edits.push(Edit::SetParameter {
+                        node: mixer,
+                        name: format!("channel {} pan", channel + 1),
+                        value: (pan != 0.0).then_some(pan),
+                    });
+                }
+            }
+            None => {
+                let connection = Connection::new(
+                    self.new_connection_id(),
+                    Endpoint::Track(id),
+                    0,
+                    Endpoint::Output,
+                    0,
+                );
+                edits.push(Edit::Connect {
+                    index: next_index,
+                    connection,
+                });
+            }
+        }
+        (id, edits)
+    }
+
+    /// Connects `from_side` of output `output` of `from` (or the whole port, with `None`) to
+    /// `to_side` of input `input` of `to`, panned centre.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::connect`], and [`Error::SideOfMonoPort`].
+    pub fn connect_sides(
+        &mut self,
+        from: Endpoint,
+        output: usize,
+        from_side: Option<Side>,
+        to: Endpoint,
+        input: usize,
+        to_side: Option<Side>,
+    ) -> Result<ConnectionId, Error> {
+        let id = self.new_connection_id();
+        self.apply(Edit::Connect {
+            index: self.state.connections.len(),
+            connection: Connection::new(id, from, output, to, input).with_sides(from_side, to_side),
+        })?;
         Ok(id)
     }
 

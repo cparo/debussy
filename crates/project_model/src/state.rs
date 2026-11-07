@@ -3,7 +3,7 @@
 use audio_buffers::Layout;
 
 use crate::error::Error;
-use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId};
+use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::types::{ClipId, Source, TrackId};
 
 /// A stretch of a source placed on the timeline. All times are frames at the project rate.
@@ -152,6 +152,36 @@ impl State {
     /// The connections to or from `endpoint`.
     pub fn connections_of(&self, endpoint: Endpoint) -> impl Iterator<Item = &Connection> {
         self.connections.iter().filter(move |c| c.touches(endpoint))
+    }
+
+    /// The project mixer: the first mixer whose output feeds the project output. New tracks
+    /// join it (ADR-0058).
+    pub fn project_mixer(&self) -> Option<NodeId> {
+        self.nodes
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::Mixer { .. }))
+            .map(|n| n.id)
+            .find(|&id| {
+                self.connections
+                    .iter()
+                    .any(|c| c.from == Endpoint::Node(id) && c.to == Endpoint::Output)
+            })
+    }
+
+    /// Mixer `node`'s channels with nothing connected to them, lowest first.
+    pub fn free_mixer_channels(&self, node: NodeId) -> Vec<usize> {
+        let channels = match self.node(node).map(|n| &n.kind) {
+            Some(NodeKind::Mixer { channels, .. }) => *channels,
+            _ => return Vec::new(),
+        };
+        (0..channels)
+            .filter(|&ch| {
+                !self
+                    .connections
+                    .iter()
+                    .any(|c| c.to == Endpoint::Node(node) && c.input == ch)
+            })
+            .collect()
     }
 
     /// A track, by id.

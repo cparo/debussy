@@ -40,13 +40,14 @@ fn refused(error: MirrorError) -> Error {
     match error {
         MirrorError::Graph(error) => Error::Refused(error),
         MirrorError::MissingEndpoint => Error::Inconsistent,
+        MirrorError::SideOfMonoPort => Error::SideOfMonoPort,
     }
 }
 
 fn failed(error: MirrorError) -> Error {
     match error {
         MirrorError::Graph(error) => Error::Graph(error),
-        MirrorError::MissingEndpoint => Error::Inconsistent,
+        MirrorError::MissingEndpoint | MirrorError::SideOfMonoPort => Error::Inconsistent,
     }
 }
 
@@ -215,10 +216,7 @@ impl Bridge {
         &self,
         id: project_model::ConnectionId,
     ) -> Option<signal_graph::ConnectionId> {
-        self.mirror
-            .connections
-            .get(&id)
-            .map(|(graph_id, _)| *graph_id)
+        self.mirror.connections.get(&id).map(|c| c.main)
     }
 
     /// The graph node standing for a track, routing node, or (with neither) the output.
@@ -240,7 +238,7 @@ impl Bridge {
         self.mirror
             .connections
             .iter()
-            .map(|(id, (_, c))| (*id, *c))
+            .map(|(id, c)| (*id, c.target))
             .collect()
     }
 }

@@ -1,7 +1,7 @@
 # ADR-0057 — The first binary imports and exports from the command line and plays through the default output
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-07
 - **Issue:** #64
 - **Architecture:** [Application startup](../architecture/user-interface.md#application-startup)

@@ -72,6 +72,9 @@ pub enum Error {
     /// A connection with this id already exists.
     #[error("{0} already exists")]
     ConnectionExists(ConnectionId),
+    /// A connection names a side of a port that is mono.
+    #[error("{0:?} has no left or right side there: the port is mono")]
+    SideOfMonoPort(Endpoint),
     /// The same ports are already connected.
     #[error("those ports are already connected")]
     AlreadyConnected,

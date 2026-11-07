@@ -33,6 +33,16 @@ impl fmt::Display for ConnectionId {
     }
 }
 
+/// One side of a stereo port. A connection end that names a side carries only that channel,
+/// as a mono signal (ADR-0058).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Side {
+    /// The left channel.
+    Left,
+    /// The right channel.
+    Right,
+}
+
 /// One end of a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Endpoint {
@@ -99,6 +109,10 @@ pub struct Connection {
     pub input: usize,
     /// Where a mono signal entering a stereo input is panned, −1 to 1.
     pub pan: f32,
+    /// The side of a stereo output it takes, or `None` for the whole port.
+    pub from_side: Option<Side>,
+    /// The side of a stereo input it feeds, or `None` for the whole port.
+    pub to_side: Option<Side>,
 }
 
 impl Connection {
@@ -117,7 +131,16 @@ impl Connection {
             to,
             input,
             pan: 0.0,
+            from_side: None,
+            to_side: None,
         }
+    }
+
+    /// The same connection taking `from_side` of its output and feeding `to_side` of its input.
+    pub fn with_sides(mut self, from_side: Option<Side>, to_side: Option<Side>) -> Self {
+        self.from_side = from_side;
+        self.to_side = to_side;
+        self
     }
 
     /// Whether it starts or ends at `endpoint`.

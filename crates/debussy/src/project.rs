@@ -14,7 +14,7 @@ use engine_bridge::{render_graph, track_renderers};
 use import_export::{ExportChannels, ExportFormat, OfflineRender, WavDepth, export, import};
 use macos_platform::MacCodecs;
 use platform_interfaces::FlacDepth;
-use project_model::{Clip, Session, Source};
+use project_model::{Clip, Session, Source, State};
 use project_storage::Bundle;
 use signal_graph::Config;
 use wav_files::WavReader;
@@ -78,8 +78,7 @@ pub fn import_files(
             eprintln!("{} holds no audio; skipped", file.display());
             continue;
         }
-        let track = session.add_track(&name, layout)?;
-        session.add_clip(track, Clip::new(source, 0, imported.frames, 0))?;
+        session.add_track_with_clip(&name, layout, Clip::new(source, 0, imported.frames, 0))?;
         if imported.truncated {
             eprintln!(
                 "{} was shorter than its header said; imported what was there",
@@ -103,8 +102,18 @@ pub fn waveform_cache(bundle: &Bundle, name: &str) -> std::path::PathBuf {
 ///
 /// If a stored file cannot be read or a cache file written.
 pub fn build_waveform_caches(bundle: &Bundle, session: &Session) -> Result<()> {
+    let names: Vec<&str> = session.referenced_files().into_iter().collect();
+    build_waveform_caches_for(bundle, &names)
+}
+
+/// Builds the waveform summary of each stored file in `names` that has no valid one yet.
+///
+/// # Errors
+///
+/// If a stored file cannot be read or a cache file written.
+pub fn build_waveform_caches_for(bundle: &Bundle, names: &[&str]) -> Result<()> {
     std::fs::create_dir_all(bundle.cache_dir())?;
-    for name in session.referenced_files() {
+    for &name in names {
         let cache = waveform_cache(bundle, name);
         let valid = File::open(&cache)
             .ok()
@@ -134,9 +143,8 @@ pub fn build_waveform_caches(bundle: &Bundle, session: &Session) -> Result<()> {
 }
 
 /// The frame just after the last clip ends.
-fn project_end(session: &Session) -> u64 {
-    session
-        .state()
+fn project_end(state: &State) -> u64 {
+    state
         .tracks
         .iter()
         .flat_map(|t| t.clips.iter().map(|(_, c)| c.end()))
@@ -144,13 +152,13 @@ fn project_end(session: &Session) -> u64 {
         .unwrap_or(0)
 }
 
-/// Renders the whole project to `path`, in the format its extension names: `.wav` (24-bit),
+/// Renders the whole of `state` to `path`, in the format its extension names: `.wav` (24-bit),
 /// `.flac` (24-bit) or `.m4a` (AAC, 256 kbit/s).
 ///
 /// # Errors
 ///
 /// For an unknown extension, or if rendering or writing fails.
-pub fn export_mix(bundle: &Bundle, session: &Session, path: &Path, mono: bool) -> Result<()> {
+pub fn export_state(bundle: &Bundle, state: &State, path: &Path, mono: bool) -> Result<()> {
     let extension = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -162,8 +170,8 @@ pub fn export_mix(bundle: &Bundle, session: &Session, path: &Path, mono: bool) -
         other => bail!("cannot export to .{other}; use .wav, .flac or .m4a"),
     };
     let rate = bundle.sample_rate();
-    let mut graph = render_graph(session.state(), Config::new(rate, MAX_BLOCK))?;
-    let (renderers, files) = track_renderers(session.state(), &graph.sources, rate)?;
+    let mut graph = render_graph(state, Config::new(rate, MAX_BLOCK))?;
+    let (renderers, files) = track_renderers(state, &graph.sources, rate)?;
     let paths: Vec<_> = files
         .names()
         .iter()
@@ -188,7 +196,7 @@ pub fn export_mix(bundle: &Bundle, session: &Session, path: &Path, mono: bool) -
             runner: &mut graph.runner,
             output: graph.output,
             tracks: &mut tracks,
-            frames: project_end(session),
+            frames: project_end(state),
             block_frames: MAX_BLOCK,
         },
         format,

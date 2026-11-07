@@ -6,6 +6,8 @@
 
 use std::collections::BTreeSet;
 
+use audio_buffers::Layout;
+
 use crate::error::Error;
 use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, State, Track};
@@ -372,8 +374,23 @@ fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> boo
     }
 }
 
+/// The layout of a port, where the model knows it; effects' ports are `signal_graph`'s.
+fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout> {
+    match endpoint {
+        Endpoint::Track(id) => state.track(id).map(|t| t.layout),
+        Endpoint::Output => Some(Layout::Stereo),
+        Endpoint::Node(id) => match state.node(id).map(|node| &node.kind) {
+            Some(NodeKind::Mixer { .. }) => {
+                Some(if output { Layout::Stereo } else { Layout::Mono })
+            }
+            Some(NodeKind::Bus(layout) | NodeKind::FeedbackDelay { layout, .. }) => Some(*layout),
+            Some(NodeKind::Effect { .. }) | None => None,
+        },
+    }
+}
+
 /// Checks a new connection against the state: a fresh id, existing endpoints with such ports,
-/// and no duplicate.
+/// sides only of ports that may be stereo, and no duplicate.
 fn check_connection(state: &State, connection: &Connection) -> Result<(), Error> {
     if state.connection(connection.id).is_some() {
         return Err(Error::ConnectionExists(connection.id));
@@ -395,13 +412,24 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
             _ => {}
         }
     }
+    let sides = [
+        (connection.from, true, connection.from_side),
+        (connection.to, false, connection.to_side),
+    ];
+    for (endpoint, output, side) in sides {
+        if side.is_some() && port_layout(state, endpoint, output) == Some(Layout::Mono) {
+            return Err(Error::SideOfMonoPort(endpoint));
+        }
+    }
     let same = |c: &Connection| {
-        (c.from, c.output, c.to, c.input)
+        (c.from, c.output, c.from_side, c.to, c.input, c.to_side)
             == (
                 connection.from,
                 connection.output,
+                connection.from_side,
                 connection.to,
                 connection.input,
+                connection.to_side,
             )
     };
     if state.connections.iter().any(same) {
