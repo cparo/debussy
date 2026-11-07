@@ -70,6 +70,15 @@ impl Session {
         Ok(())
     }
 
+    /// Reverts the latest step and forgets it, adding nothing to the redo history; for a step
+    /// something downstream refused, such as a routing edit the running graph cannot take. The
+    /// redo history that step cleared is not restored. Returns `false` if there is nothing to
+    /// revert.
+    pub fn revert_last(&mut self) -> bool {
+        let mut discarded = Vec::new();
+        step(&mut self.state, &mut self.undo, &mut discarded)
+    }
+
     /// Undoes the latest step. Returns `false` if there is nothing to undo.
     pub fn undo(&mut self) -> bool {
         step(&mut self.state, &mut self.undo, &mut self.redo)
