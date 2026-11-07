@@ -9,6 +9,12 @@ the timeline. Every edit changes clips only.
 Audio files no longer referenced by the current state or by any named version are removed only by
 an explicit cleanup action ([ADR-0011](../adrs/0011-editing-is-non-destructive-over-immutable-audio.md)).
 
+Clip positions, offsets, lengths and fade lengths are integer frames at the project rate. A clip
+also has a gain in dB and fade-in and fade-out lengths. Where clips overlap on a track, the clip
+most recently placed or moved plays and covers the one beneath, with a short automatic crossfade
+at each edge. Each completed gesture is one undoable command; selection, zoom and scrolling are not
+edits ([ADR-0037](../adrs/0037-overlapping-clips-the-later-covers-with-a-short.md)).
+
 ## Undo history
 
 Every edit is a reversible command in an in-memory history of unlimited depth. The history belongs

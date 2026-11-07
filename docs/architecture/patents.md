@@ -8,5 +8,7 @@ in an ADR. Otherwise it must be used through a platform SDK that licenses it, or
 human through the `flag-risk` skill (tag `patent`) ([ADR-0023](../adrs/0023-expired-or-royalty-free-patents-may-be-implemented.md)).
 
 The algorithms implemented in-house under this policy, each with its evidence: TPDF dither
-([ADR-0025](../adrs/0025-wav-is-built-in-house-and-integer-exports-are.md)), and the xorshift64*
-noise source seeded by SplitMix64 ([ADR-0035](../adrs/0035-the-dither-noise-source-is-xorshift64-seeded-by.md)).
+([ADR-0025](../adrs/0025-wav-is-built-in-house-and-integer-exports-are.md)), the xorshift64*
+noise source seeded by SplitMix64 ([ADR-0035](../adrs/0035-the-dither-noise-source-is-xorshift64-seeded-by.md)),
+exact rational polyphase resampling ([ADR-0036](../adrs/0036-sample-rate-conversion-is-exact-rational-polyphase.md)), and the radix-2 FFT with
+real-input packing and the Hann-windowed STFT ([ADR-0039](../adrs/0039-the-fft-is-radix-2-cooley-tukey-with-real-input.md)).
