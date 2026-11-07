@@ -483,6 +483,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
+name = "debussy"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "audio_analysis",
+ "audio_buffers",
+ "audio_engine",
+ "debussy_ui",
+ "disk_streaming",
+ "engine_bridge",
+ "import_export",
+ "macos_platform",
+ "platform_interfaces",
+ "project_model",
+ "project_storage",
+ "signal_graph",
+ "wav_files",
+]
+
+[[package]]
 name = "debussy_ui"
 version = "0.0.0"
 dependencies = [
