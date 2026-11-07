@@ -25,3 +25,6 @@ commands a Bash call would run (quoted text and heredoc bodies are not commands)
 
 CI runs the same gate, and additionally builds and tests on both the MSRV and the pinned toolchain
 and runs `cargo deny check`.
+
+Every action a workflow uses is pinned to a full commit SHA, with its release tag in a comment.
+Dependabot proposes updates to those pins, and to nothing else ([ADR-0033](../adrs/0033-github-actions-are-pinned-to-commit-shas-and.md)).
