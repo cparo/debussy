@@ -17,6 +17,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk_streaming"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "realtime_guard",
+ "thiserror",
+ "wav_files",
+]
+
+[[package]]
 name = "dsp"
 version = "0.0.0"
 dependencies = [
