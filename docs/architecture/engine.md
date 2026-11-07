@@ -13,6 +13,12 @@ in a project is stored at that rate; imported audio is resampled to it once, on 
 output or input device cannot run at the project rate, the engine converts at the device
 boundary ([ADR-0006](../adrs/0006-each-project-has-one-fixed-sample-rate.md)).
 
+Sample-rate conversion uses a polyphase Kaiser-windowed sinc that accepts any ratio. Import uses a
+preset flat to 20 kHz within ±0.01 dB with at least 120 dB stopband attenuation; real-time device
+conversion uses a shorter preset with at least 96 dB. At the device boundary the ratio adapts to
+the FIFO fill level to absorb clock drift, and every converter reports its latency to delay
+compensation ([ADR-0036](../adrs/0036-sample-rate-conversion-uses-windowed-sinc-with-two.md)).
+
 ## Buffer size
 
 The engine processes audio in blocks of a user-adjustable size from 32 to 1024 frames, defaulting
