@@ -56,3 +56,33 @@ only as a dev-dependency.
 Each crate containing real-time code must carry a `clippy.toml` whose `disallowed-types` and
 `disallowed-methods` ban locks (`Mutex`, `RwLock`, `Condvar`), file and network I/O, sleeping,
 and printing ([ADR-0010](../adrs/0010-real-time-code-is-checked-by-an-allocator-guard.md)).
+
+## Clip playback
+
+Each track channel is one disk stream (see "Disk streaming"). Its source renders the track's clips
+from the stored files on the reader thread, not the real-time thread: where clips overlap the top
+clip plays, and at each edge of an overlap a 10 ms equal-power crossfade, inside the top clip,
+passes between it and the clip beneath, shortened to half the top clip's length if that is less.
+Clip gain and the clips' linear fades are applied there too. The real-time thread copies each
+track's streams into that track's graph source ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).
+
+`audio_engine` holds the clip renderer and defines the interfaces it is fed through: a feed per
+track channel, a handle that moves every feed, and a reader of stored audio. It does no I/O and
+does not see `project_model`. `disk_streaming` implements those interfaces over its streams and the
+stored WAV files ([ADR-0047](../adrs/0047-audio-engine-defines-its-feeds-and-disk-streaming.md)).
+
+## Transport
+
+Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last
+started. Clip and track edits are accepted only while the transport is stopped or paused; the
+engine takes the project's clips when the transport starts or jumps.
+
+A mono listening switch in the engine's output stage, after the plan, sends `(L + R) × 0.7071`
+to both output channels. It is a monitoring setting and is not saved in the project ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).
+
+## Offline render
+
+Offline render runs the same plan and clip renderer as playback, block by block, without the
+reader thread or real-time deadlines. It drops the plan's first `latency` frames, so output frame 0
+is the first frame of the requested range, and renders exactly that range. For the same project
+and range its samples equal playback's ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).

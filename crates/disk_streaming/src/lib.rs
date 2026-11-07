@@ -20,10 +20,15 @@
 //! - `playback`: [`Playback`], the real-time side.
 //! - `reader`: the reader thread.
 //! - `streamer`: [`Streamer`], the control side: start, seek, events, stop.
+//! - `engine`: the bridge to `audio_engine` (ADR-0046): [`TimelineSource`], a track channel's clips
+//!   rendered as a stream; [`WavClipAudio`], stored files read for the renderer; and the engine's
+//!   [`TrackFeed`](audio_engine::TrackFeed) and [`Streams`](audio_engine::Streams) for
+//!   [`Playback`] and [`Streamer`].
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
+mod engine;
 mod error;
 mod playback;
 mod reader;
@@ -31,6 +36,7 @@ mod shared;
 mod source;
 mod streamer;
 
+pub use engine::{TimelineSource, WavClipAudio};
 pub use error::Error;
 pub use playback::Playback;
 pub use source::{FrameSource, open_wav};

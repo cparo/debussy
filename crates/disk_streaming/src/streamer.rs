@@ -189,6 +189,16 @@ impl Streamer {
         Ok(())
     }
 
+    /// The number of streams.
+    pub fn streams(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// The length in frames of stream `stream`'s source; `None` for an unknown stream.
+    pub fn stream_frames(&self, stream: usize) -> Option<u64> {
+        self.frames.get(stream).copied()
+    }
+
     /// Underruns counted on stream `stream` so far, for the UI's notice; `None` for an unknown
     /// stream.
     pub fn underruns(&self, stream: usize) -> Option<u64> {
