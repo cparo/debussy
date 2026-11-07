@@ -3,6 +3,9 @@
 
 [graph]
 all-features = true
+# Debussy ships for macOS only; dependencies of other platforms (cpal's ALSA, Windows, Android and
+# web backends) are in Cargo.lock but never built, so they are not audited (ADR-0050).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 [advisories]
 version = 2
