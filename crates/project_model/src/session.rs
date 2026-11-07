@@ -205,6 +205,27 @@ impl Session {
         })
     }
 
+    /// Adds `count` channels to the end of a mixer, as one undo step. Existing channels keep their
+    /// connections and values.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], [`Error::WrongNodeKind`], or [`Error::InvalidValue`] if `count`
+    /// is 0 or the total would overflow.
+    pub fn add_mixer_channels(&mut self, node: NodeId, count: usize) -> Result<(), Error> {
+        let current = match self.state.node(node).map(|n| &n.kind) {
+            Some(NodeKind::Mixer { channels, .. }) => *channels,
+            Some(_) => return Err(Error::WrongNodeKind(node)),
+            None => return Err(Error::UnknownNode(node)),
+        };
+        let channels = match count {
+            0 => None,
+            _ => current.checked_add(count),
+        }
+        .ok_or(Error::InvalidValue)?;
+        self.apply(Edit::SetMixerChannels { node, channels })
+    }
+
     /// Edits that remove every connection of `endpoint`.
     fn disconnect_all(&self, endpoint: Endpoint) -> Vec<Edit> {
         self.state

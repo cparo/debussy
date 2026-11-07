@@ -17,6 +17,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio_effects"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "dsp",
+ "realtime_guard",
+ "signal_graph",
+ "thiserror",
+]
+
+[[package]]
 name = "disk_streaming"
 version = "0.0.0"
 dependencies = [

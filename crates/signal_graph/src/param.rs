@@ -86,12 +86,11 @@ impl Parameter {
     }
 }
 
-/// A parameter as a node reads it: [`Smoothed::update`] reads the value once per call to
-/// `process`, and [`Smoothed::next_value`] steps linearly towards it, reaching it [`RAMP_SECONDS`]
-/// after it changed.
+/// A value that steps linearly to each new target, reaching it [`RAMP_SECONDS`] after the target
+/// was set. A node uses it for values it derives from parameters, such as a gain that combines a
+/// level with a mute; [`Smoothed`] is one that follows a single parameter. Never allocates.
 #[derive(Debug, Clone)]
-pub struct Smoothed {
-    parameter: Parameter,
+pub struct Ramp {
     /// The value given for the latest sample.
     current: f32,
     /// The value being ramped towards.
@@ -104,16 +103,14 @@ pub struct Smoothed {
     ramp: usize,
 }
 
-impl Smoothed {
-    /// A smoothed reader of `parameter` at `sample_rate`, starting at its current value.
-    pub fn new(parameter: Parameter, sample_rate: u32) -> Self {
-        let value = parameter.get();
+impl Ramp {
+    /// A ramp at `sample_rate`, resting at `value`.
+    pub fn new(value: f32, sample_rate: u32) -> Self {
         let ramp = (f64::from(sample_rate) * RAMP_SECONDS).ceil().max(1.0);
         // Within `usize` for any `u32` rate.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let ramp = ramp as usize;
-        Smoothed {
-            parameter,
+        Ramp {
             current: value,
             target: value,
             step: 0.0,
@@ -122,9 +119,8 @@ impl Smoothed {
         }
     }
 
-    /// Reads the parameter and, if it has changed, starts a new ramp from the current value.
-    pub fn update(&mut self) {
-        let target = self.parameter.get();
+    /// Sets the target. If it has changed, starts a new ramp from the current value.
+    pub fn set_target(&mut self, target: f32) {
         if target != self.target {
             self.target = target;
             self.remaining = self.ramp;
@@ -152,9 +148,51 @@ impl Smoothed {
         self.current
     }
 
-    /// Whether the value is still moving towards the parameter.
+    /// The value being ramped towards.
+    pub fn target(&self) -> f32 {
+        self.target
+    }
+
+    /// Whether the value is still moving towards the target.
     pub fn is_ramping(&self) -> bool {
         self.remaining > 0
+    }
+}
+
+/// A parameter as a node reads it: [`Smoothed::update`] reads the value once per call to
+/// `process`, and [`Smoothed::next_value`] steps linearly towards it, reaching it [`RAMP_SECONDS`]
+/// after it changed.
+#[derive(Debug, Clone)]
+pub struct Smoothed {
+    parameter: Parameter,
+    ramp: Ramp,
+}
+
+impl Smoothed {
+    /// A smoothed reader of `parameter` at `sample_rate`, starting at its current value.
+    pub fn new(parameter: Parameter, sample_rate: u32) -> Self {
+        let ramp = Ramp::new(parameter.get(), sample_rate);
+        Smoothed { parameter, ramp }
+    }
+
+    /// Reads the parameter and, if it has changed, starts a new ramp from the current value.
+    pub fn update(&mut self) {
+        self.ramp.set_target(self.parameter.get());
+    }
+
+    /// The value for the next sample.
+    pub fn next_value(&mut self) -> f32 {
+        self.ramp.next_value()
+    }
+
+    /// The value given for the latest sample.
+    pub fn current(&self) -> f32 {
+        self.ramp.current()
+    }
+
+    /// Whether the value is still moving towards the parameter.
+    pub fn is_ramping(&self) -> bool {
+        self.ramp.is_ramping()
     }
 
     /// The parameter this reads.
@@ -220,7 +258,7 @@ mod tests {
     fn test_smoothed_restarts_from_current_value() -> Result<(), Error> {
         let parameter = gain()?;
         let mut smoothed = Smoothed::new(parameter.clone(), 100);
-        assert_eq!(smoothed.ramp, 1);
+        assert_eq!(smoothed.ramp.ramp, 1);
         let mut smoothed_slow = Smoothed::new(parameter.clone(), 1_000);
         parameter.set(2.0);
         smoothed_slow.update();
@@ -238,5 +276,19 @@ mod tests {
         smoothed.update();
         assert_eq!(smoothed.next_value(), 1.0);
         Ok(())
+    }
+
+    #[test]
+    fn test_ramp_set_target_steps_linearly() {
+        let mut ramp = Ramp::new(0.0, 1_000);
+        assert!(!ramp.is_ramping());
+        ramp.set_target(1.0);
+        assert_eq!(ramp.target(), 1.0);
+        let values: Vec<f32> = (0..10).map(|_| ramp.next_value()).collect();
+        assert!((values[4] - 0.5).abs() < 1e-6);
+        assert_eq!(values[9], 1.0);
+        assert!(!ramp.is_ramping());
+        ramp.set_target(1.0);
+        assert!(!ramp.is_ramping());
     }
 }
