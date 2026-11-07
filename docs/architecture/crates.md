@@ -34,6 +34,7 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
   frameworks. Only `debussy` may depend on `macos_platform`.
 - `debussy_ui` must not depend on I/O or platform crates; it reaches them through interfaces that
   `debussy` supplies.
+- Only `project_storage` may depend on `serde` and `serde_json` ([ADR-0048](../adrs/0048-project-files-are-serialized-with-serde-and-serde.md)).
 - `realtime_guard` may be used only as a dev-dependency.
 - Each real-time core crate carries the `clippy.toml` required by `docs/architecture/engine.md`
   "Real-time thread".
