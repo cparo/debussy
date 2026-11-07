@@ -73,4 +73,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0047](0047-audio-engine-defines-its-feeds-and-disk-streaming.md) | audio_engine defines its feeds, and disk_streaming implements them | Accepted | [Clip playback](../architecture/engine.md#clip-playback) |
 | [ADR-0048](0048-project-files-are-serialized-with-serde-and-serde.md) | Project files are serialized with serde and serde_json | Accepted | [Dependency rules](../architecture/crates.md#dependency-rules) |
 | [ADR-0049](0049-saved-projects-use-their-own-format-types-crash.md) | Saved projects use their own format types, crash-safe renames, timestamped versions and checked loads | Accepted | [Saved format](../architecture/project.md#saved-format) |
+| [ADR-0050](0050-cpal-is-added-and-dependency-audits-cover-apple.md) | cpal is added and dependency audits cover Apple targets only | Accepted | [Dependency licences](../architecture/licensing.md#dependency-licences) |
+| [ADR-0051](0051-audiotoolbox-codecs-use-objc2-bindings-unsafe.md) | AudioToolbox codecs use objc2 bindings, unsafe confined to sys, and checked in-process decoding | Accepted | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
+| [ADR-0052](0052-a-duplex-stream-is-two-cpal-streams-joined-by-a.md) | A duplex stream is two cpal streams joined by a sample ring | Accepted | [Audio device I/O](../architecture/platform.md#audio-device-io) |
 
