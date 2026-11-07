@@ -63,12 +63,43 @@ A project is a directory named `<name>.debussy`, presented by macOS as a single 
 containing:
 
 - `project.json` — the current state, with an integer `format_version` field;
-- `versions/` — one JSON file per named version, in the same format as `project.json`;
+- `versions/` — one JSON file per named version, in the same format as `project.json`, named by
+  the version's ISO 8601 basic UTC stamp with milliseconds (`20261107T153012.345Z.json`) and
+  holding its name;
 - `audio/` — the project's audio files;
 - `cache/` — derived data such as waveform summaries, which may be deleted at any time and
   regenerated.
 
 A reader must refuse a `format_version` newer than it supports and must migrate older ones ([ADR-0013](../adrs/0013-a-project-is-a-bundle-directory-with-versioned.md)).
+
+## Saved format
+
+`project.json` and version files are JSON of the format types in `project_storage`, not of the
+model's own types. Every field is required except a version's `name` and `saved_at`, which only
+version files carry; unknown fields are refused. The file holds `format_version`, `sample_rate`,
+`tracks` (top first, each with its clips bottom layer first), `nodes` and `connections`. Times are
+frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+
+## Saving
+
+Every file is written to `<file>.tmp` in the same directory, synced, renamed over the old file,
+and the directory synced. A `.tmp` file found on open is deleted. A save writes `project.json`,
+writes only new or changed versions, and deletes the files of removed ones ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+
+## Loading
+
+A project file is untrusted input. Load refuses a file over 64 MB, nesting deeper than 64 levels,
+more than 10,000 tracks, 1,000,000 clips, 10,000 nodes, 100,000 connections or 10,000 versions,
+a sample rate outside the four project rates, names over 1024 bytes, and audio file names that are
+not plain names inside `audio/`. Every clip is checked against its track, ids must be unique, and
+every connection must join existing endpoints, never from the output or into a track, with a pan
+from −1 to 1. Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+
+## Cleanup
+
+Audio files in `audio/` that neither the current state nor any version uses are deleted when a
+project is opened and when it is closed, never while it is open, so undo can always reach its
+audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Stored audio
 
