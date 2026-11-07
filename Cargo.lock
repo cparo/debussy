@@ -37,11 +37,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio_engine"
+version = "0.0.0"
+dependencies = [
+ "audio_buffers",
+ "dsp",
+ "realtime_guard",
+ "signal_graph",
+ "thiserror",
+]
+
+[[package]]
 name = "disk_streaming"
 version = "0.0.0"
 dependencies = [
  "audio_buffers",
+ "audio_engine",
  "realtime_guard",
+ "signal_graph",
  "thiserror",
  "wav_files",
 ]
