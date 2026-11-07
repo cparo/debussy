@@ -18,5 +18,5 @@ Debussy targets macOS on Apple Silicon. One-time setup per clone:
 3. Make sure `python3` is available. It runs the Claude Code commit guard in `.claude/hooks/`.
 4. Optional, matching CI: `cargo install cargo-deny --locked`, then `cargo deny check`.
 
-Then `cargo build` and `cargo test`. CLAUDE.md lists the other commands. The application binary does
-not exist yet: the roadmap is the GitHub issue labelled `wayfinder:map`.
+Then `cargo build` and `cargo test`. CLAUDE.md lists the other commands. To run the application, see
+the [user guide](docs/user/README.md); the roadmap is the GitHub issue labelled `wayfinder:map`.

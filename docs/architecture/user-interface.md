@@ -23,3 +23,11 @@ solo ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)
 While a slider is dragged its value goes straight to the running graph's parameter; releasing it
 records one undo step. A mute or solo press is one step. Undo and redo are refused while the
 transport is playing ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
+
+## Application startup
+
+`debussy` opens the project named on its command line, creating it if missing, imports any
+`--import` files as new tracks, builds missing waveform summaries, and opens the window, playing
+through the default output device, which must run at the project rate. With `--export` it renders
+the project to a file and exits instead. Command-line import and export stand in until the
+interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).

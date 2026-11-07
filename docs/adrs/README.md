@@ -80,4 +80,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0054](0054-a-new-engine-bridge-crate-keeps-the-running-graph.md) | A new engine_bridge crate keeps the running graph in step by diffing checked states | Accepted | [Routing](../architecture/project.md#routing) |
 | [ADR-0055](0055-iced-0-14-is-added-the-msrv-rises-to-1-90-and-cc0.md) | iced 0.14 is added, the MSRV rises to 1.90, and CC0 is allowed | Accepted | [UI toolkit](../architecture/user-interface.md#ui-toolkit) |
 | [ADR-0056](0056-the-interface-owns-the-session-and-reaches-i-o.md) | The interface owns the session and reaches I/O through a Services trait | Accepted | [Interface structure](../architecture/user-interface.md#interface-structure) |
+| [ADR-0057](0057-the-first-binary-imports-and-exports-from-the.md) | The first binary imports and exports from the command line and plays through the default output | Accepted | [Application startup](../architecture/user-interface.md#application-startup) |
 

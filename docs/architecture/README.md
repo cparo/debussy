@@ -127,5 +127,6 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [UI toolkit](user-interface.md#ui-toolkit)
   - [Interface structure](user-interface.md#interface-structure)
   - [Gestures](user-interface.md#gestures)
+  - [Application startup](user-interface.md#application-startup)
 
 <!-- END GENERATED INDEX -->
