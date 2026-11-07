@@ -300,7 +300,7 @@ impl<R: Read + Seek> OverviewReader<R> {
     ///
     /// [`Error::BufferLength`] unless `out` holds a whole number of columns; [`Error::Io`].
     pub fn read_columns(&mut self, first: u64, out: &mut [u8]) -> Result<usize, Error> {
-        if out.len() % BINS != 0 {
+        if !out.len().is_multiple_of(BINS) {
             return Err(Error::BufferLength {
                 expected: BINS,
                 found: out.len(),

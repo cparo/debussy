@@ -79,11 +79,11 @@ impl Runner {
     /// that is full, it is held, and no further plan is taken until it has gone.
     fn swap_plans(&mut self) {
         loop {
-            if let Some(old) = self.waiting.take() {
-                if let Err(old) = self.retire.try_push(old) {
-                    self.waiting = Some(old);
-                    return;
-                }
+            if let Some(old) = self.waiting.take()
+                && let Err(old) = self.retire.try_push(old)
+            {
+                self.waiting = Some(old);
+                return;
             }
             let Some(mut next) = self.incoming.try_pop() else {
                 return;
