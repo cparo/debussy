@@ -57,6 +57,13 @@ A mixer is its own node kind, saved as its channel count with its non-default pa
 keyed by name (see `docs/architecture/signal-graph.md` "Mixer"). Its channel count only grows; the
 model checks its ports and refuses to drop a connected channel when an undo shrinks it ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)).
 
+The running graph follows the model through `engine_bridge`. After every change, including undo,
+redo, version restore and load, the bridge builds the new routing into a scratch graph to apply
+`signal_graph`'s rules. Only if that succeeds does it change the running graph, by the fewest calls
+from what it holds, and commit. A change the graph refuses is reverted and forgotten, leaving the
+model and the running graph as they were. An effect kind id this build does not know becomes a
+silent stand-in with stereo ports enough for its saved connections ([ADR-0054](../adrs/0054-a-new-engine-bridge-crate-keeps-the-running-graph.md)).
+
 ## Project bundle
 
 A project is a directory named `<name>.debussy`, presented by macOS as a single document,

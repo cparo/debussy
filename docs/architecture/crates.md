@@ -13,6 +13,7 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
 | `signal_graph` | real-time core | The processing graph: nodes, typed ports, cycle rules, processing plans, delay compensation, panning and summing |
 | `audio_engine` | real-time core | Running a processing plan each block: transport, clip playback from streamed buffers, recording capture, input monitoring, offline rendering |
 | `audio_analysis` | core | Waveform summaries and spectrogram data |
+| `engine_bridge` | core | The project as the engine runs it: routing kept in step with the processing graph, tracks as clip renderers ([ADR-0054](../adrs/0054-a-new-engine-bridge-crate-keeps-the-running-graph.md)) |
 | `project_model` | core | Tracks, clips, routing, edits as undoable commands, named versions |
 | `wav_files` | core | WAV and RF64 reading and writing over `Read`, `Write` and `Seek` |
 | `platform_interfaces` | core | The traits a platform implements: audio devices, compressed-audio codecs |
