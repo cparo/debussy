@@ -3,7 +3,7 @@
 use std::error::Error as StdError;
 
 use audio_buffers::Layout;
-use project_model::{AudioFile, Clip, Edit, Error, Session, Source};
+use project_model::{AudioFile, Clip, Edit, Endpoint, Error, NodeKind, Session, Source};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -219,5 +219,140 @@ fn test_edits_refuse_bad_targets() -> TestResult {
         }),
         Err(Error::TrackExists(track))
     );
+    Ok(())
+}
+
+#[test]
+fn test_new_track_is_connected_to_the_output() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("Vocals", Layout::Mono)?;
+    let connections: Vec<_> = session
+        .state()
+        .connections_of(Endpoint::Track(track))
+        .collect();
+    assert_eq!(connections.len(), 1);
+    assert_eq!(
+        (connections[0].to, connections[0].pan),
+        (Endpoint::Output, 0.0)
+    );
+    // Adding the track and its connection is one step.
+    assert!(session.undo());
+    assert_eq!(session.state(), &project_model::State::default());
+    Ok(())
+}
+
+#[test]
+fn test_remove_track_takes_its_connections_and_undoes_whole() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("Guitar", Layout::Mono)?;
+    let bus = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+    session.connect(Endpoint::Track(track), 0, Endpoint::Node(bus), 0)?;
+    session.connect(Endpoint::Node(bus), 0, Endpoint::Output, 0)?;
+    let before = session.state().clone();
+    assert_eq!(
+        session.apply(Edit::RemoveTrack(track)),
+        Err(Error::StillConnected(Endpoint::Track(track)))
+    );
+    session.remove_track(track)?;
+    assert!(session.state().track(track).is_none());
+    assert_eq!(session.state().connections.len(), 1);
+    session.undo();
+    assert_eq!(session.state(), &before);
+    Ok(())
+}
+
+#[test]
+fn test_connect_checks_endpoints() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("A", Layout::Mono)?;
+    let delay = session.add_node(NodeKind::FeedbackDelay {
+        layout: Layout::Mono,
+        seconds: 0.25,
+    })?;
+    assert_eq!(
+        session.connect(Endpoint::Output, 0, Endpoint::Node(delay), 0),
+        Err(Error::NoSuchPort(Endpoint::Output))
+    );
+    assert_eq!(
+        session.connect(Endpoint::Node(delay), 0, Endpoint::Track(track), 0),
+        Err(Error::NoSuchPort(Endpoint::Track(track)))
+    );
+    assert_eq!(
+        session.connect(Endpoint::Node(delay), 1, Endpoint::Output, 0),
+        Err(Error::NoSuchPort(Endpoint::Node(delay)))
+    );
+    assert_eq!(
+        session.connect(Endpoint::Track(track), 0, Endpoint::Output, 0),
+        Err(Error::AlreadyConnected)
+    );
+    let missing = project_model::NodeId(999);
+    assert_eq!(
+        session.connect(Endpoint::Node(missing), 0, Endpoint::Output, 0),
+        Err(Error::UnknownNode(missing))
+    );
+    Ok(())
+}
+
+#[test]
+fn test_parameters_and_delay_times_are_undoable() -> TestResult {
+    let mut session = Session::new();
+    let eq = session.add_node(NodeKind::Effect {
+        kind: "eq".into(),
+        parameters: Default::default(),
+    })?;
+    let delay = session.add_node(NodeKind::FeedbackDelay {
+        layout: Layout::Stereo,
+        seconds: 0.5,
+    })?;
+    let fresh = session.state().clone();
+    session.set_parameter(eq, "low gain", Some(3.0))?;
+    session.set_parameter(eq, "low gain", Some(-2.0))?;
+    session.apply(Edit::SetDelay {
+        node: delay,
+        seconds: 1.0,
+    })?;
+    assert_eq!(
+        session.set_parameter(delay, "x", Some(1.0)),
+        Err(Error::WrongNodeKind(delay))
+    );
+    assert_eq!(
+        session.set_parameter(eq, "low gain", Some(f32::NAN)),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        session.apply(Edit::SetDelay {
+            node: delay,
+            seconds: 11.0
+        }),
+        Err(Error::InvalidValue)
+    );
+    session.undo();
+    session.undo();
+    let NodeKind::Effect { parameters, .. } = &session.state().nodes[0].kind else {
+        return Err("not an effect".into());
+    };
+    assert_eq!(parameters.get("low gain"), Some(&3.0));
+    session.undo();
+    assert_eq!(session.state(), &fresh);
+    Ok(())
+}
+
+#[test]
+fn test_version_captures_routing() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("A", Layout::Mono)?;
+    session.save_version("dry")?;
+    let dry = session.state().clone();
+    let bus = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+    session.connect(Endpoint::Track(track), 0, Endpoint::Node(bus), 0)?;
+    session.restore_version("dry")?;
+    assert_eq!(session.state(), &dry);
+    // Within the session the bus's id stays taken, though nothing holds it now.
+    let id = session.add_node(NodeKind::Bus(Layout::Mono))?;
+    assert!(id.0 > bus.0);
+    // A reopened session avoids every id in the state and the versions.
+    let mut reopened = Session::open(session.state().clone(), session.versions().clone());
+    let reopened_id = reopened.add_node(NodeKind::Bus(Layout::Mono))?;
+    assert!(reopened_id.0 > id.0);
     Ok(())
 }
