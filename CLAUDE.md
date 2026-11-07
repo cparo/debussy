@@ -95,7 +95,8 @@ Rules:
 
 ## Rust Edition and Toolchain
 - Edition: 2024 (always specify in Cargo.toml)
-- MSRV: 1.85, declared as `rust-version = "1.85"` in Cargo.toml (the minimum for edition 2024).
+- MSRV: 1.90, declared as `rust-version = "1.90"` in Cargo.toml (raised from 1.85, the minimum for
+  edition 2024, for `iced` 0.14; ADR-0055).
   Do not use language or library features newer than the MSRV; CI builds on the MSRV as well as on
   the pinned toolchain
 - Development toolchain: a recent stable release, pinned exactly in `rust-toolchain.toml`. Raising

@@ -254,23 +254,23 @@ pub fn check(root: &Path, files: &[String]) -> Result<Vec<Problem>> {
             ));
             continue;
         };
-        if let Some(title) = &record.title {
-            if *title != row.title {
-                problems.push(Problem::at(
-                    INDEX,
-                    row.line,
-                    format!("title differs from {}: `{title}`", record.file),
-                ));
-            }
+        if let Some(title) = &record.title
+            && *title != row.title
+        {
+            problems.push(Problem::at(
+                INDEX,
+                row.line,
+                format!("title differs from {}: `{title}`", record.file),
+            ));
         }
-        if let Some((_, status)) = record.fields.get("Status") {
-            if plain(status) != row.status {
-                problems.push(Problem::at(
-                    INDEX,
-                    row.line,
-                    format!("status differs from {}: `{}`", record.file, plain(status)),
-                ));
-            }
+        if let Some((_, status)) = record.fields.get("Status")
+            && plain(status) != row.status
+        {
+            problems.push(Problem::at(
+                INDEX,
+                row.line,
+                format!("status differs from {}: `{}`", record.file, plain(status)),
+            ));
         }
     }
     for record in &records {
