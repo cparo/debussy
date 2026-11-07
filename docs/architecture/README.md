@@ -74,6 +74,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Sample rate](engine.md#sample-rate)
   - [Buffer size](engine.md#buffer-size)
   - [Audio storage](engine.md#audio-storage)
+  - [Disk streaming](engine.md#disk-streaming)
   - [Real-time thread](engine.md#real-time-thread)
 - [Import and Export](import-export.md)
   - [Formats](import-export.md#formats)
