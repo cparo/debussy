@@ -1,7 +1,7 @@
 # ADR-0040 — Sources and sinks are graph nodes, declarations are fixed when a node is added, and loop-closing connections are not compensated
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** #37
 - **Architecture:** [Delay compensation](../architecture/signal-graph.md#delay-compensation)
