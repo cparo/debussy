@@ -92,6 +92,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Editing model](project.md#editing-model)
   - [Undo history](project.md#undo-history)
   - [Named versions](project.md#named-versions)
+  - [Routing](project.md#routing)
   - [Project bundle](project.md#project-bundle)
   - [Stored audio](project.md#stored-audio)
 - [Recording](recording.md)
