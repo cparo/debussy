@@ -102,8 +102,12 @@ fn some_endpoint(rng: &mut Rng, state: &State) -> Endpoint {
 }
 
 fn node_kind(rng: &mut Rng, layout: Layout) -> NodeKind {
-    match rng.below(3) {
+    match rng.below(4) {
         0 => NodeKind::Bus(layout),
+        3 => NodeKind::Mixer {
+            channels: rng.index(3),
+            parameters: BTreeMap::new(),
+        },
         1 => NodeKind::FeedbackDelay {
             layout,
             seconds: rng.below(12_000) as f64 / 1_000.0,
@@ -137,7 +141,7 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
     let clip_id = some_clip(rng, &state);
     let node = some_node(rng, &state);
     let connection = some_connection(rng, &state);
-    let result = match (rng.below(18), track, clip_id) {
+    let result = match (rng.below(19), track, clip_id) {
         (0, _, _) => session.add_track("t", layout).map(|_| ()),
         (1 | 2, Some((track, layout)), _) => {
             let clip = clip(rng, layout);
@@ -203,6 +207,13 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
             Some(node) => session.apply(Edit::SetDelay {
                 node,
                 seconds: rng.below(12_000) as f64 / 1_000.0,
+            }),
+            None => return false,
+        },
+        (18, _, _) => match node {
+            Some(node) => session.apply(Edit::SetMixerChannels {
+                node,
+                channels: rng.index(4),
             }),
             None => return false,
         },

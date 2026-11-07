@@ -356,3 +356,84 @@ fn test_version_captures_routing() -> TestResult {
     assert!(reopened_id.0 > id.0);
     Ok(())
 }
+
+#[test]
+fn test_mixer_ports_follow_its_channels() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("A", Layout::Mono)?;
+    assert_eq!(
+        session.add_node(NodeKind::Mixer {
+            channels: 0,
+            parameters: Default::default(),
+        }),
+        Err(Error::InvalidValue)
+    );
+    let mixer = session.add_node(NodeKind::Mixer {
+        channels: 2,
+        parameters: Default::default(),
+    })?;
+    let node = Endpoint::Node(mixer);
+    session.connect(Endpoint::Track(track), 0, node, 1)?;
+    session.connect(node, 0, Endpoint::Output, 0)?;
+    assert_eq!(
+        session.connect(Endpoint::Track(track), 0, node, 2),
+        Err(Error::NoSuchPort(node))
+    );
+    assert_eq!(
+        session.connect(node, 1, Endpoint::Output, 0),
+        Err(Error::NoSuchPort(node))
+    );
+    session.add_mixer_channels(mixer, 1)?;
+    session.connect(Endpoint::Track(track), 0, node, 2)?;
+    Ok(())
+}
+
+#[test]
+fn test_mixer_channels_and_parameters_are_undoable() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("A", Layout::Mono)?;
+    let mixer = session.add_node(NodeKind::Mixer {
+        channels: 1,
+        parameters: Default::default(),
+    })?;
+    let fresh = session.state().clone();
+    let channels = |session: &Session| match &session.state().nodes[0].kind {
+        NodeKind::Mixer { channels, .. } => Some(*channels),
+        _ => None,
+    };
+    session.set_parameter(mixer, "channel 1 mode", Some(2.0))?;
+    session.add_mixer_channels(mixer, 2)?;
+    assert_eq!(channels(&session), Some(3));
+    assert_eq!(
+        session.add_mixer_channels(mixer, 0),
+        Err(Error::InvalidValue)
+    );
+    let bus = session.add_node(NodeKind::Bus(Layout::Mono))?;
+    assert_eq!(
+        session.add_mixer_channels(bus, 1),
+        Err(Error::WrongNodeKind(bus))
+    );
+    session.undo();
+    session.undo();
+    assert_eq!(channels(&session), Some(1));
+    session.undo();
+    assert_eq!(session.state(), &fresh);
+    // Fewer channels are refused while a removed one is connected.
+    session.redo();
+    session.redo();
+    let connection = session.connect(Endpoint::Track(track), 0, Endpoint::Node(mixer), 2)?;
+    assert_eq!(
+        session.apply(Edit::SetMixerChannels {
+            node: mixer,
+            channels: 2,
+        }),
+        Err(Error::StillConnected(Endpoint::Node(mixer)))
+    );
+    session.apply(Edit::Disconnect(connection))?;
+    session.apply(Edit::SetMixerChannels {
+        node: mixer,
+        channels: 2,
+    })?;
+    assert_eq!(channels(&session), Some(2));
+    Ok(())
+}
