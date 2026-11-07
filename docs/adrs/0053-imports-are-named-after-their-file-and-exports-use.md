@@ -1,7 +1,7 @@
 # ADR-0053 — Imports are named after their file and exports use a reproducible dither
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-07
 - **Issue:** #53
 - **Architecture:** [Import](../architecture/import-export.md#import)
