@@ -1,0 +1,18 @@
+[package]
+name = "audio_analysis"
+description = "Waveform summaries and spectrogram data, and their cache files."
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+dsp = { path = "../dsp" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
+
+[lints]
+workspace = true
