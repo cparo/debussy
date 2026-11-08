@@ -13,6 +13,7 @@
 //! - `waveform`: track lanes from the stored files, and their canvas.
 //! - `transport`: zoom steps and the position bar.
 //! - `menu`: [`Menu`] and dropdowns.
+//! - `patch_board`: the routing laid out as nodes and wires, the port gutter and the divider.
 //! - `theme`: the palette and the light and dark themes.
 //! - `services`: [`Services`].
 
@@ -20,6 +21,7 @@
 
 mod app;
 mod menu;
+mod patch_board;
 mod services;
 mod theme;
 mod transport;
@@ -30,6 +32,7 @@ use std::sync::Mutex;
 
 pub use app::{App, Message};
 pub use menu::Menu;
+pub use patch_board::{Board, NodeBox, PORT_SPACING, Pin, Wire};
 pub use services::{DeviceChoice, ImportedTrack, Services};
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;
