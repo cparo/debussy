@@ -17,7 +17,8 @@ impl TrackFeed for Playback {
         Playback::read(self, out)
     }
 
-    fn is_primed(&self, frames: u64) -> bool {
+    fn is_primed(&mut self, frames: u64) -> bool {
+        self.discard_stale();
         Playback::is_primed(self, frames)
     }
 }
