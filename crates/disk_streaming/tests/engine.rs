@@ -168,3 +168,58 @@ fn test_streamed_playback_matches_offline_render() -> Result<(), Box<dyn Error>>
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }
+
+#[test]
+fn test_play_after_a_jump_starts_once_the_old_read_ahead_is_full() -> Result<(), Box<dyn Error>> {
+    let dir = std::env::temp_dir().join(format!("disk-streaming-jump-{}", std::process::id()));
+    let paths = write_files(&dir, 4)?;
+    let (_graph, runner, track, output) = graph()?;
+    let sources = channels()
+        .into_iter()
+        .map(
+            |clips| -> Result<Box<dyn disk_streaming::FrameSource>, Box<dyn Error>> {
+                let renderer = TrackRenderer::new(clips, RATE)?;
+                Ok(Box::new(TimelineSource::new(
+                    renderer,
+                    WavClipAudio::new(paths.clone()),
+                    RATE,
+                )))
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+    // A read-ahead well short of the sources, so the reader fills every block it has.
+    let config = StreamerConfig {
+        read_ahead: Duration::from_millis(100),
+        ..StreamerConfig::new(RATE)
+    };
+    let (mut streamer, playbacks) = Streamer::start(sources, config)?;
+    let feeds = playbacks
+        .into_iter()
+        .map(|p| -> Box<dyn TrackFeed> { Box::new(p) })
+        .collect();
+    let (mut engine, mut processor) = Engine::new(runner, output, RATE)?;
+    engine.set_tracks(vec![TrackFeeds {
+        source: track,
+        feeds,
+    }])?;
+    let mut left = vec![0.0; BLOCK];
+    let mut right = vec![0.0; BLOCK];
+    // While stopped the reader fills the read-ahead from frame 0.
+    processor.process(&mut left, &mut right)?;
+    sleep(Duration::from_millis(200));
+    engine.locate(20_000, &mut streamer)?;
+    engine.play(&mut streamer)?;
+    let mut started = false;
+    for _ in 0..200 {
+        processor.process(&mut left, &mut right)?;
+        if engine.real_time_state() == TransportState::Playing {
+            started = true;
+            break;
+        }
+        sleep(Duration::from_millis(5));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(started, "the streams never primed at the new position");
+    assert!(engine.playhead() >= 20_000);
+    Ok(())
+}

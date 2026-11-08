@@ -42,6 +42,10 @@ fn main() -> Result<()> {
     project::build_waveform_caches(&bundle, &session).context("building waveforms")?;
 
     let rate = bundle.sample_rate();
+    let name = bundle.path().file_stem().map_or_else(
+        || "Untitled".to_owned(),
+        |s| s.to_string_lossy().into_owned(),
+    );
     let (bridge, runner) = Bridge::new(session.state(), Config::new(rate, project::MAX_BLOCK))?;
     let output = bridge.output().context("the project has no output")?;
     let (engine, processor) = Engine::new(runner, output, rate)?;
@@ -60,6 +64,7 @@ fn main() -> Result<()> {
         settings_path,
     ));
     let mut app = App::new(session, rate, bridge, engine, services);
+    app.set_project_name(name);
     if let Err(error) = started {
         // The window still opens; another device can be chosen there.
         app.set_status(format!("No audio output: {error:#}"));

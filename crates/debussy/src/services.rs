@@ -6,10 +6,10 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use audio_analysis::{Bucket, WaveformReader};
+use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
-use debussy_ui::{DeviceChoice, ImportedTrack, Services};
+use debussy_ui::{DeviceChoice, ImportedTrack, Services, Spectrum, spectrum_bands};
 use disk_streaming::{FrameSource, Streamer, StreamerConfig, TimelineSource, WavClipAudio};
 use engine_bridge::track_renderers;
 use import_export::import;
@@ -17,6 +17,7 @@ use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{AppSettings, Bundle};
 use signal_graph::NodeId;
+use wav_files::WavReader;
 
 use crate::audio::AudioOutput;
 use crate::project::{build_waveform_caches_for, export_state, waveform_cache};
@@ -43,6 +44,17 @@ pub struct AppServices {
     no_streams: NoStreams,
     /// Open waveform summaries, by stored file name; `None` where there is none.
     waveforms: BTreeMap<String, Option<WaveformReader<BufReader<File>>>>,
+    /// Open stored audio files for spectrograms, by name; `None` where one cannot be read.
+    audio_files: BTreeMap<String, Option<WavReader<BufReader<File>>>>,
+    /// The spectrogram calculator and its buffers, made on first use.
+    spectrogram: Option<SpectrogramScratch>,
+}
+
+/// A spectrogram calculator with a frame's samples and levels.
+struct SpectrogramScratch {
+    spectrogram: Spectrogram,
+    samples: Vec<f32>,
+    levels: Vec<f32>,
 }
 
 impl AppServices {
@@ -62,6 +74,8 @@ impl AppServices {
             streamer: None,
             no_streams: NoStreams,
             waveforms: BTreeMap::new(),
+            audio_files: BTreeMap::new(),
+            spectrogram: None,
         }
     }
 }
@@ -129,6 +143,55 @@ impl Services for AppServices {
             Some(reader) => reader.columns(start, spc, out).unwrap_or(0),
             None => 0,
         }
+    }
+
+    fn spectrogram(&mut self, file: &str, start: u64, spc: u64, out: &mut [Spectrum]) -> usize {
+        let bundle = &self.bundle;
+        let Some(reader) = self
+            .audio_files
+            .entry(file.to_owned())
+            .or_insert_with(|| {
+                File::open(bundle.audio_dir().join(file))
+                    .ok()
+                    .and_then(|f| WavReader::new(BufReader::new(f)).ok())
+            })
+            .as_mut()
+        else {
+            return 0;
+        };
+        if self.spectrogram.is_none() {
+            self.spectrogram = Spectrogram::new()
+                .ok()
+                .map(|spectrogram| SpectrogramScratch {
+                    spectrogram,
+                    samples: vec![0.0; FRAME_SIZE],
+                    levels: vec![0.0; BINS],
+                });
+        }
+        let Some(scratch) = &mut self.spectrogram else {
+            return 0;
+        };
+        // One frame from the start of each column; stored files are mono.
+        let mut filled = 0;
+        for (column, spectrum) in out.iter_mut().enumerate() {
+            let at = start.saturating_add(column as u64 * spc);
+            if at >= reader.frames() || reader.seek(at).is_err() {
+                break;
+            }
+            let Ok(read) = reader.read(&mut [&mut scratch.samples[..]]) else {
+                break;
+            };
+            if scratch
+                .spectrogram
+                .frame_db(&scratch.samples[..read], &mut scratch.levels)
+                .is_err()
+            {
+                break;
+            }
+            spectrum_bands(&scratch.levels, spectrum);
+            filled += 1;
+        }
+        filled
     }
 
     fn save(&mut self, session: &Session) -> Result<(), String> {

@@ -13,10 +13,46 @@ engine's control side. It reaches I/O and the platform only through its `Service
 `debussy` implements: disk-streamed track feeds, moving the streams, waveform summaries, and
 saving. Its update logic runs without a window, so it is tested directly ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
 
-The first screens are the transport bar (play, pause, stop, rewind, mono listening, zoom,
-scroll, undo, redo, save, import, export, export mono, and the audio device), one waveform lane per track drawn from the stored files' summaries
-(the top clip shown where clips overlap), and a strip per mixer channel with gain, pan, mute and
-solo ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
+The window is laid out as described under [Layout](#layout).
+
+## Layout
+
+The window is a top bar, a track pane beside a right pane, and a bottom bar.
+
+- **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
+  (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
+  light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
+  switch projects), save, import, export, export mono, the audio device, and quit.
+- **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the playhead's time,
+  the status line, and the position bar.
+- **Track pane:** each track is a header (its name and a ≡ menu: rename, import audio into,
+  delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
+  or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
+  every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
+  importing into a track are refused while playing.
+- **Right pane:** the mixer's channel strips, until the patch board replaces them.
+- **Lanes** show waveforms from the waveform summaries, or spectrograms: one spectrum per four
+  waveform columns, computed on demand from the stored audio as 64 log-spaced bands.
+- **Colours:** audio signals are orange and control signals lavender in both tones; only the
+  chrome changes between light and dark. The tone follows the system's appearance at launch and
+  when it changes; the toggle is not saved.
+- **Menus** are flat buttons floated over the window; a click anywhere else closes the open menu.
+
+([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
+
+## Transport and seeking
+
+A click in a lane, or a click or drag on the position bar, seeks the playhead there, during
+playback too, and makes that frame the return point. Stop returns to the return point; pausing
+and playing again leaves it in place. A seek outside the visible window recentres the view on it.
+The position bar shows the playhead as a red bar along a grey channel over the timeline's length
+(the end of the last clip, or more to take in the window and the playhead), with ticks at the
+visible window's edges.
+
+Zoom steps by √2: two steps halve or double the time shown, from 64 to 2^24 frames per waveform
+column. Zooming keeps the playhead at the same place on screen if it is visible, otherwise the
+view's centre. A mostly sideways two-finger scroll over a lane pans the view; there is no gesture
+zoom ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md)).
 
 ## Gestures
 
