@@ -39,8 +39,8 @@ playhead, serving tracks in earliest-deadline order. Blocks reach the real-time 
 lock-free queues of `audio_buffers`.
 
 When the transport starts or jumps, playback begins only once every track has 100 ms buffered at
-the new position; until then the real-time thread outputs silence and never waits. Loop starts are
-read ahead so a loop wraps without a gap.
+the new position; until then the real-time thread outputs silence, never waits, and hands back
+the blocks read for the old position. Loop starts are read ahead so a loop wraps without a gap.
 
 A buffer that is late plays as silence. The real-time thread counts each underrun in a per-track
 atomic counter, and the UI shows a non-modal notice naming the track. Underruns never stop the

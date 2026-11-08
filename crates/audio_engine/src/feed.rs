@@ -13,8 +13,9 @@ pub trait TrackFeed: Send {
     fn read(&mut self, out: &mut [f32]) -> usize;
 
     /// Whether at least `frames` frames are ready at the current position, or everything left
-    /// is. Called on the real-time thread.
-    fn is_primed(&self, frames: u64) -> bool;
+    /// is. Called on the real-time thread while playback waits to start, so a feed may hand back
+    /// audio it holds for an earlier position here; it must not block, lock or allocate.
+    fn is_primed(&mut self, frames: u64) -> bool;
 }
 
 /// One track's feeds, one per channel (left first), and the graph source they fill.
@@ -72,7 +73,7 @@ impl<A: ClipAudio + Send> TrackFeed for RenderFeed<A> {
         out.len()
     }
 
-    fn is_primed(&self, _frames: u64) -> bool {
+    fn is_primed(&mut self, _frames: u64) -> bool {
         true
     }
 }
