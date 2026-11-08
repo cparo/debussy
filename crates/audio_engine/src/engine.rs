@@ -221,9 +221,13 @@ impl Engine {
         self.shared.mono()
     }
 
-    /// The timeline frame the real-time side will play next.
+    /// The playhead: while stopped, where stop or locate left it; otherwise the frame the
+    /// real-time side will play next.
     pub fn playhead(&self) -> u64 {
-        self.shared.playhead.load(Ordering::Acquire)
+        match self.state {
+            TransportState::Stopped => self.position,
+            _ => self.shared.playhead.load(Ordering::Acquire),
+        }
     }
 
     /// The transport as the real-time side last reported it.
