@@ -57,8 +57,9 @@ const DARK: Tokens = Tokens {
     pane: Color::from_rgb(0.4, 0.4, 0.4),
     lane: Color::BLACK,
     text: Color::WHITE,
-    face: Color::from_rgb(0.92, 0.92, 0.92),
-    face_text: Color::BLACK,
+    // Halfway between `chrome` and black.
+    face: Color::from_rgb(0.1, 0.1, 0.1),
+    face_text: Color::WHITE,
     line: Color::from_rgb(0.1, 0.1, 0.1),
     channel: Color::from_rgb(0.45, 0.45, 0.45),
 };
@@ -155,17 +156,12 @@ pub fn tool(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style 
     move |theme, status| {
         let t = tokens(tone_of(theme));
         let face = if selected { AUDIO } else { t.face };
+        let ink = if selected { Color::BLACK } else { t.face_text };
         let (background, text) = match status {
-            button::Status::Disabled => (
-                Color { a: 0.35, ..face },
-                Color {
-                    a: 0.45,
-                    ..t.face_text
-                },
-            ),
-            button::Status::Hovered => (mix(face, t.face_text, 0.08), t.face_text),
-            button::Status::Pressed => (mix(face, t.face_text, 0.18), t.face_text),
-            button::Status::Active => (face, t.face_text),
+            button::Status::Disabled => (Color { a: 0.35, ..face }, Color { a: 0.45, ..ink }),
+            button::Status::Hovered => (mix(face, ink, 0.08), ink),
+            button::Status::Pressed => (mix(face, ink, 0.18), ink),
+            button::Status::Active => (face, ink),
         };
         button::Style {
             background: Some(Background::Color(background)),
@@ -227,5 +223,20 @@ mod tests {
     fn test_mix_clamps() {
         assert_eq!(mix(Color::BLACK, Color::WHITE, 2.0), Color::WHITE);
         assert_eq!(mix(Color::BLACK, Color::WHITE, -1.0), Color::BLACK);
+    }
+
+    #[test]
+    fn test_tool_dark_unselected_is_mid_grey_with_white_text() {
+        let dark = theme(Tone::Dark);
+        let unselected = tool(false)(&dark, button::Status::Active);
+        assert_eq!(
+            unselected.background,
+            Some(Background::Color(mix(DARK.chrome, Color::BLACK, 0.5)))
+        );
+        assert_eq!(unselected.text_color, Color::WHITE);
+        assert_eq!(
+            tool(true)(&dark, button::Status::Active).text_color,
+            Color::BLACK
+        );
     }
 }
