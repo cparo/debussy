@@ -66,8 +66,8 @@ impl Processor {
         if self.state == TransportState::Starting
             && self
                 .tracks
-                .iter()
-                .flat_map(|t| t.feeds.iter())
+                .iter_mut()
+                .flat_map(|t| t.feeds.iter_mut())
                 .all(|f| f.is_primed(self.prime))
         {
             self.state = TransportState::Playing;
