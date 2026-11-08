@@ -127,6 +127,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 - [User Interface](user-interface.md)
   - [UI toolkit](user-interface.md#ui-toolkit)
   - [Interface structure](user-interface.md#interface-structure)
+  - [Layout](user-interface.md#layout)
+  - [Transport and seeking](user-interface.md#transport-and-seeking)
   - [Gestures](user-interface.md#gestures)
   - [Application startup](user-interface.md#application-startup)
   - [Files and devices](user-interface.md#files-and-devices)

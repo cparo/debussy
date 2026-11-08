@@ -11,7 +11,7 @@ use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_effects::{Control, Mode};
 use audio_engine::{Engine, Processor, Streams, TrackFeeds, TransportState};
-use debussy_ui::{App, DeviceChoice, ImportedTrack, Message, Services};
+use debussy_ui::{App, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services, Spectrum};
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
 use signal_graph::{Config, NodeId as GraphNodeId};
@@ -22,6 +22,7 @@ struct Calls {
     track_feeds: usize,
     saves: usize,
     waveform: Vec<(String, u64, u64)>,
+    spectrogram: Vec<(String, u64, u64)>,
     exports: Vec<bool>,
     device: Option<String>,
 }
@@ -63,6 +64,15 @@ impl Services for Fake {
             max: 0.5,
             rms: 0.25,
         });
+        out.len()
+    }
+
+    fn spectrogram(&mut self, file: &str, start: u64, spc: u64, out: &mut [Spectrum]) -> usize {
+        self.calls
+            .borrow_mut()
+            .spectrogram
+            .push((file.to_owned(), start, spc));
+        out.fill([-30.0; SPECTRUM_BANDS]);
         out.len()
     }
 
@@ -292,7 +302,7 @@ fn test_zoom_and_lanes_follow_the_clips() -> Result<(), Box<dyn Error>> {
     for _ in 0..30 {
         app.update(Message::ZoomIn);
     }
-    app.update(Message::Scroll(100));
+    app.update(Message::Pan(0.1));
     let last = calls
         .borrow()
         .waveform
@@ -346,5 +356,192 @@ fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     block(&mut processor)?;
     app.update(Message::Device(interface));
     assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}
+
+#[test]
+fn test_seek_sets_the_return_point_and_stop_returns_there() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::Seek(9600));
+    block(&mut processor)?;
+    assert_eq!(app.return_point(), 9600);
+    assert_eq!(app.engine().playhead(), 9600);
+    app.update(Message::Play);
+    for _ in 0..8 {
+        block(&mut processor)?;
+    }
+    // Seeking while playing plays on from there, and stop returns there.
+    app.update(Message::Seek(48_000));
+    for _ in 0..8 {
+        block(&mut processor)?;
+    }
+    assert_eq!(app.engine().real_time_state(), TransportState::Playing);
+    assert!(app.engine().playhead() > 48_000);
+    assert_eq!(app.return_point(), 48_000);
+    // Pausing and playing again does not move the return point.
+    app.update(Message::Pause);
+    block(&mut processor)?;
+    app.update(Message::Play);
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    assert_eq!(app.engine().real_time_state(), TransportState::Stopped);
+    assert_eq!(app.engine().playhead(), 48_000);
+    Ok(())
+}
+
+#[test]
+fn test_seek_out_of_view_brings_it_into_view() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let far = app.view_span() * 10;
+    app.update(Message::Seek(far));
+    assert!(app.view_start() <= far && far < app.view_start() + app.view_span());
+    Ok(())
+}
+
+#[test]
+fn test_two_zoom_steps_halve_or_double_the_time_shown() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let spc = app.samples_per_column();
+    app.update(Message::ZoomIn);
+    let step = app.samples_per_column();
+    assert!(step < spc && step > spc / 2);
+    app.update(Message::ZoomIn);
+    assert_eq!(app.samples_per_column(), spc / 2);
+    for _ in 0..4 {
+        app.update(Message::ZoomOut);
+    }
+    assert_eq!(app.samples_per_column(), spc * 2);
+    Ok(())
+}
+
+#[test]
+fn test_zoom_keeps_the_view_centre_when_the_cursor_is_out_of_view() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    // Seek ahead, then pan away so the cursor is out of view.
+    app.update(Message::Seek(2_000_000));
+    block(&mut processor)?;
+    app.update(Message::Pan(-3.0));
+    let centre = app.view_start() + app.view_span() / 2;
+    app.update(Message::ZoomIn);
+    app.update(Message::ZoomIn);
+    let after = app.view_start() + app.view_span() / 2;
+    assert!(centre.abs_diff(after) <= app.samples_per_column());
+    // With the cursor in view, it stays at the same place on screen.
+    app.update(Message::Seek(app.view_start() + app.view_span() / 4));
+    block(&mut processor)?;
+    let at = app.engine().playhead();
+    let before = (at - app.view_start()) as f64 / app.view_span() as f64;
+    app.update(Message::ZoomOut);
+    let after = (at - app.view_start()) as f64 / app.view_span() as f64;
+    assert!((before - after).abs() < 0.01);
+    Ok(())
+}
+
+#[test]
+fn test_spectrogram_display_reads_spectra_per_channel() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    app.update(Message::SetDisplay(debussy_ui::Display::Spectrogram));
+    assert_eq!(app.display(), debussy_ui::Display::Spectrogram);
+    let reads = calls.borrow().spectrogram.clone();
+    assert_eq!(reads.len(), 1);
+    // Spectrogram columns are four waveform columns wide.
+    assert_eq!(reads[0].2, 4 * app.samples_per_column());
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_tone_toggles_and_follows_the_system() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::SystemTone(debussy_ui::Tone::Light));
+    assert_eq!(app.tone(), debussy_ui::Tone::Light);
+    app.update(Message::ToggleTone);
+    assert_eq!(app.tone(), debussy_ui::Tone::Dark);
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_menus_open_toggle_and_close_on_a_choice() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::OpenMenu(debussy_ui::Menu::App));
+    assert_eq!(app.menu(), Some(debussy_ui::Menu::App));
+    let _ = app.view();
+    app.update(Message::OpenMenu(debussy_ui::Menu::App));
+    assert_eq!(app.menu(), None);
+    app.update(Message::OpenMenu(debussy_ui::Menu::AddTrack));
+    app.update(Message::Tick);
+    assert_eq!(
+        app.menu(),
+        Some(debussy_ui::Menu::AddTrack),
+        "ticks leave it open"
+    );
+    app.update(Message::AddTrack(Layout::Stereo));
+    assert_eq!(app.menu(), None);
+    Ok(())
+}
+
+#[test]
+fn test_tracks_are_added_renamed_and_deleted_as_steps() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddTrack(Layout::Stereo));
+    let track = app.session().state().tracks[1].clone();
+    assert_eq!(track.name, "Track 2");
+    assert_eq!(track.layout, Layout::Stereo);
+    app.update(Message::StartRename(track.id));
+    app.update(Message::RenameText("  Piano ".into()));
+    app.update(Message::FinishRename);
+    assert_eq!(app.session().state().tracks[1].name, "Piano");
+    // Renaming to nothing, or to the same name, is not a step.
+    app.update(Message::StartRename(track.id));
+    app.update(Message::RenameText(String::new()));
+    app.update(Message::FinishRename);
+    assert_eq!(app.session().state().tracks[1].name, "Piano");
+    // Doing something else finishes a rename.
+    app.update(Message::StartRename(track.id));
+    app.update(Message::RenameText("Keys".into()));
+    app.update(Message::ZoomIn);
+    assert_eq!(app.session().state().tracks[1].name, "Keys");
+    app.update(Message::DeleteTrack(track.id));
+    assert_eq!(app.session().state().tracks.len(), 1);
+    // Undo the delete, then the rename to Keys.
+    for _ in 0..2 {
+        app.update(Message::Undo);
+    }
+    assert_eq!(app.session().state().tracks[1].name, "Piano");
+    Ok(())
+}
+
+#[test]
+fn test_import_into_a_track_takes_files_of_its_layout() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let vocal = app.session().state().tracks[0].id;
+    app.update(Message::Seek(100_000));
+    block(&mut processor)?;
+    app.update(Message::ImportInto(vocal));
+    // The fake imports a stereo file, refused on a mono track, then a mono one.
+    let track = &app.session().state().tracks[0];
+    assert_eq!(app.session().state().tracks.len(), 1);
+    assert_eq!(track.clips.len(), 2);
+    assert_eq!(track.clips[1].1.position, 100_000);
+    assert!(app.status().is_some_and(|s| s.starts_with("Keys")));
+    Ok(())
+}
+
+#[test]
+fn test_track_edits_wait_for_the_transport_to_stop() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let vocal = app.session().state().tracks[0].id;
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::AddTrack(Layout::Mono));
+    app.update(Message::DeleteTrack(vocal));
+    app.update(Message::ImportInto(vocal));
+    assert_eq!(app.session().state().tracks.len(), 1);
+    assert!(!app.session().can_undo());
+    assert!(app.status().is_some());
     Ok(())
 }
