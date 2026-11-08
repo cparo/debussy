@@ -66,6 +66,18 @@ pub trait Services {
         out: &mut [Bucket],
     ) -> usize;
 
+    /// Writes into `out` one spectrum per column of `samples_per_column` frames of stored audio
+    /// file `file`, from frame `start`: the frame starting each column, reduced with
+    /// [`spectrum_bands`](crate::spectrum_bands). Returns how many columns hold audio; 0 if the
+    /// file cannot be read.
+    fn spectrogram(
+        &mut self,
+        file: &str,
+        start: u64,
+        samples_per_column: u64,
+        out: &mut [crate::Spectrum],
+    ) -> usize;
+
     /// Saves the project.
     ///
     /// # Errors

@@ -123,7 +123,7 @@ impl TrackFeed for StreamFeed {
         available
     }
 
-    fn is_primed(&self, _frames: u64) -> bool {
+    fn is_primed(&mut self, _frames: u64) -> bool {
         self.control.ready.load(Ordering::SeqCst)
     }
 }

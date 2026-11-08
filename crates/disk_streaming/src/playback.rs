@@ -95,6 +95,29 @@ impl Playback {
         buffered >= frames || ended
     }
 
+    /// Hands back the blocks queued for an earlier seek, up to the first one for the current
+    /// position, which is kept to play next. Until then those blocks hold the stream's pool, so
+    /// the reader could not read at the new position. Real-time safe.
+    pub fn discard_stale(&mut self) {
+        if let Some(chunk) = self.stuck.take() {
+            self.retire(chunk);
+        }
+        let generation = self.shared.generation.load(Ordering::Acquire);
+        if let Some((chunk, _)) = self.current.take_if(|(c, _)| c.generation != generation) {
+            self.retire(chunk);
+        }
+        if self.current.is_some() {
+            return;
+        }
+        while let Some(chunk) = self.chunks.try_pop() {
+            if chunk.generation == generation {
+                self.current = Some((chunk, 0));
+                return;
+            }
+            self.retire(chunk);
+        }
+    }
+
     /// Underruns counted so far.
     pub fn underruns(&self) -> u64 {
         self.shared.underruns.load(Ordering::Relaxed)
