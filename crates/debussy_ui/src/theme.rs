@@ -151,8 +151,36 @@ pub fn popup(theme: &Theme) -> container::Style {
     }
 }
 
-/// A toolbar button; `selected` marks the active side of a toggle.
-pub fn tool(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+/// Where a toolbar button sits: alone, or at one position in a [`strip`] of grouped buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// A button on its own, with its own outline.
+    Alone,
+    /// The leftmost button of a strip.
+    First,
+    /// A button between two others in a strip.
+    Middle,
+    /// The rightmost button of a strip.
+    Last,
+}
+
+impl Place {
+    /// The corner radii of a button here, rounding only the strip's outer corners by `r`.
+    fn radius(self, r: f32) -> border::Radius {
+        match self {
+            Place::Alone => border::radius(r),
+            Place::First => border::left(r),
+            Place::Middle => border::radius(0.0),
+            Place::Last => border::right(r),
+        }
+    }
+}
+
+/// The outer corner radius of a toolbar button or strip.
+const TOOL_RADIUS: f32 = 6.0;
+
+/// A toolbar button at `place`; `selected` marks the active side of a toggle.
+pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(tone_of(theme));
         let face = if selected { AUDIO } else { t.face };
@@ -163,16 +191,39 @@ pub fn tool(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style 
             button::Status::Pressed => (mix(face, ink, 0.18), ink),
             button::Status::Active => (face, ink),
         };
+        // A strip draws the outline and seams; its buttons fill the space inside its 1 px border.
+        let border = match place {
+            Place::Alone => Border {
+                color: t.line,
+                width: 1.0,
+                radius: place.radius(TOOL_RADIUS),
+            },
+            _ => Border {
+                color: t.line,
+                width: 0.0,
+                radius: place.radius(TOOL_RADIUS - 1.0),
+            },
+        };
         button::Style {
             background: Some(Background::Color(background)),
             text_color: text,
-            border: Border {
-                color: t.line,
-                width: 1.0,
-                radius: border::radius(6.0),
-            },
+            border,
             ..button::Style::default()
         }
+    }
+}
+
+/// The strip behind a group of toolbar buttons: its outline, and the seams between them.
+pub fn strip(theme: &Theme) -> container::Style {
+    let t = tokens(tone_of(theme));
+    container::Style {
+        background: Some(Background::Color(t.line)),
+        border: Border {
+            color: t.line,
+            width: 1.0,
+            radius: border::radius(TOOL_RADIUS),
+        },
+        ..container::Style::default()
     }
 }
 
@@ -228,15 +279,29 @@ mod tests {
     #[test]
     fn test_tool_dark_unselected_is_mid_grey_with_white_text() {
         let dark = theme(Tone::Dark);
-        let unselected = tool(false)(&dark, button::Status::Active);
+        let unselected = tool(false, Place::Alone)(&dark, button::Status::Active);
         assert_eq!(
             unselected.background,
             Some(Background::Color(mix(DARK.chrome, Color::BLACK, 0.5)))
         );
         assert_eq!(unselected.text_color, Color::WHITE);
         assert_eq!(
-            tool(true)(&dark, button::Status::Active).text_color,
+            tool(true, Place::Alone)(&dark, button::Status::Active).text_color,
             Color::BLACK
         );
+    }
+
+    #[test]
+    fn test_tool_place_sets_corner_radii() {
+        let dark = theme(Tone::Dark);
+        let style = |place| tool(false, place)(&dark, button::Status::Active).border;
+        assert_eq!(style(Place::Alone).radius, border::radius(6.0));
+        assert_eq!(style(Place::Alone).width, 1.0);
+        assert_eq!(style(Place::First).radius, border::left(5.0));
+        assert_eq!(style(Place::Middle).radius, border::radius(0.0));
+        assert_eq!(style(Place::Last).radius, border::right(5.0));
+        for place in [Place::First, Place::Middle, Place::Last] {
+            assert_eq!(style(place).width, 0.0);
+        }
     }
 }

@@ -41,6 +41,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
   chrome changes between light and dark. The tone follows the system's appearance at launch and
   when it changes; the toggle is not saved.
+- **Button groups** (each toggle and each set of related toolbar or dialog buttons) are drawn as
+  one strip, rounded only at its ends, with a hairline seam between buttons.
 - **Menus** are flat buttons floated over the window; a click anywhere else closes the open menu.
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
