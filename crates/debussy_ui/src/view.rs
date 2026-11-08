@@ -14,7 +14,7 @@ use project_model::{Endpoint, NodeKind, TrackId};
 use crate::app::{App, Message, NewNode};
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
-use crate::theme::{self, Tone};
+use crate::theme::{self, Place, Tone};
 use crate::transport::PositionBar;
 use crate::waveform::{Display, LaneView};
 
@@ -37,16 +37,44 @@ pub(crate) const RENAME_INPUT: &str = "rename-track";
 
 /// A button in a bar: `label`, sending `message` if there is one.
 fn tool<'a>(label: &'a str, message: Option<Message>, selected: bool) -> Element<'a, Message> {
+    button_at(label, message, selected, Place::Alone)
+}
+
+/// A toolbar button styled for `place`.
+fn button_at<'a>(
+    label: &'a str,
+    message: Option<Message>,
+    selected: bool,
+    place: Place,
+) -> Element<'a, Message> {
     button(text(label).size(13).center())
         .on_press_maybe(message)
         .padding([8, 12])
-        .style(theme::tool(selected))
+        .style(theme::tool(selected, place))
         .into()
 }
 
-/// Buttons side by side, as one group.
-fn group<'a>(buttons: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    row(buttons).spacing(2).into()
+/// Buttons side by side as one strip, each a `(label, message, selected)` as for [`tool`].
+fn group<'a>(buttons: Vec<(&'a str, Option<Message>, bool)>) -> Element<'a, Message> {
+    if let [(label, message, selected)] = buttons.as_slice() {
+        return tool(label, message.clone(), *selected);
+    }
+    let last = buttons.len().saturating_sub(1);
+    let faces = buttons
+        .into_iter()
+        .enumerate()
+        .map(|(i, (label, message, selected))| {
+            let place = match i {
+                0 => Place::First,
+                i if i == last => Place::Last,
+                _ => Place::Middle,
+            };
+            button_at(label, message, selected, place)
+        });
+    container(row(faces).spacing(1))
+        .padding(1)
+        .style(theme::strip)
+        .into()
 }
 
 impl App {
@@ -107,12 +135,12 @@ impl App {
             logo,
             gap(16.0),
             group(vec![
-                tool(
+                (
                     "Waveform",
                     Some(Message::SetDisplay(Display::Waveform)),
                     display == Display::Waveform
                 ),
-                tool(
+                (
                     "Spectrogram",
                     Some(Message::SetDisplay(Display::Spectrogram)),
                     display == Display::Spectrogram
@@ -120,12 +148,12 @@ impl App {
             ]),
             gap(16.0),
             group(vec![
-                tool(
+                (
                     "Undo",
                     (!playing && self.session().can_undo()).then_some(Message::Undo),
                     false
                 ),
-                tool(
+                (
                     "Redo",
                     (!playing && self.session().can_redo()).then_some(Message::Redo),
                     false
@@ -133,14 +161,14 @@ impl App {
             ]),
             gap(16.0),
             group(vec![
-                tool("Cut", None, false),
-                tool("Copy", None, false),
-                tool("Paste", None, false),
+                ("Cut", None, false),
+                ("Copy", None, false),
+                ("Paste", None, false),
             ]),
             gap(16.0),
             group(vec![
-                tool("−", Some(Message::ZoomOut), false),
-                tool("+", Some(Message::ZoomIn), false),
+                ("−", Some(Message::ZoomOut), false),
+                ("+", Some(Message::ZoomIn), false),
             ]),
             Space::new().width(Fill),
             text(self.project_name.clone()).size(24),
@@ -181,18 +209,18 @@ impl App {
         .height(Length::Fixed(24.0));
         let mut bar = row![
             group(vec![
-                tool("Mono", Some(Message::SetMono(true)), mono),
-                tool("Stereo", Some(Message::SetMono(false)), !mono),
+                ("Mono", Some(Message::SetMono(true)), mono),
+                ("Stereo", Some(Message::SetMono(false)), !mono),
             ]),
             gap(16.0),
             group(vec![
                 if playing {
-                    tool("Pause", Some(Message::Pause), false)
+                    ("Pause", Some(Message::Pause), false)
                 } else {
-                    tool("Play", Some(Message::Play), false)
+                    ("Play", Some(Message::Play), false)
                 },
-                tool("Stop", Some(Message::Stop), false),
-                tool("Record", None, false),
+                ("Stop", Some(Message::Stop), false),
+                ("Record", None, false),
             ]),
             gap(16.0),
             text(format!("{seconds:>8.2} s")).size(14),
@@ -264,7 +292,7 @@ impl App {
             .on_press(Message::OpenMenu(Menu::AddNode))
             .width(Length::Fixed(ADD_BUTTON))
             .height(Length::Fixed(ADD_BUTTON))
-            .style(theme::tool(false));
+            .style(theme::tool(false, Place::Alone));
         let mut layers = stack![
             scrolling,
             pin(add).x(size.width - ADD_BUTTON - 24.0).y(12.0)
@@ -298,16 +326,15 @@ impl App {
                     scrollable(strips).direction(scrollable::Direction::Horizontal(
                         scrollable::Scrollbar::default(),
                     )),
-                    row![
-                        tool("Add channel", Some(Message::AddMixerChannel(id)), false),
-                        tool(
+                    group(vec![
+                        ("Add channel", Some(Message::AddMixerChannel(id)), false),
+                        (
                             "Remove channel",
                             self.removable_channel(id)
                                 .map(|_| Message::RemoveMixerChannel(id)),
                             false
                         ),
-                    ]
-                    .spacing(6),
+                    ]),
                 ]
                 .spacing(10)
                 .into()
@@ -367,7 +394,7 @@ impl App {
                 .on_press(Message::OpenMenu(Menu::AddTrack))
                 .width(Length::Fixed(44.0))
                 .height(Length::Fixed(44.0))
-                .style(theme::tool(false)),
+                .style(theme::tool(false, Place::Alone)),
         )
         .padding(16);
         column![tracks, add].width(Fill).into()
@@ -541,8 +568,8 @@ impl App {
             .step(0.01_f32)
             .on_release(Message::Release)
             .width(Length::Fixed(80.0)),
-            row![
-                tool(
+            group(vec![
+                (
                     "M",
                     Some(Message::SetMode {
                         node: id,
@@ -551,7 +578,7 @@ impl App {
                     }),
                     mode == Mode::Mute
                 ),
-                tool(
+                (
                     "S",
                     Some(Message::SetMode {
                         node: id,
@@ -560,8 +587,7 @@ impl App {
                     }),
                     mode == Mode::Solo
                 ),
-            ]
-            .spacing(4),
+            ]),
         ]
         .spacing(6)
         .width(Length::Fixed(90.0))
