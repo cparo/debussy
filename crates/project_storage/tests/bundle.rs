@@ -332,3 +332,48 @@ fn test_create_refuses_bad_rate_and_existing_path() -> Result<(), Box<dyn Error>
     }
     Ok(())
 }
+
+#[test]
+fn test_board_positions_round_trip_and_bad_ones_are_refused() -> Result<(), Box<dyn Error>> {
+    let path = scratch("board-positions")?;
+    let mut bundle = Bundle::create(&path, 48_000)?;
+    let mut session = Session::new_project();
+    let mixer = session.state().project_mixer().ok_or("no mixer")?;
+    session.move_node(mixer, Some(project_model::Position { x: 320.0, y: -12.5 }))?;
+    session.move_output(Some(96.0))?;
+    bundle.save(&session)?;
+    let (_, opened) = Bundle::open(&path)?;
+    assert_eq!(opened.state(), session.state());
+    // An older file without them opens to the automatic layout.
+    fs::write(path.join("project.json"), project("", ""))?;
+    let (_, opened) = Bundle::open(&path)?;
+    assert_eq!(opened.state().output_y, None);
+
+    let node = |position: &str| {
+        project("", "").replace(
+            "\"nodes\":[]",
+            &format!(
+                r#""nodes":[{{"id":5,"kind":{{"kind":"bus","layout":"stereo"}},"position":{position}}}]"#
+            ),
+        )
+    };
+    assert!(Bundle::open(&path).is_ok());
+    fs::write(path.join("project.json"), node(r#"{"x":10.0,"y":20.0}"#))?;
+    assert!(Bundle::open(&path).is_ok());
+    for text in [
+        node(r#"{"x":1e9,"y":0.0}"#),
+        node(r#"{"x":0.0,"y":-1e30}"#),
+        node(r#"{"x":0.0,"y":0.0,"z":1.0}"#),
+        project("", "").replace("\"nodes\":[]", "\"nodes\":[],\"output_y\":1e12"),
+    ] {
+        let error = open_with(&path, &text)?;
+        assert!(
+            matches!(
+                error,
+                StorageError::Invalid { .. } | StorageError::Json { .. }
+            ),
+            "{error}"
+        );
+    }
+    Ok(())
+}

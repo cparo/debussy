@@ -54,8 +54,13 @@ output is never a source and a track never a target, and that no connection is d
 ports and cycles are checked by `signal_graph` before an edit is recorded ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
 
 A mixer is its own node kind, saved as its channel count with its non-default parameter values
-keyed by name (see `docs/architecture/signal-graph.md` "Mixer"). Its channel count only grows; the
-model checks its ports and refuses to drop a connected channel when an undo shrinks it ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)).
+keyed by name (see `docs/architecture/signal-graph.md` "Mixer"). The model checks its ports and
+refuses to drop a connected channel ([ADR-0044](../adrs/0044-mixing-is-a-mixer-node-with-per-channel-gain-pan.md)); the interface removes only an unconnected last
+channel ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)).
+
+A node's position on the patch board and the height of the output's L are optional model state,
+moved as one undo step per drag and kept in named versions; without them the interface lays the
+board out automatically ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)).
 
 A connection end at a stereo port may name its left or right side, carrying that channel as a
 mono signal; the model refuses a side of a port it knows to be mono. In the running graph a sided
@@ -96,7 +101,9 @@ model's own types. Every field is required except a version's `name` and `saved_
 version files carry; unknown fields are refused. The file holds `format_version`, `sample_rate`,
 `tracks` (top first, each with its clips bottom layer first), `nodes` and `connections`. Since
 format version 2 a connection may carry `from_side` and `to_side` (`left` or `right`); version 1
-files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)). Times are
+files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)). Since version 3 a node may carry a
+`position` (`x`, `y`) and the project an `output_y`, both patch-board coordinates within
+±1,000,000; version 2 files migrate unchanged and use the automatic layout ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving

@@ -85,6 +85,28 @@ pub enum NodeKind {
     },
 }
 
+/// Where a node's top-left corner sits on the patch board, in logical pixels. The interface's
+/// to interpret; it plays no part in the sound.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    /// Rightwards from the board's left edge.
+    pub x: f32,
+    /// Downwards from the top of the tracks.
+    pub y: f32,
+}
+
+/// The furthest a saved board position may be from the origin, either way.
+pub const MAX_BOARD_COORDINATE: f32 = 1_000_000.0;
+
+/// Checks a board coordinate: finite and within [`MAX_BOARD_COORDINATE`].
+pub(crate) fn check_coordinate(value: f32) -> Result<(), Error> {
+    if value.is_finite() && value.abs() <= MAX_BOARD_COORDINATE {
+        Ok(())
+    } else {
+        Err(Error::InvalidValue)
+    }
+}
+
 /// A routing node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
@@ -92,6 +114,8 @@ pub struct Node {
     pub id: NodeId,
     /// What it is.
     pub kind: NodeKind,
+    /// Where the user put it on the patch board; `None` leaves it to the automatic layout.
+    pub position: Option<Position>,
 }
 
 /// A connection from an output port of one endpoint to an input port of another.
@@ -151,6 +175,10 @@ impl Connection {
 
 /// Checks a node's own values.
 pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
+    if let Some(p) = node.position {
+        check_coordinate(p.x)?;
+        check_coordinate(p.y)?;
+    }
     match &node.kind {
         NodeKind::Effect { parameters, .. } => check_parameters(parameters),
         NodeKind::Mixer {

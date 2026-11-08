@@ -437,3 +437,43 @@ fn test_mixer_channels_and_parameters_are_undoable() -> TestResult {
     assert_eq!(channels(&session), Some(2));
     Ok(())
 }
+
+#[test]
+fn test_moving_nodes_and_the_output_are_steps_and_checked() -> TestResult {
+    let mut session = Session::new_project();
+    let mixer = session.state().project_mixer().ok_or("no mixer")?;
+    let at = project_model::Position { x: 40.0, y: 80.0 };
+    session.move_node(mixer, Some(at))?;
+    session.move_output(Some(120.0))?;
+    assert_eq!(
+        session.state().node(mixer).and_then(|n| n.position),
+        Some(at)
+    );
+    assert_eq!(session.state().output_y, Some(120.0));
+    assert!(session.undo());
+    assert_eq!(session.state().output_y, None);
+    assert!(session.undo());
+    assert_eq!(session.state().node(mixer).and_then(|n| n.position), None);
+    for bad in [f32::NAN, f32::INFINITY, 2.0e6] {
+        let moved = session.move_node(mixer, Some(project_model::Position { x: bad, y: 0.0 }));
+        assert!(matches!(moved, Err(Error::InvalidValue)));
+        assert!(matches!(
+            session.move_output(Some(bad)),
+            Err(Error::InvalidValue)
+        ));
+    }
+    assert!(!session.can_undo(), "refused moves are not steps");
+    Ok(())
+}
+
+#[test]
+fn test_disconnect_is_a_step() -> TestResult {
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let id = session.state().connections[1].id;
+    session.disconnect(id)?;
+    assert_eq!(session.state().connections.len(), 1);
+    assert!(session.undo());
+    assert_eq!(session.state().connections.len(), 2);
+    Ok(())
+}
