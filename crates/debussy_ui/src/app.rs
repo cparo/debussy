@@ -17,6 +17,13 @@ use crate::theme::Tone;
 use crate::transport::{DEFAULT_ZOOM, MAX_ZOOM, samples_per_column, zoomed_start};
 use crate::waveform::{Display, LANE_COLUMNS, Lane, lanes};
 
+/// The track pane's share of the window's width at launch.
+const DEFAULT_SPLIT: f32 = 0.6;
+/// The narrowest the divider leaves the track pane.
+const MIN_SPLIT: f32 = 0.2;
+/// The widest the divider leaves the track pane.
+const MAX_SPLIT: f32 = 0.85;
+
 /// Something the user did, or a frame tick.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
@@ -49,8 +56,10 @@ pub enum Message {
     OpenMenu(Menu),
     /// Close the open menu.
     CloseMenu,
-    /// The track pane scrolled to this offset from the top, in logical pixels.
-    TracksScrolled(f32),
+    /// The tracks, gutter and board scrolled to this offset from the top, in logical pixels.
+    Scrolled(f32),
+    /// The divider moved: the track pane's share of the window's width.
+    Split(f32),
     /// Quit the application; the window's shell handles it.
     Quit,
     /// Undo the latest step.
@@ -133,8 +142,10 @@ pub struct App {
     pub(crate) menu: Option<Menu>,
     /// The track being renamed, and the name typed so far.
     pub(crate) renaming: Option<(TrackId, String)>,
-    /// How far the track pane is scrolled down, in logical pixels.
-    pub(crate) tracks_scrolled: f32,
+    /// How far the tracks, gutter and board are scrolled down, in logical pixels.
+    pub(crate) scrolled: f32,
+    /// The track pane's share of the window's width.
+    pub(crate) split: f32,
     /// The tracks the engine's feeds were made from.
     loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
@@ -170,7 +181,8 @@ impl App {
             tone: Tone::default(),
             menu: None,
             renaming: None,
-            tracks_scrolled: 0.0,
+            scrolled: 0.0,
+            split: DEFAULT_SPLIT,
             loaded: None,
             live: None,
             devices: (Vec::new(), None),
@@ -247,6 +259,32 @@ impl App {
         self.display
     }
 
+    /// The track pane's share of the window's width.
+    pub fn split(&self) -> f32 {
+        self.split
+    }
+
+    /// Each track's lane centres, top to bottom, from the top of the track pane's contents.
+    pub fn lane_centres(&self) -> Vec<(TrackId, Vec<f32>)> {
+        let mut top = 0.0;
+        self.lanes
+            .iter()
+            .map(|(id, lanes)| {
+                let first = top + crate::view::HEADER_HEIGHT;
+                let centres = (0..lanes.len())
+                    .map(|k| first + crate::view::LANE_HEIGHT * (k as f32 + 0.5))
+                    .collect();
+                top = first + crate::view::LANE_HEIGHT * lanes.len() as f32;
+                (*id, centres)
+            })
+            .collect()
+    }
+
+    /// The patch board laid out at least `min` in size.
+    pub fn board(&self, min: iced::Size) -> crate::patch_board::Board {
+        crate::patch_board::layout(self.session.state(), &self.lane_centres(), min)
+    }
+
     /// The open menu, if any.
     pub fn menu(&self) -> Option<Menu> {
         self.menu
@@ -264,7 +302,7 @@ impl App {
         if !matches!(
             message,
             Message::Tick
-                | Message::TracksScrolled(_)
+                | Message::Scrolled(_)
                 | Message::SystemTone(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
@@ -276,7 +314,7 @@ impl App {
         if !matches!(
             message,
             Message::Tick
-                | Message::TracksScrolled(_)
+                | Message::Scrolled(_)
                 | Message::SystemTone(_)
                 | Message::RenameText(_)
                 | Message::FinishRename
@@ -329,7 +367,8 @@ impl App {
                 self.menu = (self.menu != Some(menu)).then_some(menu);
             }
             Message::CloseMenu | Message::Quit => {}
-            Message::TracksScrolled(offset) => self.tracks_scrolled = offset,
+            Message::Scrolled(offset) => self.scrolled = offset,
+            Message::Split(share) => self.split = share.clamp(MIN_SPLIT, MAX_SPLIT),
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
             Message::Save => {
                 let result = self.services.save(&self.session);

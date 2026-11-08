@@ -1,5 +1,6 @@
-//! Drawing the window: the top bar, the track pane beside the right pane, the bottom bar, and
-//! any open menu floated over them (`docs/architecture/user-interface.md` "Layout").
+//! Drawing the window: the top bar; the track pane, divider, port gutter and patch board
+//! scrolling together; the bottom bar; and any open menu floated over them
+//! (`docs/architecture/user-interface.md` "Layout").
 
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
@@ -7,11 +8,12 @@ use iced::widget::{
     Space, button, canvas, column, container, mouse_area, pin, responsive, row, scrollable, slider,
     stack, text, text_input, vertical_slider,
 };
-use iced::{Alignment, Element, Fill, FillPortion, Length, Size};
+use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
 
 use crate::app::{App, Message};
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
+use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView};
 use crate::theme::{self, Tone};
 use crate::transport::PositionBar;
 use crate::waveform::{Display, LaneView};
@@ -22,8 +24,14 @@ pub(crate) const LANE_HEIGHT: f32 = 128.0;
 pub(crate) const HEADER_HEIGHT: f32 = 26.0;
 /// The height of the top and bottom bars.
 const BAR_HEIGHT: f32 = 56.0;
-/// The track pane's share of the width beside the right pane's.
-const TRACK_PORTION: (u16, u16) = (3, 2);
+/// The divider's width.
+const DIVIDER_WIDTH: f32 = 6.0;
+/// The space below the tracks holding the "+" button.
+const ADD_AREA: f32 = 76.0;
+/// The height of the mixer strips' panel, until the mixer has its node dialog.
+const MIXER_HEIGHT: f32 = 270.0;
+/// The gap between the window's main parts.
+const SPACING: f32 = 2.0;
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
@@ -47,20 +55,19 @@ impl App {
         responsive(move |size| self.window(size)).into()
     }
 
+    /// The track pane's width in a window `width` wide.
+    fn track_pane_width(&self, width: f32) -> f32 {
+        (width * self.split() - DIVIDER_WIDTH / 2.0).max(0.0)
+    }
+
     fn window(&self, size: Size) -> Element<'_, Message> {
-        let body = row![
-            container(self.track_pane())
-                .width(FillPortion(TRACK_PORTION.0))
-                .height(Fill)
-                .style(theme::pane),
-            container(self.right_pane())
-                .width(FillPortion(TRACK_PORTION.1))
-                .height(Fill)
-                .style(theme::pane),
-        ]
-        .spacing(2);
-        let base = column![self.top_bar(), body, self.bottom_bar()]
-            .spacing(2)
+        let mixer = container(self.mixer())
+            .padding(12)
+            .width(Fill)
+            .height(Length::Fixed(MIXER_HEIGHT))
+            .style(theme::pane);
+        let base = column![self.top_bar(), self.body(size), mixer, self.bottom_bar()]
+            .spacing(SPACING)
             .height(Fill);
         let base = container(base)
             .width(Fill)
@@ -210,6 +217,51 @@ impl App {
             .into()
     }
 
+    /// The track pane, divider, gutter and board, scrolling together under one scrollbar.
+    fn body(&self, size: Size) -> Element<'_, Message> {
+        let viewport = (size.height - 2.0 * BAR_HEIGHT - MIXER_HEIGHT - 3.0 * SPACING).max(0.0);
+        let tracks_width = self.track_pane_width(size.width);
+        let board_width = (size.width - tracks_width - DIVIDER_WIDTH - GUTTER_WIDTH).max(0.0);
+        let board = self.board(Size::new(board_width, viewport));
+        let height = viewport
+            .max(self.tracks_height() + ADD_AREA)
+            .max(board.size.height);
+        let centres: Vec<f32> = self
+            .lane_centres()
+            .into_iter()
+            .flat_map(|(_, c)| c)
+            .collect();
+        let board_size = board.size;
+        let content = row![
+            container(self.track_pane())
+                .width(Length::Fixed(tracks_width))
+                .height(Length::Fixed(height))
+                .style(theme::pane),
+            canvas(Divider {
+                window_width: size.width
+            })
+            .width(Length::Fixed(DIVIDER_WIDTH))
+            .height(Length::Fixed(height)),
+            canvas(GutterView(centres))
+                .width(Length::Fixed(GUTTER_WIDTH))
+                .height(Length::Fixed(height)),
+            scrollable(
+                canvas(BoardView(board))
+                    .width(Length::Fixed(board_size.width))
+                    .height(Length::Fixed(height)),
+            )
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::default(),
+            ))
+            .width(Fill),
+        ];
+        scrollable(content)
+            .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
+            .width(Fill)
+            .height(Fill)
+            .into()
+    }
+
     fn track_pane(&self) -> Element<'_, Message> {
         let cursor = self.playhead_fraction();
         let (start, span) = (self.view_start(), self.view_span());
@@ -241,11 +293,7 @@ impl App {
                 .style(theme::tool(false)),
         )
         .padding(16);
-        scrollable(column![tracks, add])
-            .on_scroll(|viewport| Message::TracksScrolled(viewport.absolute_offset().y))
-            .height(Fill)
-            .width(Fill)
-            .into()
+        column![tracks, add].width(Fill).into()
     }
 
     fn track_header<'a>(&'a self, id: TrackId, name: &'a str) -> Element<'a, Message> {
@@ -275,15 +323,10 @@ impl App {
         .into()
     }
 
-    fn right_pane(&self) -> Element<'_, Message> {
-        container(self.mixer()).padding(12).into()
-    }
-
     /// Where `menu` opens, in the window, for a window of `size`.
     fn menu_position(&self, menu: Menu, size: Size) -> (f32, f32) {
-        let track_pane =
-            size.width * f32::from(TRACK_PORTION.0) / f32::from(TRACK_PORTION.0 + TRACK_PORTION.1);
-        let pane_top = BAR_HEIGHT + 2.0 - self.tracks_scrolled;
+        let track_pane = self.track_pane_width(size.width);
+        let pane_top = BAR_HEIGHT + SPACING - self.scrolled;
         let (x, y) = match menu {
             Menu::App => (size.width - MENU_WIDTH - 8.0, BAR_HEIGHT),
             Menu::Track(id) => {
@@ -413,7 +456,7 @@ impl App {
             })
             .step(0.1_f32)
             .on_release(Message::Release)
-            .height(Length::Fixed(140.0)),
+            .height(Length::Fixed(120.0)),
             text(format!("{gain:.1} dB")).size(12),
             slider(-1.0..=1.0, pan, move |value| Message::Slide {
                 node: id,

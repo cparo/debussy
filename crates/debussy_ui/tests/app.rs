@@ -545,3 +545,36 @@ fn test_track_edits_wait_for_the_transport_to_stop() -> Result<(), Box<dyn Error
     assert!(app.status().is_some());
     Ok(())
 }
+
+#[test]
+fn test_divider_is_clamped() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    assert_eq!(app.split(), 0.6);
+    app.update(Message::Split(0.01));
+    assert!(app.split() >= 0.2);
+    app.update(Message::Split(0.99));
+    assert!(app.split() <= 0.85);
+    Ok(())
+}
+
+#[test]
+fn test_board_ports_line_up_with_the_lanes() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddTrack(Layout::Stereo));
+    let centres = app.lane_centres();
+    // A 26 px header over 128 px lanes: the vocal's one lane, then the new track's two.
+    assert_eq!(centres[0].1, vec![90.0]);
+    assert_eq!(centres[1].1, vec![244.0, 372.0]);
+    let board = app.board(iced::Size::new(400.0, 300.0));
+    let gutter: Vec<f32> = board
+        .pins
+        .iter()
+        .filter(|(p, _)| matches!(p.endpoint, project_model::Endpoint::Track(_)))
+        .map(|(_, at)| at.y)
+        .collect();
+    assert_eq!(gutter.len(), 3);
+    assert!(gutter.iter().all(|y| [90.0, 244.0, 372.0].contains(y)));
+    // Three wires into the mixer, two out to L and R.
+    assert_eq!(board.wires.len(), 5);
+    Ok(())
+}
