@@ -5,15 +5,15 @@
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
-    Space, button, canvas, column, container, mouse_area, pin, responsive, row, scrollable, slider,
-    stack, text, text_input, vertical_slider,
+    Space, button, canvas, column, container, mouse_area, opaque, pin, responsive, row, scrollable,
+    slider, stack, text, text_input, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, NewNode};
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
-use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView};
+use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
 use crate::theme::{self, Tone};
 use crate::transport::PositionBar;
 use crate::waveform::{Display, LaneView};
@@ -28,8 +28,8 @@ const BAR_HEIGHT: f32 = 56.0;
 const DIVIDER_WIDTH: f32 = 6.0;
 /// The space below the tracks holding the "+" button.
 const ADD_AREA: f32 = 76.0;
-/// The height of the mixer strips' panel, until the mixer has its node dialog.
-const MIXER_HEIGHT: f32 = 270.0;
+/// The size of the "+" buttons.
+const ADD_BUTTON: f32 = 44.0;
 /// The gap between the window's main parts.
 const SPACING: f32 = 2.0;
 /// The id of the track name being edited, to focus it.
@@ -61,12 +61,7 @@ impl App {
     }
 
     fn window(&self, size: Size) -> Element<'_, Message> {
-        let mixer = container(self.mixer())
-            .padding(12)
-            .width(Fill)
-            .height(Length::Fixed(MIXER_HEIGHT))
-            .style(theme::pane);
-        let base = column![self.top_bar(), self.body(size), mixer, self.bottom_bar()]
+        let base = column![self.top_bar(), self.body(size), self.bottom_bar()]
             .spacing(SPACING)
             .height(Fill);
         let base = container(base)
@@ -219,17 +214,18 @@ impl App {
 
     /// The track pane, divider, gutter and board, scrolling together under one scrollbar.
     fn body(&self, size: Size) -> Element<'_, Message> {
-        let viewport = (size.height - 2.0 * BAR_HEIGHT - MIXER_HEIGHT - 3.0 * SPACING).max(0.0);
+        let viewport = (size.height - 2.0 * BAR_HEIGHT - 2.0 * SPACING).max(0.0);
         let tracks_width = self.track_pane_width(size.width);
         let board_width = (size.width - tracks_width - DIVIDER_WIDTH - GUTTER_WIDTH).max(0.0);
         let board = self.board(Size::new(board_width, viewport));
         let height = viewport
             .max(self.tracks_height() + ADD_AREA)
             .max(board.size.height);
-        let centres: Vec<f32> = self
-            .lane_centres()
-            .into_iter()
-            .flat_map(|(_, c)| c)
+        let gutter: Vec<(crate::patch_board::Pin, f32)> = board
+            .pins
+            .iter()
+            .filter(|(p, _)| matches!(p.endpoint, Endpoint::Track(_)))
+            .map(|(p, at)| (*p, at.y))
             .collect();
         let board_size = board.size;
         let content = row![
@@ -242,24 +238,105 @@ impl App {
             })
             .width(Length::Fixed(DIVIDER_WIDTH))
             .height(Length::Fixed(height)),
-            canvas(GutterView(centres))
+            canvas(GutterView(gutter))
                 .width(Length::Fixed(GUTTER_WIDTH))
                 .height(Length::Fixed(height)),
             scrollable(
-                canvas(BoardView(board))
-                    .width(Length::Fixed(board_size.width))
-                    .height(Length::Fixed(height)),
+                canvas(BoardView {
+                    board,
+                    selection: self.selection,
+                    wiring: self.wiring,
+                })
+                .width(Length::Fixed(board_size.width))
+                .height(Length::Fixed(height)),
             )
             .direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::default(),
             ))
             .width(Fill),
         ];
-        scrollable(content)
+        let scrolling = scrollable(content)
             .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
             .width(Fill)
-            .height(Fill)
-            .into()
+            .height(Fill);
+        // The node menu's "+" stays at the board's top right, clear of the scrollbar.
+        let add = button(text("+").size(24).center())
+            .on_press(Message::OpenMenu(Menu::AddNode))
+            .width(Length::Fixed(ADD_BUTTON))
+            .height(Length::Fixed(ADD_BUTTON))
+            .style(theme::tool(false));
+        let mut layers = stack![
+            scrolling,
+            pin(add).x(size.width - ADD_BUTTON - 24.0).y(12.0)
+        ];
+        if let Some(dialog) = self.node_dialog((tracks_width - 32.0).clamp(0.0, 560.0)) {
+            layers = layers.push(pin(opaque(dialog)).x(16.0).y(16.0));
+        }
+        layers.into()
+    }
+
+    /// The selected node's dialog, `width` wide, over the track pane.
+    fn node_dialog(&self, width: f32) -> Option<Element<'_, Message>> {
+        let Some(Selection::Node(id)) = self.selection() else {
+            return None;
+        };
+        let node = self.session().state().node(id)?;
+        let header = row![
+            text(crate::patch_board::title(&node.kind)).size(18),
+            Space::new().width(Fill),
+            tool("Delete node", Some(Message::DeleteNode(id)), false),
+            tool("×", Some(Message::Select(None)), false),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+        let body: Element<'_, Message> = match &node.kind {
+            NodeKind::Mixer { channels, .. } => {
+                let strips =
+                    row((0..*channels).map(|ch| self.strip(id, ch, self.channel_name(id, ch))))
+                        .spacing(12);
+                column![
+                    scrollable(strips).direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::default(),
+                    )),
+                    row![
+                        tool("Add channel", Some(Message::AddMixerChannel(id)), false),
+                        tool(
+                            "Remove channel",
+                            self.removable_channel(id)
+                                .map(|_| Message::RemoveMixerChannel(id)),
+                            false
+                        ),
+                    ]
+                    .spacing(6),
+                ]
+                .spacing(10)
+                .into()
+            }
+            NodeKind::FeedbackDelay { seconds, .. } => {
+                let typed = match &self.delay_text {
+                    Some((node, typed)) if *node == id => typed.clone(),
+                    _ => format!("{seconds}"),
+                };
+                row![
+                    text("Time (seconds)").size(14),
+                    text_input("0.25", &typed)
+                        .on_input(move |t| Message::DelayText(id, t))
+                        .on_submit(Message::CommitDelay)
+                        .width(Length::Fixed(100.0)),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+                .into()
+            }
+            NodeKind::Bus(_) | NodeKind::Effect { .. } => Space::new().into(),
+        };
+        Some(
+            container(column![header, body].spacing(12))
+                .padding(12)
+                .width(Length::Fixed(width))
+                .style(theme::popup)
+                .into(),
+        )
     }
 
     fn track_pane(&self) -> Element<'_, Message> {
@@ -342,6 +419,10 @@ impl App {
                 )
             }
             Menu::AddTrack => (16.0, pane_top + self.tracks_height() + 16.0 + 46.0),
+            Menu::AddNode => (
+                size.width - MENU_WIDTH - 24.0,
+                BAR_HEIGHT + SPACING + 12.0 + ADD_BUTTON + 4.0,
+            ),
         };
         (
             x.clamp(0.0, (size.width - MENU_WIDTH).max(0.0)),
@@ -401,41 +482,34 @@ impl App {
                 ),
                 Entry::item("Automation curve", None),
             ],
+            Menu::AddNode => vec![
+                Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),
+                Entry::item("Bus", Some(Message::AddNode(NewNode::Bus))),
+                Entry::item(
+                    "Feedback delay",
+                    Some(Message::AddNode(NewNode::FeedbackDelay)),
+                ),
+            ],
         };
         dropdown(entries)
     }
 
-    /// The mixers' channel strips; a stand-in until the mixer has its node dialog.
-    fn mixer(&self) -> Element<'_, Message> {
+    /// A mixer channel's name: the track connected to it, if any, else its number.
+    fn channel_name(&self, node: project_model::NodeId, channel: usize) -> String {
         let state = self.session().state();
-        let mut strips = row![].spacing(12);
-        for node in &state.nodes {
-            let NodeKind::Mixer { channels, .. } = &node.kind else {
-                continue;
-            };
-            for channel in 0..*channels {
-                // Named after the track connected to the channel, if any.
-                let name = state
-                    .connections
-                    .iter()
-                    .find(|c| c.to == Endpoint::Node(node.id) && c.input == channel)
-                    .and_then(|c| match c.from {
-                        Endpoint::Track(id) => state.track(id).map(|t| match c.from_side {
-                            Some(project_model::Side::Left) => format!("{} L", t.name),
-                            Some(project_model::Side::Right) => format!("{} R", t.name),
-                            None => t.name.clone(),
-                        }),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| format!("{}", channel + 1));
-                strips = strips.push(self.strip(node.id, channel, name));
-            }
-        }
-        scrollable(strips)
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ))
-            .into()
+        state
+            .connections
+            .iter()
+            .find(|c| c.to == Endpoint::Node(node) && c.input == channel)
+            .and_then(|c| match c.from {
+                Endpoint::Track(id) => state.track(id).map(|t| match c.from_side {
+                    Some(project_model::Side::Left) => format!("{} L", t.name),
+                    Some(project_model::Side::Right) => format!("{} R", t.name),
+                    None => t.name.clone(),
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| format!("{}", channel + 1))
     }
 
     /// One mixer channel's gain, pan, mute and solo.

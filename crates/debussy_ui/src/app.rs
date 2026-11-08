@@ -9,9 +9,10 @@ use audio_buffers::Layout;
 use audio_effects::{Control, Mode, parameter_name};
 use audio_engine::Engine;
 use engine_bridge::Bridge;
-use project_model::{Edit, NodeId, NodeKind, Session, Track, TrackId};
+use project_model::{Edit, Endpoint, NodeId, NodeKind, Position, Session, Track, TrackId};
 
 use crate::menu::Menu;
+use crate::patch_board::{Pin, Selection, can_connect};
 use crate::services::Services;
 use crate::theme::Tone;
 use crate::transport::{DEFAULT_ZOOM, MAX_ZOOM, samples_per_column, zoomed_start};
@@ -23,6 +24,42 @@ const DEFAULT_SPLIT: f32 = 0.6;
 const MIN_SPLIT: f32 = 0.2;
 /// The widest the divider leaves the track pane.
 const MAX_SPLIT: f32 = 0.85;
+
+/// A kind of node the board's "+" adds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewNode {
+    /// A two-channel mixer.
+    Mixer,
+    /// A stereo bus.
+    Bus,
+    /// A stereo feedback delay of a quarter second.
+    FeedbackDelay,
+}
+
+impl NewNode {
+    fn kind(self) -> NodeKind {
+        match self {
+            NewNode::Mixer => NodeKind::Mixer {
+                channels: 2,
+                parameters: std::collections::BTreeMap::new(),
+            },
+            NewNode::Bus => NodeKind::Bus(Layout::Stereo),
+            NewNode::FeedbackDelay => NodeKind::FeedbackDelay {
+                layout: Layout::Stereo,
+                seconds: 0.25,
+            },
+        }
+    }
+}
+
+/// A move on the board not yet recorded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Moving {
+    /// A node, now here.
+    Node(NodeId, Position),
+    /// The L/R outputs, L now at this height.
+    Output(f32),
+}
 
 /// Something the user did, or a frame tick.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +119,33 @@ pub enum Message {
     RenameText(String),
     /// Finish renaming: record the typed name as one step.
     FinishRename,
+    /// A wire is being dragged from this output.
+    StartWire(Pin),
+    /// The wire being dragged was dropped on this input, or elsewhere.
+    FinishWire(Option<Pin>),
+    /// Select a node (opening its dialog) or a wire; `None` clears the selection and closes
+    /// the dialog.
+    Select(Option<Selection>),
+    /// A node is being dragged here: shown, not yet recorded.
+    DragNode(NodeId, Position),
+    /// The L/R outputs are being dragged: L's height, shown, not yet recorded.
+    DragOutput(f32),
+    /// The node or outputs being dragged were dropped: record the move as one step.
+    Drop,
+    /// Delete the selected node or wire.
+    DeleteSelection,
+    /// Add a node to the board.
+    AddNode(NewNode),
+    /// Delete a node and its connections.
+    DeleteNode(NodeId),
+    /// Add a channel to a mixer.
+    AddMixerChannel(NodeId),
+    /// Remove a mixer's last channel, if nothing is connected to it.
+    RemoveMixerChannel(NodeId),
+    /// The feedback delay time being typed, in seconds.
+    DelayText(NodeId, String),
+    /// Record the typed delay time as one step.
+    CommitDelay,
     /// Export the mix, through a file dialog; the mono mix if `true`.
     Export(bool),
     /// Use this audio device for input and output.
@@ -146,6 +210,14 @@ pub struct App {
     pub(crate) scrolled: f32,
     /// The track pane's share of the window's width.
     pub(crate) split: f32,
+    /// The selected node or wire.
+    pub(crate) selection: Option<Selection>,
+    /// The output a wire is being dragged from.
+    pub(crate) wiring: Option<Pin>,
+    /// A node or the outputs being dragged.
+    pub(crate) moving: Option<Moving>,
+    /// A feedback delay's time being typed.
+    pub(crate) delay_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
     loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
@@ -183,6 +255,10 @@ impl App {
             renaming: None,
             scrolled: 0.0,
             split: DEFAULT_SPLIT,
+            selection: None,
+            wiring: None,
+            moving: None,
+            delay_text: None,
             loaded: None,
             live: None,
             devices: (Vec::new(), None),
@@ -282,7 +358,41 @@ impl App {
 
     /// The patch board laid out at least `min` in size.
     pub fn board(&self, min: iced::Size) -> crate::patch_board::Board {
-        crate::patch_board::layout(self.session.state(), &self.lane_centres(), min)
+        let state = self.session.state();
+        let Some(moving) = self.moving else {
+            return crate::patch_board::layout(state, &self.lane_centres(), min);
+        };
+        // Show the move under way without recording it.
+        let mut shown = state.clone();
+        match moving {
+            Moving::Node(id, position) => {
+                if let Some(node) = shown.nodes.iter_mut().find(|n| n.id == id) {
+                    node.position = Some(position);
+                }
+            }
+            Moving::Output(y) => shown.output_y = Some(y),
+        }
+        crate::patch_board::layout(&shown, &self.lane_centres(), min)
+    }
+
+    /// The selected node or wire.
+    pub fn selection(&self) -> Option<Selection> {
+        self.selection
+    }
+
+    /// The number of channels `node` would keep after removing its last one, if it is a mixer
+    /// of more than one channel with nothing connected to its last.
+    pub fn removable_channel(&self, node: NodeId) -> Option<usize> {
+        let state = self.session.state();
+        let NodeKind::Mixer { channels, .. } = state.node(node)?.kind else {
+            return None;
+        };
+        let last = channels.checked_sub(1).filter(|&n| n >= 1)?;
+        let used = state
+            .connections
+            .iter()
+            .any(|c| c.to == Endpoint::Node(node) && c.input == last);
+        (!used).then_some(last)
     }
 
     /// The open menu, if any.
@@ -306,6 +416,9 @@ impl App {
                 | Message::SystemTone(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
+                | Message::DragNode(..)
+                | Message::DragOutput(_)
+                | Message::DelayText(..)
         ) {
             self.status = None;
             self.menu = None;
@@ -410,6 +523,106 @@ impl App {
                 }
             }
             Message::FinishRename => self.finish_rename(),
+            Message::StartWire(pin) => self.wiring = Some(pin),
+            Message::FinishWire(to) => {
+                if let (Some(from), Some(to)) = (self.wiring.take(), to)
+                    && can_connect(self.session.state(), from, to)
+                {
+                    let result = self.bridge.edit(&mut self.session, |s| {
+                        s.connect_sides(
+                            from.endpoint,
+                            from.port,
+                            from.side,
+                            to.endpoint,
+                            to.port,
+                            to.side,
+                        )
+                    });
+                    self.report(result.map(|_| ()).map_err(|e| e.to_string()));
+                }
+                self.wiring = None;
+            }
+            Message::Select(selection) => {
+                // A click on the board leaves any delay time being typed.
+                self.delay_text = None;
+                self.selection = selection;
+            }
+            Message::DragNode(node, position) => {
+                self.moving = Some(Moving::Node(node, position));
+            }
+            Message::DragOutput(y) => self.moving = Some(Moving::Output(y)),
+            Message::Drop => {
+                let result = match self.moving.take() {
+                    Some(Moving::Node(node, position)) => self
+                        .bridge
+                        .edit(&mut self.session, |s| s.move_node(node, Some(position))),
+                    Some(Moving::Output(y)) => self
+                        .bridge
+                        .edit(&mut self.session, |s| s.move_output(Some(y))),
+                    None => Ok(()),
+                };
+                self.report(result.map_err(|e| e.to_string()));
+            }
+            Message::DeleteSelection => {
+                // Delete and Backspace edit the text being typed instead.
+                if self.renaming.is_some() || self.delay_text.is_some() {
+                    return;
+                }
+                let result = match self.selection.take() {
+                    Some(Selection::Node(node)) => {
+                        self.bridge.edit(&mut self.session, |s| s.remove_node(node))
+                    }
+                    Some(Selection::Wire(id)) => {
+                        self.bridge.edit(&mut self.session, |s| s.disconnect(id))
+                    }
+                    None => Ok(()),
+                };
+                self.report(result.map_err(|e| e.to_string()));
+            }
+            Message::AddNode(choice) => {
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.add_node(choice.kind()));
+                match result {
+                    Ok(node) => self.selection = Some(Selection::Node(node)),
+                    Err(error) => self.status = Some(error.to_string()),
+                }
+            }
+            Message::DeleteNode(node) => {
+                let result = self.bridge.edit(&mut self.session, |s| s.remove_node(node));
+                self.report(result.map_err(|e| e.to_string()));
+                if self.selection == Some(Selection::Node(node)) {
+                    self.selection = None;
+                }
+            }
+            Message::AddMixerChannel(node) => {
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.add_mixer_channels(node, 1));
+                self.report(result.map_err(|e| e.to_string()));
+            }
+            Message::RemoveMixerChannel(node) => {
+                if let Some(channels) = self.removable_channel(node) {
+                    let result = self.bridge.edit(&mut self.session, |s| {
+                        s.apply(Edit::SetMixerChannels { node, channels })
+                    });
+                    self.report(result.map_err(|e| e.to_string()));
+                }
+            }
+            Message::DelayText(node, text) => self.delay_text = Some((node, text)),
+            Message::CommitDelay => {
+                if let Some((node, text)) = self.delay_text.take() {
+                    match text.trim().parse::<f64>() {
+                        Ok(seconds) => {
+                            let result = self.bridge.edit(&mut self.session, |s| {
+                                s.apply(Edit::SetDelay { node, seconds })
+                            });
+                            self.report(result.map_err(|e| e.to_string()));
+                        }
+                        Err(_) => self.status = Some(format!("{text:?} is not a time in seconds")),
+                    }
+                }
+            }
             Message::Export(mono) => match self.services.export(self.session.state(), mono) {
                 Ok(Some(name)) => self.status = Some(format!("Exported {name}")),
                 Ok(None) => {}

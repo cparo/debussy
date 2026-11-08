@@ -7,7 +7,7 @@ use audio_buffers::Layout;
 
 use crate::edit::Edit;
 use crate::error::Error;
-use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Side};
+use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side};
 use crate::state::{Clip, State, Track};
 use crate::types::{ClipId, TrackId};
 
@@ -279,9 +279,42 @@ impl Session {
         let index = self.state.nodes.len();
         self.apply(Edit::InsertNode {
             index,
-            node: Node { id, kind },
+            node: Node {
+                id,
+                kind,
+                position: None,
+            },
         })?;
         Ok(id)
+    }
+
+    /// Moves a node on the patch board, as one step; `None` returns it to the automatic layout.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`]; [`Error::InvalidValue`] for a coordinate that is not finite or is
+    /// beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE).
+    pub fn move_node(&mut self, id: NodeId, position: Option<Position>) -> Result<(), Error> {
+        self.apply(Edit::MoveNode { node: id, position })
+    }
+
+    /// Moves the project output's L and R on the patch board, as one step; `None` returns them
+    /// to the automatic layout.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidValue`] as for [`Session::move_node`].
+    pub fn move_output(&mut self, y: Option<f32>) -> Result<(), Error> {
+        self.apply(Edit::MoveOutput(y))
+    }
+
+    /// Removes a connection, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownConnection`].
+    pub fn disconnect(&mut self, id: ConnectionId) -> Result<(), Error> {
+        self.apply(Edit::Disconnect(id))
     }
 
     /// Removes a routing node and its connections, as one step.

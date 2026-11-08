@@ -13,7 +13,7 @@ use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State};
 
 use crate::app::Message;
-use crate::theme::{AUDIO, tokens, tone_of};
+use crate::theme::{AUDIO, mix, tokens, tone_of};
 
 /// The distance between two port circles on a node, in logical pixels.
 pub const PORT_SPACING: f32 = 48.0;
@@ -110,6 +110,76 @@ fn sides(layout: Layout) -> &'static [Option<Side>] {
         Layout::Mono => &[None],
         Layout::Stereo => &[Some(Side::Left), Some(Side::Right)],
     }
+}
+
+/// What is under a point on the board.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Hit {
+    /// A port circle.
+    Pin(Pin),
+    /// A node's body.
+    Node(NodeId),
+    /// A wire.
+    Wire(ConnectionId),
+    /// Empty board.
+    Nothing,
+}
+
+/// How close to a wire a click must be to select it.
+const WIRE_REACH: f32 = 6.0;
+
+/// The point `t` (0 to 1) along a wire's curve from `a` to `b`.
+fn along(a: Point, b: Point, t: f32) -> Point {
+    let reach = ((b.x - a.x).abs() / 2.0).max(40.0);
+    let (c1, c2) = (Point::new(a.x + reach, a.y), Point::new(b.x - reach, b.y));
+    let u = 1.0 - t;
+    let mix = |p: f32, q: f32, r: f32, s: f32| {
+        u * u * u * p + 3.0 * u * u * t * q + 3.0 * u * t * t * r + t * t * t * s
+    };
+    Point::new(mix(a.x, c1.x, c2.x, b.x), mix(a.y, c1.y, c2.y, b.y))
+}
+
+impl Board {
+    /// What is at `at`: a pin first, then a node, then a wire.
+    pub fn hit(&self, at: Point) -> Hit {
+        for (pin, centre) in &self.pins {
+            let radius = match pin.endpoint {
+                Endpoint::Output => OUTPUT_RADIUS,
+                _ => PIN_RADIUS,
+            } + 3.0;
+            if centre.distance(at) <= radius {
+                return Hit::Pin(*pin);
+            }
+        }
+        if let Some(node) = self.nodes.iter().rev().find(|n| n.rect.contains(at)) {
+            return Hit::Node(node.id);
+        }
+        for wire in &self.wires {
+            let (Some(a), Some(b)) = (self.pins.get(&wire.from), self.pins.get(&wire.to)) else {
+                continue;
+            };
+            if (0..=32).any(|i| along(*a, *b, i as f32 / 32.0).distance(at) <= WIRE_REACH) {
+                return Hit::Wire(wire.connection);
+            }
+        }
+        Hit::Nothing
+    }
+}
+
+/// Whether input `pin` already takes a wire: a connection to that side, or to the whole port.
+pub fn occupied(state: &State, pin: Pin) -> bool {
+    !pin.output
+        && state.connections.iter().any(|c| {
+            c.to == pin.endpoint
+                && c.input == pin.port
+                && (c.to_side.is_none() || pin.side.is_none() || c.to_side == pin.side)
+        })
+}
+
+/// Whether a wire may run from output `from` to input `to`: an output to a free input of
+/// another endpoint.
+pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
+    from.output && !to.output && from.endpoint != to.endpoint && !occupied(state, to)
 }
 
 /// The pins of `endpoint`'s ports in order: each port's sides, top to bottom.
@@ -210,13 +280,20 @@ pub fn layout(state: &State, lanes: &[(project_model::TrackId, Vec<f32>)], min: 
             let inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
             let outputs = pins_of(Endpoint::Node(node.id), true, &outputs);
             let height = node_height(inputs.len().max(outputs.len()));
-            let wanted = if key == f32::MAX {
-                next_free
-            } else {
-                key - PORT_SPACING
+            // A node the user placed stays there; the rest stack down their column.
+            let (x, y) = match node.position {
+                Some(p) => (p.x.max(0.0), p.y.max(0.0)),
+                None => {
+                    let wanted = if key == f32::MAX {
+                        next_free
+                    } else {
+                        key - PORT_SPACING
+                    };
+                    let y = wanted.max(next_free);
+                    next_free = y + height + PORT_SPACING;
+                    (x, y)
+                }
             };
-            let y = wanted.max(next_free);
-            next_free = y + height + PORT_SPACING;
             for (side, list) in [(x, inputs), (x + NODE_WIDTH, outputs)] {
                 for (slot, pin) in list.into_iter().enumerate() {
                     pins.insert(pin, Point::new(side, y + PORT_SPACING * (slot + 1) as f32));
@@ -247,7 +324,11 @@ pub fn layout(state: &State, lanes: &[(project_model::TrackId, Vec<f32>)], min: 
         .map(|(_, at)| at.y)
         .collect();
     let top = feeding.iter().copied().fold(f32::MAX, f32::min);
-    let out_y = if top == f32::MAX { MARGIN } else { top };
+    let out_y = match state.output_y {
+        Some(y) => y.max(0.0),
+        None if top == f32::MAX => MARGIN,
+        None => top,
+    };
     for (slot, pin) in pins_of(Endpoint::Output, false, &[Layout::Stereo])
         .into_iter()
         .enumerate()
@@ -326,31 +407,177 @@ fn pin(frame: &mut Frame, at: Point, radius: f32, fill: iced::Color) {
     );
 }
 
-/// Draws a laid-out board.
-pub struct BoardView(pub Board);
+/// What is selected on the board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Selection {
+    /// A node, whose dialog is open.
+    Node(NodeId),
+    /// A connection.
+    Wire(ConnectionId),
+}
+
+/// Draws a laid-out board and turns presses, drags and keys on it into messages: drag from an
+/// output to an input to connect, drag a node or the L/R outputs to move them, click to select,
+/// Delete or Backspace to remove the selection.
+pub struct BoardView {
+    /// The laid-out board.
+    pub board: Board,
+    /// What is selected.
+    pub selection: Option<Selection>,
+    /// The output a wire is being dragged from.
+    pub wiring: Option<Pin>,
+}
+
+/// A drag the board is following.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum BoardDrag {
+    /// None.
+    #[default]
+    Idle,
+    /// A node, held at this offset from its top-left corner.
+    Node(NodeId, iced::Vector),
+    /// The L/R outputs, held this far below L's centre.
+    Output(f32),
+}
+
+/// The board's own state: the drag it is following, and the pointer for a wire being drawn.
+#[derive(Default)]
+pub struct BoardState {
+    drag: BoardDrag,
+    pointer: Option<Point>,
+}
+
+/// `cursor` relative to `bounds`' top-left, inside or not.
+fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
+    cursor
+        .position()
+        .map(|p| Point::new(p.x - bounds.x, p.y - bounds.y))
+}
 
 impl Program<Message> for BoardView {
-    type State = ();
+    type State = BoardState;
+
+    fn update(
+        &self,
+        state: &mut BoardState,
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        use iced::keyboard::{self, key::Named};
+        match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let at = cursor.position_in(bounds)?;
+                let message = match self.board.hit(at) {
+                    Hit::Pin(pin) if pin.endpoint == Endpoint::Output => {
+                        let centre = self.board.pins.get(&Pin {
+                            side: Some(Side::Left),
+                            ..pin
+                        })?;
+                        state.drag = BoardDrag::Output(at.y - centre.y);
+                        return Some(canvas::Action::capture());
+                    }
+                    Hit::Pin(pin) if pin.output => Message::StartWire(pin),
+                    Hit::Pin(_) => return Some(canvas::Action::capture()),
+                    Hit::Node(id) => {
+                        let corner = self
+                            .board
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == id)
+                            .map(|n| n.rect.position())?;
+                        state.drag = BoardDrag::Node(id, at - corner);
+                        Message::Select(Some(Selection::Node(id)))
+                    }
+                    Hit::Wire(id) => Message::Select(Some(Selection::Wire(id))),
+                    Hit::Nothing => Message::Select(None),
+                };
+                Some(canvas::Action::publish(message).and_capture())
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                let at = relative(cursor, bounds)?;
+                match state.drag {
+                    BoardDrag::Node(id, grab) => {
+                        let corner = at - grab;
+                        Some(canvas::Action::publish(Message::DragNode(
+                            id,
+                            project_model::Position {
+                                x: corner.x.max(0.0),
+                                y: corner.y.max(0.0),
+                            },
+                        )))
+                    }
+                    BoardDrag::Output(grab) => Some(canvas::Action::publish(Message::DragOutput(
+                        (at.y - grab).max(0.0),
+                    ))),
+                    BoardDrag::Idle if self.wiring.is_some() => {
+                        state.pointer = Some(at);
+                        Some(canvas::Action::request_redraw())
+                    }
+                    BoardDrag::Idle => None,
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if !matches!(state.drag, BoardDrag::Idle) {
+                    state.drag = BoardDrag::Idle;
+                    return Some(canvas::Action::publish(Message::Drop).and_capture());
+                }
+                self.wiring?;
+                state.pointer = None;
+                let target = match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+                    Some(Hit::Pin(pin)) if !pin.output => Some(pin),
+                    _ => None,
+                };
+                Some(canvas::Action::publish(Message::FinishWire(target)).and_capture())
+            }
+            canvas::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Delete | Named::Backspace),
+                ..
+            }) if self.selection.is_some() => {
+                Some(canvas::Action::publish(Message::DeleteSelection))
+            }
+            _ => None,
+        }
+    }
 
     fn draw(
         &self,
-        _state: &(),
+        state: &BoardState,
         renderer: &Renderer,
         theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let t = tokens(tone_of(theme));
+        let selected = mix(AUDIO, iced::Color::WHITE, 0.6);
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
-        let wire = Stroke::default().with_width(WIRE_WIDTH).with_color(AUDIO);
-        for w in &self.0.wires {
-            if let (Some(a), Some(b)) = (self.0.pins.get(&w.from), self.0.pins.get(&w.to)) {
-                frame.stroke(&curve(*a, *b), wire);
+        let board = &self.board;
+        for w in &board.wires {
+            if let (Some(a), Some(b)) = (board.pins.get(&w.from), board.pins.get(&w.to)) {
+                let chosen = self.selection == Some(Selection::Wire(w.connection));
+                let stroke = Stroke::default()
+                    .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
+                    .with_color(if chosen { selected } else { AUDIO });
+                frame.stroke(&curve(*a, *b), stroke);
             }
         }
-        for node in &self.0.nodes {
+        if let (Some(from), Some(to)) = (self.wiring, state.pointer)
+            && let Some(a) = board.pins.get(&from)
+        {
+            let stroke = Stroke::default()
+                .with_width(WIRE_WIDTH)
+                .with_color(selected);
+            frame.stroke(&curve(*a, to), stroke);
+        }
+        for node in &board.nodes {
             frame.fill_rectangle(node.rect.position(), node.rect.size(), t.lane);
+            if self.selection == Some(Selection::Node(node.id)) {
+                frame.stroke(
+                    &Path::rectangle(node.rect.position(), node.rect.size()),
+                    Stroke::default().with_width(2.0).with_color(selected),
+                );
+            }
             frame.fill_text(Text {
                 content: node.title.clone(),
                 position: Point::new(node.rect.center_x(), node.rect.y + PORT_SPACING / 2.0),
@@ -361,7 +588,7 @@ impl Program<Message> for BoardView {
                 ..Text::default()
             });
         }
-        for (p, at) in &self.0.pins {
+        for (p, at) in &board.pins {
             match p.endpoint {
                 // Drawn in the gutter; the wire starts at the board's edge.
                 Endpoint::Track(_) => {}
@@ -387,14 +614,54 @@ impl Program<Message> for BoardView {
         }
         vec![frame.into_geometry()]
     }
+
+    fn mouse_interaction(
+        &self,
+        state: &BoardState,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        match state.drag {
+            BoardDrag::Node(..) => return mouse::Interaction::Grabbing,
+            BoardDrag::Output(_) => return mouse::Interaction::ResizingVertically,
+            BoardDrag::Idle => {}
+        }
+        match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+            Some(Hit::Pin(p)) if p.endpoint == Endpoint::Output => {
+                mouse::Interaction::ResizingVertically
+            }
+            Some(Hit::Pin(p)) if p.output => mouse::Interaction::Crosshair,
+            Some(Hit::Node(_)) => mouse::Interaction::Grab,
+            Some(Hit::Wire(_)) => mouse::Interaction::Pointer,
+            _ => mouse::Interaction::default(),
+        }
+    }
 }
 
-/// Draws the port gutter: a pin centred on each lane (given by its centre), with a stub to the
-/// board.
-pub struct GutterView(pub Vec<f32>);
+/// Draws the port gutter: a pin centred on each lane, with a stub to the board. Pressing a pin
+/// starts a wire from it.
+pub struct GutterView(pub Vec<(Pin, f32)>);
 
 impl Program<Message> for GutterView {
     type State = ();
+
+    fn update(
+        &self,
+        _state: &mut (),
+        event: &canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        let canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event else {
+            return None;
+        };
+        let at = cursor.position_in(bounds)?;
+        let centre = Point::new(bounds.width / 2.0, 0.0);
+        self.0
+            .iter()
+            .find(|(_, y)| Point::new(centre.x, *y).distance(at) <= PIN_RADIUS + 3.0)
+            .map(|(pin, _)| canvas::Action::publish(Message::StartWire(*pin)).and_capture())
+    }
 
     fn draw(
         &self,
@@ -408,7 +675,7 @@ impl Program<Message> for GutterView {
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.chrome);
         let x = bounds.width / 2.0;
-        for &y in &self.0 {
+        for &(_, y) in &self.0 {
             frame.fill_rectangle(
                 Point::new(x, y - WIRE_WIDTH / 2.0),
                 Size::new(bounds.width - x, WIRE_WIDTH),
@@ -417,6 +684,24 @@ impl Program<Message> for GutterView {
             pin(&mut frame, Point::new(x, y), PIN_RADIUS, t.lane);
         }
         vec![frame.into_geometry()]
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &(),
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        let over = cursor.position_in(bounds).is_some_and(|at| {
+            self.0
+                .iter()
+                .any(|(_, y)| Point::new(bounds.width / 2.0, *y).distance(at) <= PIN_RADIUS + 3.0)
+        });
+        if over {
+            mouse::Interaction::Crosshair
+        } else {
+            mouse::Interaction::default()
+        }
     }
 }
 
@@ -571,6 +856,97 @@ mod tests {
         for pair in board.nodes.windows(2) {
             assert!(pair[1].rect.y >= pair[0].rect.y + pair[0].rect.height);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_hit_finds_pins_nodes_wires_and_nothing() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let board = layout(
+            session.state(),
+            &[(vocal, vec![90.0])],
+            Size::new(600.0, 400.0),
+        );
+        let mixer = &board.nodes[0];
+        let input = Pin {
+            endpoint: Endpoint::Node(mixer.id),
+            output: false,
+            port: 0,
+            side: None,
+        };
+        let at = *board.pins.get(&input).ok_or("no input")?;
+        assert_eq!(board.hit(Point::new(at.x + 4.0, at.y)), Hit::Pin(input));
+        assert_eq!(board.hit(mixer.rect.center()), Hit::Node(mixer.id));
+        // Midway along the vocal's wire.
+        let wire = board
+            .wires
+            .iter()
+            .find(|w| w.to == input)
+            .ok_or("no wire")?;
+        let from = *board.pins.get(&wire.from).ok_or("no from")?;
+        assert_eq!(board.hit(along(from, at, 0.5)), Hit::Wire(wire.connection));
+        assert_eq!(board.hit(Point::new(5.0, 390.0)), Hit::Nothing);
+        Ok(())
+    }
+
+    #[test]
+    fn test_inputs_take_one_wire() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        let out = Pin {
+            endpoint: Endpoint::Track(vocal),
+            output: true,
+            port: 0,
+            side: None,
+        };
+        let taken = Pin {
+            endpoint: Endpoint::Node(mixer),
+            output: false,
+            port: 0,
+            side: None,
+        };
+        let left = Pin {
+            endpoint: Endpoint::Output,
+            output: false,
+            port: 0,
+            side: Some(Side::Left),
+        };
+        assert!(occupied(session.state(), taken));
+        assert!(!can_connect(session.state(), out, taken));
+        // The mixer feeds the whole output port, so both sides are taken.
+        assert!(occupied(session.state(), left));
+        assert!(!can_connect(session.state(), taken, out), "input to output");
+        session.add_mixer_channels(mixer, 1)?;
+        let free = Pin { port: 1, ..taken };
+        assert!(can_connect(session.state(), out, free));
+        Ok(())
+    }
+
+    #[test]
+    fn test_placed_nodes_and_outputs_stay_where_put() -> Result {
+        let mut session = Session::new_project();
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        session.move_node(mixer, Some(project_model::Position { x: 300.0, y: 500.0 }))?;
+        session.move_output(Some(40.0))?;
+        let board = layout(session.state(), &[], Size::new(100.0, 100.0));
+        assert_eq!(board.nodes[0].rect.position(), Point::new(300.0, 500.0));
+        let left = Pin {
+            endpoint: Endpoint::Output,
+            output: false,
+            port: 0,
+            side: Some(Side::Left),
+        };
+        assert_eq!(board.pins.get(&left).map(|p| p.y), Some(40.0));
+        // Still to the right of every node, and the board grows to hold it.
+        assert!(
+            board
+                .pins
+                .get(&left)
+                .is_some_and(|p| p.x > 300.0 + NODE_WIDTH)
+        );
+        assert!(board.size.height > 500.0);
         Ok(())
     }
 }

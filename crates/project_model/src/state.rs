@@ -127,6 +127,9 @@ pub struct State {
     pub nodes: Vec<Node>,
     /// The connections, in the order they were made.
     pub connections: Vec<Connection>,
+    /// Where the user put the project output's L and R on the patch board, as L's height in
+    /// logical pixels; `None` leaves it to the automatic layout.
+    pub output_y: Option<f32>,
 }
 
 impl State {
