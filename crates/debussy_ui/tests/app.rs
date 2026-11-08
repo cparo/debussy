@@ -393,6 +393,21 @@ fn test_seek_sets_the_return_point_and_stop_returns_there() -> Result<(), Box<dy
 }
 
 #[test]
+fn test_stop_shows_the_return_point_before_the_real_time_side_runs() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::Seek(9600));
+    block(&mut processor)?;
+    app.update(Message::Play);
+    for _ in 0..8 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Stop);
+    // The redraw that follows the click reads the playhead before the audio thread runs again.
+    assert_eq!(app.engine().playhead(), 9600);
+    Ok(())
+}
+
+#[test]
 fn test_seek_out_of_view_brings_it_into_view() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let far = app.view_span() * 10;
