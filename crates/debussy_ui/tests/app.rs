@@ -578,3 +578,130 @@ fn test_board_ports_line_up_with_the_lanes() -> Result<(), Box<dyn Error>> {
     assert_eq!(board.wires.len(), 5);
     Ok(())
 }
+
+fn input(node: NodeId, port: usize) -> debussy_ui::Pin {
+    debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Node(node),
+        output: false,
+        port,
+        side: None,
+    }
+}
+
+#[test]
+fn test_wires_connect_free_inputs_and_delete_as_steps() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    let vocal = app.session().state().tracks[0].id;
+    let out = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Track(vocal),
+        output: true,
+        port: 0,
+        side: None,
+    };
+    // Channel 1 is taken: dropping there does nothing.
+    app.update(Message::StartWire(out));
+    app.update(Message::FinishWire(Some(input(mixer, 0))));
+    assert!(!app.session().can_undo());
+    app.update(Message::AddMixerChannel(mixer));
+    app.update(Message::StartWire(out));
+    app.update(Message::FinishWire(Some(input(mixer, 1))));
+    let state = app.session().state();
+    let wire = state
+        .connections
+        .iter()
+        .find(|c| c.to == project_model::Endpoint::Node(mixer) && c.input == 1)
+        .ok_or("not connected")?
+        .id;
+    // Dropped nowhere: nothing.
+    app.update(Message::StartWire(out));
+    app.update(Message::FinishWire(None));
+    let count = app.session().state().connections.len();
+    app.update(Message::Select(Some(debussy_ui::Selection::Wire(wire))));
+    app.update(Message::DeleteSelection);
+    assert_eq!(app.session().state().connections.len(), count - 1);
+    assert_eq!(app.selection(), None);
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().connections.len(), count);
+    Ok(())
+}
+
+#[test]
+fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddNode(debussy_ui::NewNode::Bus));
+    let bus = app.session().state().nodes.last().ok_or("no node")?.id;
+    assert_eq!(app.selection(), Some(debussy_ui::Selection::Node(bus)));
+    let _ = app.view();
+    // A drag shows live and records one step on drop.
+    for x in [10.0, 50.0, 90.0] {
+        app.update(Message::DragNode(
+            bus,
+            project_model::Position { x, y: 30.0 },
+        ));
+    }
+    let board = app.board(iced::Size::new(600.0, 400.0));
+    let shown = board
+        .nodes
+        .iter()
+        .find(|n| n.id == bus)
+        .ok_or("not shown")?;
+    assert_eq!(shown.rect.x, 90.0);
+    assert_eq!(
+        app.session().state().node(bus).and_then(|n| n.position),
+        None
+    );
+    app.update(Message::Drop);
+    assert_eq!(
+        app.session().state().node(bus).and_then(|n| n.position),
+        Some(project_model::Position { x: 90.0, y: 30.0 })
+    );
+    app.update(Message::DragOutput(200.0));
+    app.update(Message::Drop);
+    assert_eq!(app.session().state().output_y, Some(200.0));
+    // Delete is ignored while typing.
+    app.update(Message::DelayText(bus, "1".into()));
+    app.update(Message::DeleteSelection);
+    assert!(app.session().state().node(bus).is_some());
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(bus))));
+    app.update(Message::DeleteSelection);
+    assert!(app.session().state().node(bus).is_none());
+    // Undo the delete, the output move, the node move and the add.
+    for _ in 0..4 {
+        app.update(Message::Undo);
+    }
+    assert!(app.session().state().node(bus).is_none());
+    assert_eq!(app.session().state().output_y, None);
+    Ok(())
+}
+
+#[test]
+fn test_node_dialogs_edit_mixers_and_delays() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    let _ = app.view();
+    // Channel 1 holds the vocal, so it cannot be removed; a new channel 2 can.
+    assert_eq!(app.removable_channel(mixer), None);
+    app.update(Message::AddMixerChannel(mixer));
+    assert_eq!(app.removable_channel(mixer), Some(1));
+    app.update(Message::RemoveMixerChannel(mixer));
+    assert!(matches!(
+        app.session().state().node(mixer).map(|n| &n.kind),
+        Some(NodeKind::Mixer { channels: 1, .. })
+    ));
+    app.update(Message::AddNode(debussy_ui::NewNode::FeedbackDelay));
+    let delay = app.session().state().nodes.last().ok_or("no node")?.id;
+    let _ = app.view();
+    app.update(Message::DelayText(delay, "0.5".into()));
+    app.update(Message::CommitDelay);
+    assert!(matches!(
+        app.session().state().node(delay).map(|n| &n.kind),
+        Some(NodeKind::FeedbackDelay { seconds, .. }) if *seconds == 0.5
+    ));
+    app.update(Message::DelayText(delay, "soon".into()));
+    app.update(Message::CommitDelay);
+    assert!(app.status().is_some());
+    app.update(Message::DeleteNode(delay));
+    assert!(app.session().state().node(delay).is_none());
+    assert_eq!(app.selection(), None);
+    Ok(())
+}

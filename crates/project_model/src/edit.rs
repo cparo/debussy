@@ -110,6 +110,16 @@ pub enum Edit {
         /// The pan, −1 to 1.
         pan: f32,
     },
+    /// Moves a node on the patch board; `None` returns it to the automatic layout.
+    MoveNode {
+        /// The node.
+        node: NodeId,
+        /// Its new position.
+        position: Option<crate::routing::Position>,
+    },
+    /// Moves the project output's L and R up or down the patch board; `None` returns them to
+    /// the automatic layout.
+    MoveOutput(Option<f32>),
     /// Replaces the whole state, as when restoring a named version.
     Restore(State),
     /// Several edits applied in order, as one.
@@ -271,6 +281,24 @@ impl Edit {
                     connection,
                     pan: old,
                 })
+            }
+            Edit::MoveNode { node, position } => {
+                if let Some(p) = position {
+                    routing::check_coordinate(p.x)?;
+                    routing::check_coordinate(p.y)?;
+                }
+                let index = node_index(state, node)?;
+                let old = std::mem::replace(&mut state.nodes[index].position, position);
+                Ok(Edit::MoveNode {
+                    node,
+                    position: old,
+                })
+            }
+            Edit::MoveOutput(y) => {
+                if let Some(y) = y {
+                    routing::check_coordinate(y)?;
+                }
+                Ok(Edit::MoveOutput(std::mem::replace(&mut state.output_y, y)))
             }
             Edit::Restore(new) => {
                 check_state(&new)?;
@@ -460,7 +488,11 @@ fn check_state(state: &State) -> Result<(), Error> {
         tracks: state.tracks.clone(),
         nodes: state.nodes.clone(),
         connections: Vec::with_capacity(state.connections.len()),
+        output_y: state.output_y,
     };
+    if let Some(y) = state.output_y {
+        routing::check_coordinate(y)?;
+    }
     for connection in &state.connections {
         check_connection(&built, connection)?;
         built.connections.push(*connection);

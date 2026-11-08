@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,6 +30,10 @@ pub(crate) struct SavedProject {
     pub tracks: Vec<SavedTrack>,
     pub nodes: Vec<SavedNode>,
     pub connections: Vec<SavedConnection>,
+    /// Since version 3: the height of the project output's L on the patch board; absent for
+    /// the automatic layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_y: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +87,18 @@ pub(crate) struct SavedClip {
 pub(crate) struct SavedNode {
     pub id: u64,
     pub kind: SavedNodeKind,
+    /// Since version 3: where the node sits on the patch board; absent for the automatic
+    /// layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<SavedPosition>,
+}
+
+/// A point on the patch board, in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedPosition {
+    pub x: f32,
+    pub y: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

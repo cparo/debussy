@@ -21,6 +21,8 @@ pub enum Menu {
     Track(TrackId),
     /// The "+" below the tracks.
     AddTrack,
+    /// The "+" at the board's top right.
+    AddNode,
 }
 
 /// A line in a menu.
