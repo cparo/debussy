@@ -202,6 +202,41 @@ fn test_pause_holds_and_stop_returns_to_start() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn test_playhead_after_stop_is_the_start_point_before_the_real_time_side_runs()
+-> Result<(), Box<dyn Error>> {
+    let g = graph(0)?;
+    let control = Arc::new(StreamControl::default());
+    control.ready.store(true, Ordering::SeqCst);
+    let mut streams = TestStreams(Arc::clone(&control));
+    let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+    engine.locate(1000, &mut streams)?;
+    engine.play(&mut streams)?;
+    run(&mut processor, 4)?;
+    engine.stop()?;
+    // The view redraws before the real-time side has run again.
+    assert_eq!(engine.playhead(), 1000);
+    run(&mut processor, 1)?;
+    assert_eq!(engine.playhead(), 1000);
+    Ok(())
+}
+
+#[test]
+fn test_playhead_after_locate_while_stopped_is_the_new_frame_before_the_real_time_side_runs()
+-> Result<(), Box<dyn Error>> {
+    let g = graph(0)?;
+    let control = Arc::new(StreamControl::default());
+    control.ready.store(true, Ordering::SeqCst);
+    let mut streams = TestStreams(Arc::clone(&control));
+    let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+    run(&mut processor, 1)?;
+    engine.locate(5000, &mut streams)?;
+    assert_eq!(engine.playhead(), 5000);
+    run(&mut processor, 1)?;
+    assert_eq!(engine.playhead(), 5000);
+    Ok(())
+}
+
+#[test]
 fn test_locate_while_playing_jumps_and_becomes_the_return_point() -> Result<(), Box<dyn Error>> {
     let g = graph(0)?;
     let control = Arc::new(StreamControl::default());
