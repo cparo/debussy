@@ -30,13 +30,36 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.
-- **Right pane:** the mixer's channel strips, until the patch board replaces them.
+- **Divider, gutter and board:** a draggable divider (starting at 60 % tracks, 40 % board), the
+  port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
+  vertically together under one scrollbar at the window's right edge.
+- **Mixer panel:** the mixer's channel strips sit in a panel above the bottom bar until the mixer
+  has its node dialog.
 - **Lanes** show waveforms from the waveform summaries, or spectrograms: one spectrum per four
   waveform columns, computed on demand from the stored audio as 64 log-spaced bands.
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
   chrome changes between light and dark. The tone follows the system's appearance at launch and
   when it changes; the toggle is not saved.
 - **Menus** are flat buttons floated over the window; a click anywhere else closes the open menu.
+
+([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
+
+## Patch board
+
+The patch board draws the routing; it pans horizontally with its own scrollbar when wider than
+its pane, is never narrower than its pane, and does not zoom.
+
+- The gutter holds one port per lane, centred on the lane.
+- Every wire is mono and orange. A stereo port is drawn as two circles, left above right; a
+  connection that names a side joins that circle, and a whole-port connection is drawn as a wire
+  per side.
+- Node ports are 48 pixels apart, inputs on the left and outputs on the right, and a node's height
+  follows from its taller side. A mixer has a mono input per channel and a stereo output; a bus or
+  feedback delay one port of its layout each way; an effect is drawn with one stereo port each way.
+- Nodes are placed automatically in columns by graph depth (one past the deepest node feeding
+  them), each column ordered by the height of what feeds it.
+- The project output's L and R sit just inside the board's right edge, to the right of every node,
+  level with what feeds them.
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
 
