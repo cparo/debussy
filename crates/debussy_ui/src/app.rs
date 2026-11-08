@@ -5,16 +5,17 @@
 //! Gestures follow ADR-0037 and ADR-0043: while a slider is dragged its value goes straight to
 //! the running graph's parameter; releasing it records one undo step.
 
+use audio_buffers::Layout;
 use audio_effects::{Control, Mode, parameter_name};
 use audio_engine::Engine;
 use engine_bridge::Bridge;
-use project_model::{NodeId, NodeKind, Session, Track, TrackId};
+use project_model::{Edit, NodeId, NodeKind, Session, Track, TrackId};
 
+use crate::menu::Menu;
 use crate::services::Services;
-use crate::waveform::{LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, lane};
-
-/// The finest zoom out: frames per lane column.
-pub const MAX_SAMPLES_PER_COLUMN: u64 = 1 << 24;
+use crate::theme::Tone;
+use crate::transport::{DEFAULT_ZOOM, MAX_ZOOM, samples_per_column, zoomed_start};
+use crate::waveform::{Display, LANE_COLUMNS, Lane, lanes};
 
 /// Something the user did, or a frame tick.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,20 +24,35 @@ pub enum Message {
     Play,
     /// Pause, holding the playhead.
     Pause,
-    /// Stop, returning to where playback started.
+    /// Stop, returning to the return point.
     Stop,
-    /// Move the playhead to the start.
-    Rewind,
-    /// Turn mono listening on or off.
-    ToggleMono,
+    /// Move the playhead to this timeline frame, playing on from there if playing; it becomes
+    /// the return point.
+    Seek(u64),
+    /// Turn mono listening on (`true`) or off.
+    SetMono(bool),
     /// A display frame while playing: refresh the playhead and finish pending work.
     Tick,
-    /// Show half as much time.
+    /// Show less time: one √2 step.
     ZoomIn,
-    /// Show twice as much time.
+    /// Show more time: one √2 step.
     ZoomOut,
-    /// Scroll by this many lane columns (negative is earlier).
-    Scroll(i64),
+    /// Pan by this fraction of the visible time (negative is earlier).
+    Pan(f32),
+    /// Show waveforms or spectrograms.
+    SetDisplay(Display),
+    /// Switch between light and dark chrome.
+    ToggleTone,
+    /// The system's appearance, at launch or when it changes.
+    SystemTone(Tone),
+    /// Open this menu, or close it if it is open.
+    OpenMenu(Menu),
+    /// Close the open menu.
+    CloseMenu,
+    /// The track pane scrolled to this offset from the top, in logical pixels.
+    TracksScrolled(f32),
+    /// Quit the application; the window's shell handles it.
+    Quit,
     /// Undo the latest step.
     Undo,
     /// Redo the latest undone step.
@@ -45,6 +61,18 @@ pub enum Message {
     Save,
     /// Import files as new tracks, through a file dialog.
     Import,
+    /// Import files into this track, through a file dialog: each a clip from the playhead on.
+    ImportInto(TrackId),
+    /// Add an empty track of this layout after the others.
+    AddTrack(Layout),
+    /// Delete a track, its clips and its connections.
+    DeleteTrack(TrackId),
+    /// Start renaming a track.
+    StartRename(TrackId),
+    /// The new name being typed.
+    RenameText(String),
+    /// Finish renaming: record the typed name as one step.
+    FinishRename,
     /// Export the mix, through a file dialog; the mono mix if `true`.
     Export(bool),
     /// Use this audio device for input and output.
@@ -88,11 +116,25 @@ pub struct App {
     pub(crate) engine: Engine,
     pub(crate) services: Box<dyn Services>,
     sample_rate: u32,
+    /// The project's name, for the top bar.
+    pub(crate) project_name: String,
     /// The first timeline frame shown.
     pub(crate) start: u64,
-    /// Frames per lane column.
-    pub(crate) samples_per_column: u64,
-    pub(crate) lanes: Vec<(TrackId, Lane)>,
+    /// The zoom level; see [`samples_per_column`].
+    zoom: u32,
+    /// Where stop returns to: the last place seeked to.
+    return_point: u64,
+    /// Each track's lanes, one per channel, in track order.
+    pub(crate) lanes: Vec<(TrackId, Vec<Lane>)>,
+    /// Changes whenever the lanes' contents or the tone change.
+    pub(crate) generation: u64,
+    pub(crate) display: Display,
+    pub(crate) tone: Tone,
+    pub(crate) menu: Option<Menu>,
+    /// The track being renamed, and the name typed so far.
+    pub(crate) renaming: Option<(TrackId, String)>,
+    /// How far the track pane is scrolled down, in logical pixels.
+    pub(crate) tracks_scrolled: f32,
     /// The tracks the engine's feeds were made from.
     loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
@@ -118,9 +160,17 @@ impl App {
             engine,
             services,
             sample_rate: sample_rate.max(1),
+            project_name: String::new(),
             start: 0,
-            samples_per_column: 1024,
+            zoom: DEFAULT_ZOOM,
+            return_point: 0,
             lanes: Vec::new(),
+            generation: 0,
+            display: Display::default(),
+            tone: Tone::default(),
+            menu: None,
+            renaming: None,
+            tracks_scrolled: 0.0,
             loaded: None,
             live: None,
             devices: (Vec::new(), None),
@@ -151,6 +201,11 @@ impl App {
         &self.bridge
     }
 
+    /// Names the project in the top bar.
+    pub fn set_project_name(&mut self, name: String) {
+        self.project_name = name;
+    }
+
     /// Shows `message` on the status line.
     pub fn set_status(&mut self, message: String) {
         self.status = Some(message);
@@ -161,6 +216,42 @@ impl App {
         self.status.as_deref()
     }
 
+    /// Frames per lane column at the current zoom.
+    pub fn samples_per_column(&self) -> u64 {
+        samples_per_column(self.zoom)
+    }
+
+    /// The first timeline frame shown.
+    pub fn view_start(&self) -> u64 {
+        self.start
+    }
+
+    /// The frames shown across a lane.
+    pub fn view_span(&self) -> u64 {
+        self.samples_per_column()
+            .saturating_mul(LANE_COLUMNS as u64)
+    }
+
+    /// Where stop returns to.
+    pub fn return_point(&self) -> u64 {
+        self.return_point
+    }
+
+    /// Light or dark chrome.
+    pub fn tone(&self) -> Tone {
+        self.tone
+    }
+
+    /// Waveforms or spectrograms.
+    pub fn display(&self) -> Display {
+        self.display
+    }
+
+    /// The open menu, if any.
+    pub fn menu(&self) -> Option<Menu> {
+        self.menu
+    }
+
     /// Whether the interface needs a tick every display frame: while playing or starting.
     pub fn wants_ticks(&self) -> bool {
         self.engine.is_playing()
@@ -168,7 +259,30 @@ impl App {
 
     /// Handles `message`.
     pub fn update(&mut self, message: Message) {
-        self.status = None;
+        // A frame tick, a scroll or typing leaves the status line and the open menu alone;
+        // anything else replaces the status and closes the menu.
+        if !matches!(
+            message,
+            Message::Tick
+                | Message::TracksScrolled(_)
+                | Message::SystemTone(_)
+                | Message::RenameText(_)
+                | Message::OpenMenu(_)
+        ) {
+            self.status = None;
+            self.menu = None;
+        }
+        // Doing anything else while renaming a track finishes the rename.
+        if !matches!(
+            message,
+            Message::Tick
+                | Message::TracksScrolled(_)
+                | Message::SystemTone(_)
+                | Message::RenameText(_)
+                | Message::FinishRename
+        ) {
+            self.finish_rename();
+        }
         match message {
             Message::Play => self.play(),
             Message::Pause => {
@@ -176,14 +290,14 @@ impl App {
                 self.report(result.map_err(|e| e.to_string()));
             }
             Message::Stop => {
-                let result = self.engine.stop();
+                let result = self.engine.stop().and_then(|()| {
+                    self.engine
+                        .locate(self.return_point, self.services.streams())
+                });
                 self.report(result.map_err(|e| e.to_string()));
             }
-            Message::Rewind => {
-                let result = self.engine.locate(0, self.services.streams());
-                self.report(result.map_err(|e| e.to_string()));
-            }
-            Message::ToggleMono => self.engine.set_mono(!self.engine.mono()),
+            Message::Seek(frame) => self.seek(frame),
+            Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::Tick => {
                 self.engine.collect();
                 let result = self.bridge.commit();
@@ -194,25 +308,69 @@ impl App {
                     self.status = Some(format!("Audio stopped: {error}"));
                 }
             }
-            Message::ZoomIn => self.zoom(self.samples_per_column / 2),
-            Message::ZoomOut => self.zoom(self.samples_per_column.saturating_mul(2)),
-            Message::Scroll(columns) => {
-                let by = columns
-                    .unsigned_abs()
-                    .saturating_mul(self.samples_per_column);
-                self.start = if columns < 0 {
+            Message::ZoomIn => self.zoom(self.zoom.saturating_sub(1)),
+            Message::ZoomOut => self.zoom((self.zoom + 1).min(MAX_ZOOM)),
+            Message::Pan(fraction) => {
+                let by = (f64::from(fraction.abs()) * self.view_span() as f64) as u64;
+                self.start = if fraction < 0.0 {
                     self.start.saturating_sub(by)
                 } else {
                     self.start.saturating_add(by)
                 };
                 self.refresh_lanes();
             }
+            Message::SetDisplay(display) => {
+                self.display = display;
+                self.refresh_lanes();
+            }
+            Message::ToggleTone => self.set_tone(self.tone.toggled()),
+            Message::SystemTone(tone) => self.set_tone(tone),
+            Message::OpenMenu(menu) => {
+                self.menu = (self.menu != Some(menu)).then_some(menu);
+            }
+            Message::CloseMenu | Message::Quit => {}
+            Message::TracksScrolled(offset) => self.tracks_scrolled = offset,
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
             Message::Save => {
                 let result = self.services.save(&self.session);
                 self.report(result);
             }
-            Message::Import => self.import(),
+            Message::Import => self.import(None),
+            Message::ImportInto(track) => self.import(Some(track)),
+            Message::AddTrack(layout) => {
+                if self.refuse_while_playing("add a track") {
+                    return;
+                }
+                let name = format!("Track {}", self.session.state().tracks.len() + 1);
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.add_track(&name, layout));
+                self.report(result.map(|_| ()).map_err(|e| e.to_string()));
+                self.refresh_lanes();
+            }
+            Message::DeleteTrack(track) => {
+                if self.refuse_while_playing("delete a track") {
+                    return;
+                }
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.remove_track(track));
+                self.report(result.map_err(|e| e.to_string()));
+                self.refresh_lanes();
+            }
+            Message::StartRename(track) => {
+                self.renaming = self
+                    .session
+                    .state()
+                    .track(track)
+                    .map(|t| (track, t.name.clone()));
+            }
+            Message::RenameText(name) => {
+                if let Some((_, typed)) = &mut self.renaming {
+                    *typed = name;
+                }
+            }
+            Message::FinishRename => self.finish_rename(),
             Message::Export(mono) => match self.services.export(self.session.state(), mono) {
                 Ok(Some(name)) => self.status = Some(format!("Exported {name}")),
                 Ok(None) => {}
@@ -303,9 +461,10 @@ impl App {
         self.report(result.map_err(|e| e.to_string()));
     }
 
-    fn import(&mut self) {
-        if self.engine.is_playing() {
-            self.status = Some("Stop playback to import.".to_owned());
+    /// Imports through the file dialog: each file as a new track, or with `into`, as a clip on
+    /// that track from the playhead on, end to end. Each file is one step.
+    fn import(&mut self, into: Option<TrackId>) {
+        if self.refuse_while_playing("import") {
             return;
         }
         let imported = match self.services.import() {
@@ -315,16 +474,78 @@ impl App {
                 return;
             }
         };
+        let mut position = self.engine.playhead();
         for track in imported {
             let clip = project_model::Clip::new(track.source, 0, track.frames, 0);
-            let result = self.bridge.edit(&mut self.session, |s| {
-                s.add_track_with_clip(&track.name, track.layout, clip)
-            });
+            let result = match into {
+                None => self
+                    .bridge
+                    .edit(&mut self.session, |s| {
+                        s.add_track_with_clip(&track.name, track.layout, clip)
+                    })
+                    .map(|_| ()),
+                Some(id) => {
+                    let clip = project_model::Clip { position, ..clip };
+                    let end = clip.end();
+                    let added = self
+                        .bridge
+                        .edit(&mut self.session, |s| s.add_clip(id, clip));
+                    if added.is_ok() {
+                        position = end;
+                    }
+                    added.map(|_| ())
+                }
+            };
             if let Err(error) = result {
                 self.status = Some(format!("{}: {error}", track.name));
             }
         }
         self.refresh_lanes();
+    }
+
+    /// Moves the playhead to `frame` and makes it the return point, bringing it into view.
+    fn seek(&mut self, frame: u64) {
+        let result = self.engine.locate(frame, self.services.streams());
+        self.report(result.map_err(|e| e.to_string()));
+        self.return_point = frame;
+        let span = self.view_span();
+        if frame < self.start || frame >= self.start.saturating_add(span) {
+            self.start = frame.saturating_sub(span / 2);
+            self.refresh_lanes();
+        }
+    }
+
+    fn set_tone(&mut self, tone: Tone) {
+        self.tone = tone;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    fn finish_rename(&mut self) {
+        let Some((track, name)) = self.renaming.take() else {
+            return;
+        };
+        let name = name.trim().to_owned();
+        let unchanged = self
+            .session
+            .state()
+            .track(track)
+            .is_none_or(|t| t.name == name);
+        if name.is_empty() || unchanged {
+            return;
+        }
+        let result = self.bridge.edit(&mut self.session, |s| {
+            s.apply(Edit::RenameTrack { track, name })
+        });
+        self.report(result.map_err(|e| e.to_string()));
+    }
+
+    /// Reports and returns `true` while playing: `what` waits for the transport to stop.
+    fn refuse_while_playing(&mut self, what: &str) -> bool {
+        let playing = self.engine.is_playing();
+        if playing {
+            self.status = Some(format!("Stop playback to {what}."));
+        }
+        playing
     }
 
     /// Re-reads the device list and the device in use.
@@ -333,8 +554,7 @@ impl App {
     }
 
     fn history(&mut self, undo: bool) {
-        if self.engine.is_playing() {
-            self.status = Some("Stop or pause playback to undo or redo.".to_owned());
+        if self.refuse_while_playing("undo or redo") {
             return;
         }
         let result = if undo {
@@ -346,30 +566,54 @@ impl App {
         self.refresh_lanes();
     }
 
-    fn zoom(&mut self, samples_per_column: u64) {
-        self.samples_per_column =
-            samples_per_column.clamp(MIN_SAMPLES_PER_COLUMN, MAX_SAMPLES_PER_COLUMN);
+    /// Zooms to `level`, keeping the playhead in place if it is in view, else the view's centre.
+    fn zoom(&mut self, level: u32) {
+        let old = self.samples_per_column();
+        let anchor = match self.playhead_fraction() {
+            Some(_) => self.engine.playhead(),
+            None => self.start.saturating_add(self.view_span() / 2),
+        };
+        self.zoom = level;
+        self.start = zoomed_start(self.start, old, self.samples_per_column(), anchor);
         self.refresh_lanes();
     }
 
-    /// Recomputes every track's waveform lane for the visible stretch.
+    /// Recomputes every track's lanes for the visible stretch.
     pub(crate) fn refresh_lanes(&mut self) {
-        let (start, spc) = (self.start, self.samples_per_column);
+        let (start, spc, display) = (self.start, self.samples_per_column(), self.display);
         let services = self.services.as_mut();
         self.lanes = self
             .session
             .state()
             .tracks
             .iter()
-            .map(|track| (track.id, lane(track, start, spc, services)))
+            .map(|track| (track.id, lanes(track, start, spc, display, services)))
             .collect();
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Where the playhead falls in the visible stretch, as a fraction of its width.
     pub(crate) fn playhead_fraction(&self) -> Option<f32> {
-        let span = self.samples_per_column.saturating_mul(LANE_COLUMNS as u64);
+        let span = self.view_span();
         let at = self.engine.playhead().checked_sub(self.start)?;
         (at < span).then(|| at as f32 / span as f32)
+    }
+
+    /// The timeline's length for the position bar: the end of the last clip, or further to
+    /// take in the visible window and the playhead.
+    pub(crate) fn timeline_length(&self) -> u64 {
+        let clips = self
+            .session
+            .state()
+            .tracks
+            .iter()
+            .flat_map(|t| t.clips.iter().map(|(_, c)| c.end()))
+            .max()
+            .unwrap_or(0);
+        clips
+            .max(self.start.saturating_add(self.view_span()))
+            .max(self.engine.playhead())
+            .max(1)
     }
 
     fn report(&mut self, result: Result<(), String>) {
