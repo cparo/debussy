@@ -133,6 +133,36 @@ fn test_seek_discards_old_blocks_and_plays_from_new_position() -> Result<(), Box
 }
 
 #[test]
+fn test_discard_stale_frees_a_full_read_ahead_for_the_new_position() -> Result<(), Box<dyn Error>> {
+    let config = StreamerConfig {
+        read_ahead: Duration::from_millis(100),
+        ..config()
+    };
+    let (mut streamer, mut playbacks) =
+        Streamer::start(vec![Box::new(Ramp::new(500_000))], config)?;
+    let playback = &mut playbacks[0];
+    // Without reading, let the reader fill every block at frame 0.
+    wait_primed(playback, 4800)?;
+    sleep(Duration::from_millis(50));
+    streamer.seek(0, Plan::from(300_000))?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !assert_realtime(|| {
+        playback.discard_stale();
+        playback.is_primed(4800)
+    }) {
+        if Instant::now() > deadline {
+            return Err("stream never primed at the new position".into());
+        }
+        sleep(Duration::from_millis(1));
+    }
+    let out = play(playback, 1000)?;
+    for (n, &s) in out.iter().enumerate() {
+        assert_eq!(s, value(300_000 + n as u64), "frame {n}");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_loop_region_wraps_without_a_gap() -> Result<(), Box<dyn Error>> {
     let (mut streamer, mut playbacks) =
         Streamer::start(vec![Box::new(Ramp::new(100_000))], config())?;
