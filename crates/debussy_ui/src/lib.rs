@@ -30,9 +30,9 @@ mod waveform;
 
 use std::sync::Mutex;
 
-pub use app::{App, Message};
+pub use app::{App, Message, NewNode};
 pub use menu::Menu;
-pub use patch_board::{Board, NodeBox, PORT_SPACING, Pin, Wire};
+pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use services::{DeviceChoice, ImportedTrack, Services};
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;

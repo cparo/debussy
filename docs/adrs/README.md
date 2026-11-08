@@ -84,4 +84,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0058](0058-stereo-ports-are-connected-by-side-and-new-tracks.md) | Stereo ports are connected by side, and new tracks join a project mixer | Accepted | [Routing](../architecture/project.md#routing) |
 | [ADR-0059](0059-the-window-imports-exports-and-picks-one-audio.md) | The window imports, exports and picks one audio device, remembered in app settings | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 | [ADR-0060](0060-the-window-is-laid-out-as-top-bar-track-pane.md) | The window is laid out as top bar, track pane beside the patch board, and bottom bar, with seeking that sets the return point | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0061](0061-node-positions-and-the-outputs-height-are-saved-as.md) | Node positions and the outputs' height are saved as optional fields, and the patch board edits the routing | Accepted | [Saved format](../architecture/project.md#saved-format) |
 

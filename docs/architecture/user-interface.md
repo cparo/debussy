@@ -33,8 +33,9 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Divider, gutter and board:** a draggable divider (starting at 60 % tracks, 40 % board), the
   port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
   vertically together under one scrollbar at the window's right edge.
-- **Mixer panel:** the mixer's channel strips sit in a panel above the bottom bar until the mixer
-  has its node dialog.
+- **Node dialogs** open over the track pane for the selected node: a header with its name and a
+  delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
+  or a feedback delay's time in seconds; a bus has only the header.
 - **Lanes** show waveforms from the waveform summaries, or spectrograms: one spectrum per four
   waveform columns, computed on demand from the stored audio as 64 log-spaced bands.
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
@@ -56,10 +57,22 @@ its pane, is never narrower than its pane, and does not zoom.
 - Node ports are 48 pixels apart, inputs on the left and outputs on the right, and a node's height
   follows from its taller side. A mixer has a mono input per channel and a stereo output; a bus or
   feedback delay one port of its layout each way; an effect is drawn with one stereo port each way.
-- Nodes are placed automatically in columns by graph depth (one past the deepest node feeding
-  them), each column ordered by the height of what feeds it.
+- A node the user has moved stays where they put it. The rest are placed automatically in
+  columns by graph depth (one past the deepest node feeding them), each column ordered by the
+  height of what feeds it.
 - The project output's L and R sit just inside the board's right edge, to the right of every node,
-  level with what feeds them.
+  at the height the user dragged them to, or else level with what feeds them.
+
+Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)):
+
+- Drag from an output to an input to connect; at a stereo port the connection names its side. An
+  input takes one wire; a drop on an occupied input, an output, or empty board does nothing.
+- Drag a node, or the L and R outputs (vertically), to move them; the move is one undo step.
+- Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes the
+  selection, except while text is being typed. A click on empty board clears the selection and
+  closes the dialog.
+- The "+" at the board's top right adds a two-channel mixer, a stereo bus or a stereo feedback
+  delay; no effects are offered yet.
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
 

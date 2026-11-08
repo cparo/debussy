@@ -5,13 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use audio_buffers::Layout;
 use project_model::{
-    AudioFile, Clip, ClipId, Connection, ConnectionId, Edit, Endpoint, Node, NodeId, NodeKind,
-    Side, Source, State, Track, TrackId,
+    AudioFile, Clip, ClipId, Connection, ConnectionId, Edit, Endpoint, MAX_BOARD_COORDINATE, Node,
+    NodeId, NodeKind, Position, Side, Source, State, Track, TrackId,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedEndpoint, SavedFile, SavedLayout, SavedNode,
-    SavedNodeKind, SavedProject, SavedSide, SavedSource, SavedTrack,
+    SavedNodeKind, SavedPosition, SavedProject, SavedSide, SavedSource, SavedTrack,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -62,6 +62,7 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
             .map(|node| SavedNode {
                 id: node.id.0,
                 kind: kind_to_saved(&node.kind),
+                position: node.position.map(|p| SavedPosition { x: p.x, y: p.y }),
             })
             .collect(),
         connections: state
@@ -78,6 +79,7 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
                 to_side: side_to_saved(c.to_side),
             })
             .collect(),
+        output_y: state.output_y,
     }
 }
 
@@ -172,6 +174,14 @@ fn endpoint_from_saved(endpoint: SavedEndpoint) -> Endpoint {
 }
 
 /// Fails with `reason` unless `ok`.
+/// Checks a patch-board coordinate: finite and within `MAX_BOARD_COORDINATE`.
+fn check_coordinate(value: f32) -> Result<(), String> {
+    ensure(
+        value.is_finite() && value.abs() <= MAX_BOARD_COORDINATE,
+        || format!("{value} is not a patch board position"),
+    )
+}
+
 fn ensure(ok: bool, reason: impl FnOnce() -> String) -> Result<(), String> {
     if ok { Ok(()) } else { Err(reason()) }
 }
@@ -321,16 +331,29 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
         ensure(node_ids.insert(node.id), || {
             format!("node id {} is used twice", node.id)
         })?;
+        let position = match node.position {
+            Some(p) => {
+                check_coordinate(p.x)?;
+                check_coordinate(p.y)?;
+                Some(Position { x: p.x, y: p.y })
+            }
+            None => None,
+        };
         nodes.push(Node {
             id: NodeId(node.id),
             kind: kind_from_saved(node.kind)?,
+            position,
         });
     }
 
+    if let Some(y) = saved.output_y {
+        check_coordinate(y)?;
+    }
     let mut state = State {
         tracks,
         nodes,
         connections: Vec::new(),
+        output_y: saved.output_y,
     };
     let mut connection_ids = BTreeSet::new();
     let mut ports = BTreeSet::new();

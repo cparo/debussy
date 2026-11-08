@@ -15,11 +15,18 @@ pub const MAX_DEPTH: u64 = 64;
 pub(crate) type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`.
-const MIGRATIONS: &[Migration] = &[one_to_two];
+const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
 /// connection is a whole-port connection, which is what their absence means.
 fn one_to_two(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
+
+/// Version 3 added an optional `position` to nodes and `output_y` to the project (ADR-0061); a
+/// version 2 file leaves the patch board to the automatic layout, which is what their absence
+/// means.
+fn two_to_three(value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
@@ -128,12 +135,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":3");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":4");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 3,
-                supported: 2,
+                found: 4,
+                supported: 3,
                 ..
             })
         ));
