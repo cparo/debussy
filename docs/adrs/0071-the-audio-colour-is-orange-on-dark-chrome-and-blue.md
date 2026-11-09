@@ -15,9 +15,9 @@ orange. A colour that works on one tone's chrome need not work on the other's.
 
 ## Decision
 
-The audio colour is a per-tone token: orange (`#FF8000`) in the dark tone and blue (`#0073E6`) in
-the light tone. Each tone also names the ink drawn on an audio fill: black on orange, white on
-blue. Every audio-coloured element takes the token of the current tone. Control signals stay
+The audio colour is a per-tone token: orange (`#FF8000`) in the dark tone and a light, muted blue
+(`#76A1CC`) in the light tone. Each tone also names the ink drawn on an audio fill; both are
+black. Every audio-coloured element takes the token of the current tone. Control signals stay
 lavender in both tones.
 
 ## Alternatives considered
@@ -26,7 +26,10 @@ lavender in both tones.
   out, and no single hue sits well on both near-white and near-black chrome.
 - **A darker orange in the light tone** — keeps one hue family but darkens towards brown, losing
   the signal's brightness; blue gives clearer contrast with light grey chrome.
-- **Black ink on the light-tone blue** — low contrast on a saturated mid blue; white reads better.
+- **A saturated mid blue (`#0073E6`)** — tried first; too heavy against light chrome, and it
+  needed white ink.
+- **White ink on the light-tone blue** — about 2.6:1 contrast on `#76A1CC`, against about 8:1
+  for black.
 
 ## Consequences
 
