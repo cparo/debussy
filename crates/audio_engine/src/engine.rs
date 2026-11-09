@@ -5,12 +5,12 @@
 //! These calls run off the real-time thread.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use audio_buffers::{Consumer, Producer, queue};
 use signal_graph::{NodeId, Runner};
 
-use crate::capture::{ArmedTrack, TakeInfo};
+use crate::capture::{ArmedTrack, MAX_INPUTS, TakeInfo};
 use crate::error::Error;
 use crate::feed::{Streams, TrackFeeds};
 use crate::processor::Processor;
@@ -51,9 +51,22 @@ impl TransportState {
     }
 }
 
+/// Each device input's peak since the control side last read it, as `f32` bits. For
+/// non-negative floats the bits order as the values do, so the largest is kept with
+/// `fetch_max`.
+#[derive(Debug)]
+pub(crate) struct Peaks(Box<[AtomicU32]>);
+
+impl Default for Peaks {
+    fn default() -> Self {
+        Peaks((0..MAX_INPUTS).map(|_| AtomicU32::new(0)).collect())
+    }
+}
+
 /// What the real-time side publishes, and the mono switch the control side sets.
 #[derive(Debug, Default)]
 pub(crate) struct Shared {
+    input_peaks: Peaks,
     playhead: AtomicU64,
     state: AtomicU8,
     mono: AtomicBool,
@@ -65,6 +78,15 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    /// Raises device input `channel`'s peak to `peak` (a magnitude) if it is higher.
+    pub(crate) fn raise_peak(&self, channel: usize, peak: f32) {
+        if let Some(slot) = self.input_peaks.0.get(channel)
+            && peak.is_finite()
+        {
+            slot.fetch_max(peak.abs().to_bits(), Ordering::Relaxed);
+        }
+    }
+
     pub(crate) fn start_take(&self, start_frame: u64, latency: u64) {
         self.take_start.store(start_frame, Ordering::Relaxed);
         self.take_latency.store(latency, Ordering::Relaxed);
@@ -221,6 +243,17 @@ impl Engine {
                 start_frame: self.shared.take_start.load(Ordering::Relaxed),
                 latency: self.shared.take_latency.load(Ordering::Relaxed),
             })
+    }
+
+    /// Device input `channel`'s (from 0) peak magnitude since the last call for it, for an input
+    /// meter; 0 for a channel beyond [`MAX_INPUTS`]. Inputs are measured only while a track is
+    /// armed.
+    pub fn take_input_peak(&self, channel: usize) -> f32 {
+        self.shared
+            .input_peaks
+            .0
+            .get(channel)
+            .map_or(0.0, |slot| f32::from_bits(slot.swap(0, Ordering::Relaxed)))
     }
 
     /// Whether the transport is recording, as last set here.

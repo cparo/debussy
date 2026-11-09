@@ -11,6 +11,11 @@ use project_model::{AudioFile, Clip, Source, TrackId};
 use crate::app::App;
 use crate::services::{TakeFiles, TakeStatus};
 
+/// The quietest level an input meter shows, in dBFS.
+pub const METER_FLOOR_DB: f32 = -60.0;
+/// How far a meter falls per display frame when the input drops, in dB.
+const METER_FALL_DB: f32 = 1.5;
+
 /// One armed track's settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Arming {
@@ -79,6 +84,42 @@ impl App {
             .step_by(step)
             .map(|input| InputChoice { input, stereo })
             .collect()
+    }
+
+    /// The armed track's input meter: one level per channel in dBFS, from
+    /// [`METER_FLOOR_DB`] to 0 and above when clipping. Empty until the first frame is measured.
+    pub fn input_levels(&self, track: TrackId) -> &[f32] {
+        self.meters.get(&track).map_or(&[], Vec::as_slice)
+    }
+
+    /// Reads the engine's input peaks for the armed tracks' meters: each meter jumps up to a
+    /// louder peak and falls [`METER_FALL_DB`] per frame otherwise. Called each display frame.
+    pub(crate) fn update_meters(&mut self) {
+        let mut peaks: BTreeMap<usize, f32> = BTreeMap::new();
+        let mut meters = BTreeMap::new();
+        for (id, arming) in &self.arming {
+            let channels = self.track_layout(*id).map_or(0, Layout::channels);
+            let old = self.meters.get(id);
+            let levels = (0..channels)
+                .map(|c| {
+                    let input = arming.input + c;
+                    let peak = *peaks
+                        .entry(input)
+                        .or_insert_with(|| self.engine.take_input_peak(input));
+                    let db = if peak > 0.0 {
+                        (20.0 * peak.log10()).max(METER_FLOOR_DB)
+                    } else {
+                        METER_FLOOR_DB
+                    };
+                    let fallen = old
+                        .and_then(|o| o.get(c))
+                        .map_or(METER_FLOOR_DB, |l| (l - METER_FALL_DB).max(METER_FLOOR_DB));
+                    db.max(fallen)
+                })
+                .collect();
+            meters.insert(*id, levels);
+        }
+        self.meters = meters;
     }
 
     /// Whether the transport is recording.

@@ -26,6 +26,9 @@ people's voices, stored as files in the project bundle. This was raised for huma
 - Record is refused while nothing is armed, while the device has no inputs, and while the previous
   pass's files are still being written. The pass's takes are placed as one undo step once every
   file has finished (ADR-0078).
+- An armed track's header meters its inputs, so a silent or wrong input is seen before
+  recording: in testing, a take recorded from an unused input of a 6-input interface while the
+  microphone was on input 3, with nothing on screen to show it.
 - Take files are named `<track name> <n>[ L| R].wav` from `import_export`'s naming, kept distinct
   across the pass's tracks.
 
@@ -36,6 +39,8 @@ people's voices, stored as files in the project bundle. This was raised for huma
 - **Build the controls but leave the device output-only** — recording would still not work.
 - **Save arm and monitor in the project** — a persisted format change for state that depends on
   the machine's inputs and the moment.
+- **Default the input to the first one with signal** — less predictable than a meter, and it
+  says nothing when the chosen input goes quiet.
 - **Allow monitor and input changes while playing** — arming is refused by the engine while
   playing (ADR-0078); an atomic monitor switch would allow it and can be added later.
 

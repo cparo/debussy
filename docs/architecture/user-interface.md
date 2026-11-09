@@ -28,7 +28,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Bottom bar:** mono/stereo listening, play/pause, stop, record (see [Recording](#recording)),
   the position bar, the playhead's time, and the status line.
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
-  toggle and the input choice, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
+  toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.
@@ -182,11 +182,12 @@ interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-expo
 ## Recording
 
 A track header's arm toggle arms the track; an armed track shows a monitor toggle, off by default,
-and an input choice: one device input for a mono track, a pair (1–2, 3–4, …) for a stereo track,
-defaulting to input 1 or 1–2. Arm, monitor and input are session state, not saved in the project,
-and change only while the transport is stopped or paused. The device's inputs are open only while
-a track is armed: arming the first track reopens the device duplex, and disarming the last
-reopens it output-only.
+an input choice: one device input for a mono track, a pair (1–2, 3–4, …) for a stereo track,
+defaulting to input 1 or 1–2, and an input meter, one bar per channel from −60 to 0 dBFS, red
+from −1 dBFS, that holds a peak and falls 1.5 dB per display frame. Arm, monitor and input are
+session state, not saved in the project, and change only while the transport is stopped or
+paused. The device's inputs are open only while a track is armed: arming the first track reopens
+the device duplex, and disarming the last reopens it output-only.
 
 Record is enabled while stopped or paused with a track armed, the device's inputs open and the
 previous take saved. It records every armed track from the playhead while the other tracks play,

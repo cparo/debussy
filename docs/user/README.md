@@ -52,7 +52,8 @@ aggregate device to record with them.)
 
 1. While stopped, click **Arm** on each track to record. The first armed track opens the device's
    inputs; macOS asks for microphone access the first time.
-2. Choose the track's input (**In 1**, or **In 1–2** for a stereo track) and turn **Monitor** on
+2. Choose the track's input (**In 1**, or **In 1–2** for a stereo track): the meter beside it
+   moves when you play or speak into that input, and turns red when it clips. Turn **Monitor** on
    to hear the input through the track's mixer channel.
 3. Move the playhead where the take should start and press record (⏺). The other tracks play
    while you record.

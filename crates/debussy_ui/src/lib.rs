@@ -42,7 +42,7 @@ use std::sync::Mutex;
 pub use app::{App, Message, NewNode};
 pub use menu::Menu;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
-pub use recording::InputChoice;
+pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{DeviceChoice, ImportedTrack, Services, TakeFiles, TakeStatus};
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;

@@ -21,7 +21,9 @@ The engine takes the device's interleaved input with each block and deinterleave
 allocated when the engine is built; inputs beyond `audio_engine::MAX_INPUTS` are silent. A track
 is armed with its graph source, the device input channel for each of its channels, its monitor
 toggle, and one take sink per channel. Arming is accepted only while the transport is stopped or
-paused, and the replaced set is dropped off the real-time thread.
+paused, and the replaced set is dropped off the real-time thread. While any track is armed, the
+real-time side raises an atomic peak per device input each block, which the control side reads
+and clears for the input meters.
 
 Record starts like play, from the playhead, with every other track playing. Capture begins on the
 block where the transport changes from starting to playing, so a take's first frame is the
