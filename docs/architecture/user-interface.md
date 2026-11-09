@@ -47,8 +47,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
   σ = 0.5 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
   ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
-- **Colours:** audio signals are orange and control signals lavender in both tones; only the
-  chrome changes between light and dark. The tone follows the system's appearance at launch and
+- **Colours:** audio signals (and a selected button's face, and the logo) are orange in the dark
+  tone and blue in the light tone
+  ([ADR-0071](../adrs/0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md)); control
+  signals are lavender in both. The tone follows the system's appearance at launch and
   when it changes; the toggle is not saved.
 - **Button groups** (each toggle and each set of related toolbar or dialog buttons) are drawn as
   one strip, rounded only at its ends, with a hairline seam between buttons.
@@ -71,7 +73,7 @@ its pane, is never narrower than its pane, and does not zoom.
 
 - The gutter is drawn in the board's colour and holds one port per lane, centred vertically on
   the lane with its left edge 4 pixels from the divider.
-- Every wire is mono and orange. A stereo port is drawn as two circles, left above right; a
+- Every wire is mono and in the audio colour ("Layout"). A stereo port is drawn as two circles, left above right; a
   connection that names a side joins that circle, and a whole-port connection is drawn as a wire
   per side.
 - Node ports are 48 pixels apart, inputs on the left and outputs on the right, and a node's height
