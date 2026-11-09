@@ -2,11 +2,13 @@
 //! scrolling together; the bottom bar; and any open menu floated over them
 //! (`docs/architecture/user-interface.md` "Layout").
 
+use std::sync::LazyLock;
+
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pin, responsive, row, scrollable,
-    slider, stack, text, text_input, vertical_slider,
+    slider, stack, svg, text, text_input, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
@@ -32,6 +34,12 @@ const ADD_AREA: f32 = 76.0;
 const ADD_BUTTON: f32 = 44.0;
 /// The gap between the window's main parts.
 const SPACING: f32 = 2.0;
+/// The logo's height in the top bar; its width follows from the artwork.
+const LOGO_HEIGHT: f32 = 44.0;
+/// The logo artwork (`docs/architecture/user-interface.md` "Icons"), parsed once.
+static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
+    svg::Handle::from_memory(include_bytes!("../assets/icons/debussy.svg").as_slice())
+});
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
@@ -116,21 +124,10 @@ impl App {
     fn top_bar(&self) -> Element<'_, Message> {
         let playing = self.engine().is_playing();
         let display = self.display();
-        let logo = container(text("D").size(26))
-            .padding([2, 12])
-            .style(|t: &iced::Theme| {
-                let k = theme::tokens(theme::tone_of(t));
-                container::Style {
-                    background: Some(k.face.into()),
-                    text_color: Some(k.face_text),
-                    border: iced::Border {
-                        color: k.line,
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..container::Style::default()
-                }
-            });
+        let logo = svg(LOGO.clone())
+            .width(Length::Shrink)
+            .height(LOGO_HEIGHT)
+            .style(theme::logo);
         let bar = row![
             logo,
             gap(16.0),
