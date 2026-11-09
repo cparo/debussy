@@ -288,8 +288,8 @@ fn test_transport_loads_feeds_once_and_follows_the_engine() -> Result<(), Box<dy
     assert_eq!(app.engine().real_time_state(), TransportState::Stopped);
     // The clips did not change, so the feeds were made once.
     assert_eq!(calls.borrow().track_feeds, 1);
-    app.update(Message::Save);
-    assert_eq!(calls.borrow().saves, 1);
+    // Playback changes nothing to save.
+    assert_eq!(calls.borrow().saves, 0);
     Ok(())
 }
 
@@ -986,8 +986,8 @@ fn test_update_reports_a_failed_autosave_once() -> Result<(), Box<dyn Error>> {
     assert_eq!(app.status(), Some("Autosave failed: disk full"));
     app.update(Message::Tick);
     assert_eq!(calls.borrow().saves, 1);
-    // Save still writes on request.
-    app.update(Message::Save);
+    // The next edit tries again.
+    app.update(Message::AddTrack(Layout::Mono));
     assert_eq!(calls.borrow().saves, 2);
     Ok(())
 }

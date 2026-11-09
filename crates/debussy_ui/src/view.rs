@@ -476,7 +476,6 @@ impl App {
                 let mut entries = vec![
                     Entry::item("New project", None),
                     Entry::item("Open…", None),
-                    Entry::item("Save", Some(Message::Save)),
                     Entry::Separator,
                     Entry::item("Import…", when_stopped(Message::Import)),
                     Entry::item("Export…", Some(Message::Export(false))),

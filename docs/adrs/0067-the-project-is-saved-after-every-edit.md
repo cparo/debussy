@@ -16,7 +16,7 @@ launch. Saving and loading were correct; nothing called them.
 
 The interface saves the project after every message that changes the session's state or named
 versions. `Session` counts those changes in a revision; `App::update` saves when the revision
-differs from the one last saved or tried. File → Save still writes at once. Quit is handled by the
+differs from the one last saved or tried. There is no File → Save. Quit is handled by the
 app before the window exits, so a rename being typed is finished and saved.
 
 ## Alternatives considered

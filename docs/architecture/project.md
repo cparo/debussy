@@ -113,7 +113,7 @@ and the directory synced. A `.tmp` file found on open is deleted. A save writes 
 writes only new or changed versions, and deletes the files of removed ones ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 The interface saves the project after every change to the state or the named versions, including
-undo and redo; Save writes immediately ([ADR-0067](../adrs/0067-the-project-is-saved-after-every-edit.md)).
+undo and redo; it has no explicit save ([ADR-0067](../adrs/0067-the-project-is-saved-after-every-edit.md)).
 
 ## Loading
 
