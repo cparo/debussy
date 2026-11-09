@@ -12,6 +12,12 @@ pub enum Error {
     /// Clip and track changes are accepted only while the transport is stopped or paused.
     #[error("clips can be changed only while the transport is stopped or paused")]
     Playing,
+    /// Record needs takes armed since the last recording.
+    #[error("no takes are armed for recording")]
+    NotArmed,
+    /// The playhead cannot be moved while recording.
+    #[error("the playhead cannot be moved while recording")]
+    Recording,
     /// The real-time side has not yet taken earlier requests; try again shortly.
     #[error("the engine is busy; try again")]
     Busy,
