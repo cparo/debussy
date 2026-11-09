@@ -1,21 +1,23 @@
 //! The audio device: the engine's [`Processor`] running on the chosen device, and switching
-//! devices without rebuilding the engine (`docs/architecture/platform.md` "Audio device I/O",
-//! ADR-0059).
+//! devices, or opening its inputs while a track is armed, without rebuilding the engine
+//! (`docs/architecture/platform.md` "Audio device I/O", ADR-0059, ADR-0079).
 //!
 //! The processor reaches a callback over a lock-free queue only once its stream has opened, so a
-//! device that fails to open never takes it. To switch, the control side asks the running
+//! device that fails to open never takes it. A stream whose device has gone never calls back, so
+//! its processor cannot be handed back: the layer above builds a new engine and gives this its
+//! processor with [`AudioOutput::adopt`] (ADR-0081). To switch, the control side asks the running
 //! callback to hand the processor back over a second queue, stops that stream, and opens the
 //! new one.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use audio_buffers::{Consumer, Producer, queue};
-use audio_engine::Processor;
+use audio_engine::{MAX_INPUTS, Processor};
 use platform_interfaces::{
-    AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, StreamConfig,
+    AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, Latency, StreamConfig,
 };
 
 use crate::project::MAX_BLOCK;
@@ -27,18 +29,25 @@ const PREFERRED_BUFFER: u32 = 128;
 /// How long to wait for a running callback to hand the processor back.
 const HANDBACK_WAIT: Duration = Duration::from_secs(2);
 
+/// How long a stream may go without calling back before it counts as lost: its device has gone
+/// even if the platform has not said so.
+const STALL: Duration = Duration::from_millis(500);
+
 /// Runs the engine on the device's real-time thread. Allocates nothing per buffer.
 struct EngineCallback {
     processor: Option<Processor>,
     incoming: Consumer<Processor>,
     release: Arc<AtomicBool>,
     back: Producer<Processor>,
+    /// Callbacks run, for telling a stalled stream from a running one.
+    beats: Arc<AtomicU64>,
     left: Vec<f32>,
     right: Vec<f32>,
 }
 
 impl AudioCallback for EngineCallback {
     fn process(&mut self, buffers: Buffers<'_>) {
+        self.beats.fetch_add(1, Ordering::Relaxed);
         // Collect a processor handed over, even if a release is already asked for, so the
         // release can hand it straight back.
         if self.processor.is_none() {
@@ -93,6 +102,13 @@ struct Running {
     release: Arc<AtomicBool>,
     back: Consumer<Processor>,
     device: String,
+    /// Why the stream stopped, once it has (its device gone); it never calls back again.
+    lost: Option<String>,
+    /// The callback count, the count last seen, and when it last changed.
+    beats: Arc<AtomicU64>,
+    last_beat: (u64, Instant),
+    /// Whether `lost` has been reported through [`AudioOutput::take_error`].
+    reported: bool,
 }
 
 /// The engine's real-time side on an audio device.
@@ -102,6 +118,8 @@ pub struct AudioOutput {
     running: Option<Running>,
     /// The processor while no stream runs it.
     parked: Option<Processor>,
+    /// Whether to open the device's inputs: while a track is armed.
+    input: bool,
 }
 
 impl AudioOutput {
@@ -123,6 +141,7 @@ impl AudioOutput {
             sample_rate,
             running: None,
             parked: Some(processor),
+            input: false,
         };
         let result = output.choose(preferred).and_then(|id| output.open(&id));
         (output, result)
@@ -145,6 +164,9 @@ impl AudioOutput {
     /// If the new device cannot be opened (the old one is reopened), or the running stream
     /// does not hand the processor back.
     pub fn switch(&mut self, id: &str) -> Result<()> {
+        if self.is_lost() {
+            bail!("the audio engine was lost with its device; it must be rebuilt");
+        }
         let previous = self.current().map(str::to_owned);
         self.stop()?;
         match self.open(id) {
@@ -156,6 +178,44 @@ impl AudioOutput {
                 Err(error)
             }
         }
+    }
+
+    /// Opens the device's inputs as well as its outputs (`true`), or its outputs only, by
+    /// reopening it. Does nothing if that is already so. Call only while the transport is
+    /// stopped: the output drops out briefly.
+    ///
+    /// # Errors
+    ///
+    /// As [`AudioOutput::switch`]; the setting is kept for the next device opened.
+    pub fn set_input(&mut self, input: bool) -> Result<()> {
+        if self.input == input {
+            return Ok(());
+        }
+        self.input = input;
+        match self.current().map(str::to_owned) {
+            Some(id) => self.switch(&id),
+            None => Ok(()),
+        }
+    }
+
+    /// The input channels open on the running stream; 0 when output only.
+    pub fn input_channels(&self) -> u16 {
+        self.running
+            .as_ref()
+            .map_or(0, |r| r.stream.config().input_channels)
+    }
+
+    /// The running stream's input and output latency, in frames; 0 when none runs.
+    pub fn latency(&self) -> u64 {
+        let Latency {
+            input_frames,
+            output_frames,
+        } = self
+            .running
+            .as_ref()
+            .map(|r| r.stream.latency())
+            .unwrap_or_default();
+        u64::from(input_frames) + u64::from(output_frames)
     }
 
     /// `preferred` if present, else the default output device.
@@ -221,16 +281,23 @@ impl AudioOutput {
             device: DeviceId(device.id.0.clone()),
             sample_rate: self.sample_rate,
             buffer_frames: buffer,
-            input_channels: 0,
+            input_channels: if self.input {
+                // The engine reads at most this many; MAX_INPUTS is 64, so it fits.
+                device.input_channels.min(MAX_INPUTS as u16)
+            } else {
+                0
+            },
             output_channels: device.output_channels.min(2),
         };
         let (back_tx, back) = queue::channel(1)?;
         let (mut send, incoming) = queue::channel(1)?;
         let release = Arc::new(AtomicBool::new(false));
+        let beats = Arc::new(AtomicU64::new(0));
         let callback = EngineCallback {
             processor: None,
             incoming,
             release: Arc::clone(&release),
+            beats: Arc::clone(&beats),
             back: back_tx,
             left: vec![0.0; buffer as usize],
             right: vec![0.0; buffer as usize],
@@ -248,6 +315,10 @@ impl AudioOutput {
                     release,
                     back,
                     device: device.id.0,
+                    lost: None,
+                    reported: false,
+                    beats,
+                    last_beat: (0, Instant::now()),
                 });
                 Ok(())
             }
@@ -256,10 +327,181 @@ impl AudioOutput {
     }
 
     /// Whether the running stream has stopped with an error, such as its device unplugged.
+    /// Reports each stop once.
     pub fn take_error(&mut self) -> Option<String> {
-        self.running
-            .as_mut()
-            .and_then(|r| r.stream.take_error())
-            .map(|e| e.to_string())
+        self.poll();
+        let running = self.running.as_mut()?;
+        let lost = running.lost.clone()?;
+        if running.reported {
+            return None;
+        }
+        running.reported = true;
+        Some(lost)
+    }
+
+    /// Whether the running stream has stopped, taking the processor with it; it can run again
+    /// only through [`AudioOutput::adopt`].
+    pub fn is_lost(&mut self) -> bool {
+        self.poll();
+        self.running.as_ref().is_some_and(|r| r.lost.is_some())
+    }
+
+    /// Drops the running stream, with whatever processor it holds, and starts `processor` on
+    /// the device with id `preferred`, or the default output device if there is none such.
+    ///
+    /// # Errors
+    ///
+    /// As [`AudioOutput::start`]; the processor is kept for a later [`AudioOutput::switch`].
+    pub fn adopt(&mut self, processor: Processor, preferred: Option<&str>) -> Result<()> {
+        // A lost stream never calls back, so this does not wait on the real-time thread.
+        self.running = None;
+        self.parked = Some(processor);
+        let id = self.choose(preferred)?;
+        self.open(&id)
+    }
+
+    /// Records an error that has stopped the running stream, or that it has stopped calling back
+    /// for [`STALL`]: some platforms stop a stream whose device has gone without saying so, or
+    /// say so late.
+    fn poll(&mut self) {
+        let Some(running) = &mut self.running else {
+            return;
+        };
+        if running.lost.is_some() {
+            return;
+        }
+        if let Some(error) = running.stream.take_error() {
+            running.lost = Some(error.to_string());
+            return;
+        }
+        let beats = running.beats.load(Ordering::Relaxed);
+        let now = Instant::now();
+        if beats != running.last_beat.0 {
+            running.last_beat = (beats, now);
+        } else if now.duration_since(running.last_beat.1) > STALL {
+            running.lost = Some(format!("{} stopped responding", running.device));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use audio_buffers::Layout;
+    use audio_engine::Engine;
+    use platform_interfaces::test_doubles::FakeDevices;
+    use signal_graph::{Config, Graph};
+
+    use super::*;
+
+    /// A processor for an empty project.
+    fn processor() -> Result<Processor, Box<dyn Error>> {
+        let (mut graph, runner) = Graph::new(Config::new(48_000, 1024))?;
+        let output = graph.add_sink(Layout::Stereo);
+        graph.commit()?;
+        // The graph only plans; the runner keeps what it needs.
+        drop(graph);
+        let (_engine, processor) = Engine::new(runner, output, 48_000)?;
+        Ok(processor)
+    }
+
+    #[test]
+    fn test_unplugged_device_is_lost_and_reported_once() -> Result<(), Box<dyn Error>> {
+        let devices = FakeDevices::new();
+        let (mut audio, started) =
+            AudioOutput::start(Box::new(devices.clone()), 48_000, processor()?, None);
+        started.map_err(|e| e.to_string())?;
+        assert!(!audio.is_lost());
+        // Asked every display frame while all is well, as the window does.
+        assert_eq!(audio.take_error(), None);
+        devices.unplug();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !audio.is_lost() {
+            if Instant::now() > deadline {
+                return Err("the unplug was never seen".into());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(audio.take_error().is_some());
+        assert_eq!(audio.take_error(), None);
+        // Switching does not wait for a handback that cannot come.
+        let started = Instant::now();
+        assert!(audio.switch("fake").is_err());
+        assert!(started.elapsed() < HANDBACK_WAIT);
+        // A rebuilt engine is kept for later when no device can take it.
+        assert!(audio.adopt(processor()?, None).is_err());
+        assert!(audio.parked.is_some() && audio.current().is_none());
+        Ok(())
+    }
+
+    /// A device whose stream never calls back and never reports an error, as a stream stopped
+    /// without notice.
+    struct StalledDevices;
+
+    struct StalledStream {
+        config: StreamConfig,
+        _callback: Box<dyn AudioCallback>,
+    }
+
+    impl AudioStream for StalledStream {
+        fn config(&self) -> &StreamConfig {
+            &self.config
+        }
+
+        fn latency(&self) -> Latency {
+            Latency::default()
+        }
+
+        fn take_error(&mut self) -> Option<platform_interfaces::Error> {
+            None
+        }
+    }
+
+    impl AudioDevices for StalledDevices {
+        fn devices(&self) -> Result<Vec<DeviceInfo>, platform_interfaces::Error> {
+            Ok(vec![DeviceInfo {
+                id: DeviceId("stalled".into()),
+                name: "Stalled".into(),
+                input_channels: 0,
+                output_channels: 2,
+                sample_rates: vec![48_000],
+                buffer_frames: (32, 1024),
+                is_default: true,
+            }])
+        }
+
+        fn open(
+            &self,
+            config: &StreamConfig,
+            callback: Box<dyn AudioCallback>,
+        ) -> Result<Box<dyn AudioStream>, platform_interfaces::Error> {
+            Ok(Box::new(StalledStream {
+                config: config.clone(),
+                _callback: callback,
+            }))
+        }
+    }
+
+    #[test]
+    fn test_stream_that_stops_calling_back_is_lost() -> Result<(), Box<dyn Error>> {
+        let (mut audio, started) =
+            AudioOutput::start(Box::new(StalledDevices), 48_000, processor()?, None);
+        started.map_err(|e| e.to_string())?;
+        assert!(!audio.is_lost());
+        std::thread::sleep(STALL + Duration::from_millis(100));
+        assert!(audio.is_lost());
+        assert_eq!(
+            audio.take_error().as_deref(),
+            Some("stalled stopped responding")
+        );
+        let started = Instant::now();
+        assert!(audio.switch("stalled").is_err());
+        assert!(started.elapsed() < HANDBACK_WAIT);
+        // The rebuilt engine opens again on the same device.
+        audio.adopt(processor()?, None).map_err(|e| e.to_string())?;
+        assert_eq!(audio.current(), Some("stalled"));
+        assert!(!audio.is_lost());
+        Ok(())
     }
 }

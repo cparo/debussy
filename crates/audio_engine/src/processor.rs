@@ -69,7 +69,8 @@ impl Processor {
     /// pending commands, starts playback once every feed is primed, fills the track sources
     /// (silence unless playing; armed tracks' input or silence, see
     /// `docs/architecture/recording.md` "Input monitoring"), hands the input to the takes while
-    /// recording, runs the plan and advances the playhead. The graph runs while stopped too, so
+    /// recording, publishes each input's peak for the meters while armed, runs the plan and
+    /// advances the playhead. The graph runs while stopped too, so
     /// plans swap, tails ring out and monitored input is heard.
     ///
     /// # Errors
@@ -100,6 +101,10 @@ impl Processor {
         let frames = left.len();
         if !self.armed.is_empty() {
             self.input.load(input, input_channels, frames);
+            for channel in 0..self.input.live() {
+                self.shared
+                    .raise_peak(channel, self.input.peak(channel, frames));
+            }
         }
         let mut live = Live {
             armed: &mut self.armed,

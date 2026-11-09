@@ -138,6 +138,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Gestures](user-interface.md#gestures)
   - [Range selection and shortcuts](user-interface.md#range-selection-and-shortcuts)
   - [Application startup](user-interface.md#application-startup)
+  - [Recording](user-interface.md#recording)
   - [Files and devices](user-interface.md#files-and-devices)
 
 <!-- END GENERATED INDEX -->

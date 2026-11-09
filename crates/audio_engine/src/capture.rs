@@ -94,6 +94,18 @@ impl Input {
         self.live = live;
     }
 
+    /// Device channels holding this block's input.
+    pub(crate) fn live(&self) -> usize {
+        self.live
+    }
+
+    /// The largest absolute sample in device channel `channel`'s first `frames` frames.
+    pub(crate) fn peak(&self, channel: usize, frames: usize) -> f32 {
+        self.channel(channel, frames)
+            .iter()
+            .fold(0.0, |peak: f32, s| peak.max(s.abs()))
+    }
+
     /// Device channel `channel`'s first `frames` frames, silence if it has none.
     pub(crate) fn channel(&self, channel: usize, frames: usize) -> &[f32] {
         let buffer = if channel < self.live {
@@ -155,5 +167,16 @@ mod tests {
         assert_eq!(input.channel(0, 3), &[0.0; 3]);
         input.load(&[], 0, 3);
         assert_eq!(input.channel(1, 3), &[0.0; 3]);
+    }
+
+    #[test]
+    fn test_peak_is_the_largest_magnitude() {
+        let mut input = Input::new(4);
+        input.load(&[0.1, -0.2, -0.7, 0.3, 0.5, 0.0], 2, 3);
+        assert_eq!(
+            (input.live(), input.peak(0, 3), input.peak(1, 3)),
+            (2, 0.7, 0.3)
+        );
+        assert_eq!(input.peak(2, 3), 0.0);
     }
 }

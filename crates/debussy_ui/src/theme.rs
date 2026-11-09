@@ -8,6 +8,10 @@ use iced::{Background, Border, Color, Theme, border};
 /// The playhead: the lane cursor and the position bar.
 pub const CURSOR: Color = Color::from_rgb(0.9, 0.2, 0.2);
 
+/// Recording red, the same in both tones: the record button's dot, and its face and an armed
+/// track's arm toggle while active.
+pub const RECORD: Color = Color::from_rgb8(0xBB, 0x00, 0x00);
+
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tone {
@@ -192,12 +196,21 @@ pub fn accent_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
 /// The outer corner radius of a toolbar button or strip.
 const TOOL_RADIUS: f32 = 6.0;
 
+/// What a selected toolbar button is lit with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accent {
+    /// The tone's audio accent.
+    Audio,
+    /// [`RECORD`] red with black ink: the record button and the arm toggle.
+    Record,
+}
+
 /// A toolbar button's face and ink colours, before its status changes them.
-fn tool_colours(t: &Tokens, selected: bool) -> (Color, Color) {
-    if selected {
-        (t.audio, t.audio_text)
-    } else {
-        (t.face, t.face_text)
+fn tool_colours(t: &Tokens, selected: bool, accent: Accent) -> (Color, Color) {
+    match (selected, accent) {
+        (true, Accent::Audio) => (t.audio, t.audio_text),
+        (true, Accent::Record) => (RECORD, Color::BLACK),
+        (false, _) => (t.face, t.face_text),
     }
 }
 
@@ -210,10 +223,26 @@ fn disabled_ink(ink: Color) -> Color {
 /// towards the button's face when the button is disabled.
 pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
     move |theme, _status| {
-        let (face, ink) = tool_colours(tokens(tone_of(theme)), selected);
+        let (face, ink) = tool_colours(tokens(tone_of(theme)), selected, Accent::Audio);
         svg::Style {
             color: Some(if enabled { ink } else { mix(face, ink, 0.4) }),
         }
+    }
+}
+
+/// The record button's dot: [`RECORD`] red on the button's face, greyed towards the face when
+/// disabled; black on red while `recording`, when the button is disabled but must still read
+/// as on.
+pub fn record_icon(recording: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
+    move |theme, _status| {
+        let color = if recording {
+            Color::BLACK
+        } else if enabled {
+            RECORD
+        } else {
+            mix(tokens(tone_of(theme)).face, RECORD, 0.4)
+        };
+        svg::Style { color: Some(color) }
     }
 }
 
@@ -221,6 +250,16 @@ pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) 
 /// Disabled, its face fades as well as its text.
 pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
     tool_style(selected, place, true)
+}
+
+/// A toolbar button lit with `accent` when `selected`; otherwise as [`tool_style`].
+pub fn accent_style(
+    selected: bool,
+    place: Place,
+    fade_disabled: bool,
+    accent: Accent,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| styled(theme, status, selected, place, fade_disabled, accent)
 }
 
 /// A toolbar button's style; `fade_disabled` fades a disabled button's face. A button showing an
@@ -231,37 +270,45 @@ pub fn tool_style(
     place: Place,
     fade_disabled: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |theme, status| {
-        let t = tokens(tone_of(theme));
-        let (face, ink) = tool_colours(t, selected);
-        let (background, text) = match status {
-            button::Status::Disabled if fade_disabled => {
-                (Color { a: 0.35, ..face }, disabled_ink(ink))
-            }
-            button::Status::Disabled => (face, disabled_ink(ink)),
-            button::Status::Hovered => (mix(face, ink, 0.08), ink),
-            button::Status::Pressed => (mix(face, ink, 0.18), ink),
-            button::Status::Active => (face, ink),
-        };
-        // A strip draws the outline and seams; its buttons fill the space inside its 1 px border.
-        let border = match place {
-            Place::Alone => Border {
-                color: t.line,
-                width: 1.0,
-                radius: place.radius(TOOL_RADIUS),
-            },
-            _ => Border {
-                color: t.line,
-                width: 0.0,
-                radius: place.radius(TOOL_RADIUS - 1.0),
-            },
-        };
-        button::Style {
-            background: Some(Background::Color(background)),
-            text_color: text,
-            border,
-            ..button::Style::default()
-        }
+    accent_style(selected, place, fade_disabled, Accent::Audio)
+}
+
+/// A toolbar button's style for `status`, lit with `accent` when `selected`.
+fn styled(
+    theme: &Theme,
+    status: button::Status,
+    selected: bool,
+    place: Place,
+    fade_disabled: bool,
+    accent: Accent,
+) -> button::Style {
+    let t = tokens(tone_of(theme));
+    let (face, ink) = tool_colours(t, selected, accent);
+    let (background, text) = match status {
+        button::Status::Disabled if fade_disabled => (Color { a: 0.35, ..face }, disabled_ink(ink)),
+        button::Status::Disabled => (face, disabled_ink(ink)),
+        button::Status::Hovered => (mix(face, ink, 0.08), ink),
+        button::Status::Pressed => (mix(face, ink, 0.18), ink),
+        button::Status::Active => (face, ink),
+    };
+    // A strip draws the outline and seams; its buttons fill the space inside its 1 px border.
+    let border = match place {
+        Place::Alone => Border {
+            color: t.line,
+            width: 1.0,
+            radius: place.radius(TOOL_RADIUS),
+        },
+        _ => Border {
+            color: t.line,
+            width: 0.0,
+            radius: place.radius(TOOL_RADIUS - 1.0),
+        },
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color: text,
+        border,
+        ..button::Style::default()
     }
 }
 
@@ -357,6 +404,35 @@ mod tests {
             tool(true, Place::Alone)(&dark, button::Status::Active).text_color,
             DARK.audio_text
         );
+    }
+
+    #[test]
+    fn test_record_is_red_in_both_tones_and_black_on_red_when_active() {
+        for tone in [Tone::Light, Tone::Dark] {
+            let theme = theme(tone);
+            let idle = record_icon(false, true)(&theme, svg::Status::Idle).color;
+            assert_eq!(idle, Some(RECORD));
+            // Record is disabled while recording; the dot stays black.
+            let active = record_icon(true, false)(&theme, svg::Status::Idle).color;
+            assert_eq!(active, Some(Color::BLACK));
+            let disabled = record_icon(false, false)(&theme, svg::Status::Idle).color;
+            assert_ne!(disabled, Some(RECORD));
+            let face = accent_style(true, Place::Alone, false, Accent::Record)(
+                &theme,
+                button::Status::Active,
+            );
+            assert_eq!(face.background, Some(Background::Color(RECORD)));
+            assert_eq!(face.text_color, Color::BLACK);
+            let off = accent_style(false, Place::Alone, false, Accent::Record)(
+                &theme,
+                button::Status::Active,
+            );
+            assert_eq!(
+                off.background,
+                tool(false, Place::Alone)(&theme, button::Status::Active).background
+            );
+        }
+        assert_eq!(RECORD, Color::from_rgb8(0xBB, 0x00, 0x00));
     }
 
     #[test]

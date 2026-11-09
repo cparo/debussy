@@ -5,6 +5,8 @@
 //! Gestures follow ADR-0037 and ADR-0043: while a slider is dragged its value goes straight to
 //! the running graph's parameter; releasing it records one undo step.
 
+use std::collections::BTreeMap;
+
 use audio_buffers::Layout;
 use audio_effects::{Control, Mode, parameter_name};
 use audio_engine::Engine;
@@ -16,6 +18,7 @@ use project_model::{
 use crate::menu::Menu;
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
+use crate::recording::{Arming, InputChoice, Pass};
 use crate::services::Services;
 use crate::theme::Tone;
 use crate::transport::{
@@ -73,6 +76,14 @@ pub(crate) enum Moving {
 pub enum Message {
     /// Start playing from the playhead.
     Play,
+    /// Start recording the armed tracks from the playhead, with the others playing.
+    Record,
+    /// Arm this track for recording, or disarm it.
+    Arm(TrackId),
+    /// Turn this armed track's input monitoring on or off.
+    Monitor(TrackId),
+    /// Record this armed track from this input.
+    Input(TrackId, InputChoice),
     /// Pause, holding the playhead.
     Pause,
     /// Stop, returning to the return point.
@@ -188,6 +199,8 @@ pub enum Message {
     Export(bool),
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
+    /// The device dropdown opened: re-read the devices present, so one plugged in since shows.
+    RefreshDevices,
     /// A mixer gain or pan slider moved: applied live, recorded on [`Message::Release`].
     Slide {
         /// The mixer node.
@@ -270,7 +283,7 @@ pub struct App {
     /// A feedback delay's time being typed.
     pub(crate) delay_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
-    loaded: Option<Vec<Track>>,
+    pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
     /// The audio devices present, and the one in use.
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
@@ -278,6 +291,16 @@ pub struct App {
     pub(crate) status: Option<String>,
     /// The session revision last saved, or last tried; autosave writes when it moves on.
     saved_revision: u64,
+    /// The armed tracks' settings; not saved.
+    pub(crate) arming: BTreeMap<TrackId, Arming>,
+    /// Whether the device's inputs have been asked for.
+    pub(crate) input_open: bool,
+    /// The input channels open on the device.
+    pub(crate) inputs: usize,
+    /// A recording pass whose files are still being written.
+    pub(crate) pass: Option<Pass>,
+    /// Each armed track's input meter, one level per channel in dBFS.
+    pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -332,6 +355,11 @@ impl App {
             devices: (Vec::new(), None),
             status: None,
             saved_revision: 0,
+            arming: BTreeMap::new(),
+            input_open: false,
+            inputs: 0,
+            pass: None,
+            meters: BTreeMap::new(),
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -522,7 +550,8 @@ impl App {
 
     /// Whether the interface needs a tick every display frame: while playing or starting.
     pub fn wants_ticks(&self) -> bool {
-        self.engine.is_playing()
+        // While armed, ticks drive the input meters.
+        self.engine.is_playing() || self.recording_pending() || !self.arming.is_empty()
     }
 
     /// Handles `message`, then saves the project if it changed
@@ -557,6 +586,7 @@ impl App {
                 | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
+                | Message::RefreshDevices
                 | Message::DragNode(..)
                 | Message::DragOutput(_)
                 | Message::DelayText(..)
@@ -580,6 +610,10 @@ impl App {
         }
         match message {
             Message::Play => self.play(),
+            Message::Record => self.record(),
+            Message::Arm(track) => self.toggle_arm(track),
+            Message::Monitor(track) => self.toggle_monitor(track),
+            Message::Input(track, choice) => self.set_input(track, choice.input),
             Message::Pause => {
                 let result = self.engine.pause();
                 self.report(result.map_err(|e| e.to_string()));
@@ -615,14 +649,25 @@ impl App {
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::Tick => {
                 self.engine.collect();
+                self.poll_recording();
+                self.update_meters();
                 self.stop_at_end();
                 self.follow_playhead();
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
                 if let Some(error) = self.services.audio_error() {
-                    // Nothing more can play until another device is chosen.
-                    let _ = self.engine.stop();
-                    self.status = Some(format!("Audio stopped: {error}"));
+                    // Pause, holding the playhead; a take being recorded ends here.
+                    let _ = self.engine.pause();
+                    let mut notice = format!("Audio stopped: {error}. Paused");
+                    if self.services.audio_lost() {
+                        // Its device is gone: carry on with the remembered or default device.
+                        self.recover_audio(None);
+                        if let Some(device) = self.current_device_name() {
+                            notice.push_str(&format!("; now using {device}"));
+                        }
+                    }
+                    notice.push('.');
+                    self.status = Some(self.status.take().unwrap_or(notice));
                 }
             }
             Message::ZoomIn => {
@@ -701,6 +746,9 @@ impl App {
                     .bridge
                     .edit(&mut self.session, |s| s.remove_track(track));
                 self.report(result.map_err(|e| e.to_string()));
+                if self.arming.contains_key(&track) {
+                    self.sync_arming();
+                }
                 self.refresh_lanes();
             }
             Message::StartRename(track) => {
@@ -821,13 +869,18 @@ impl App {
                 Ok(None) => {}
                 Err(message) => self.status = Some(message),
             },
+            Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
-                    self.status = Some("Stop playback to change the audio device.".to_owned());
+                    self.status =
+                        Some("Pause or stop playback to change the audio device.".to_owned());
+                } else if self.services.audio_lost() {
+                    self.recover_audio(Some(&choice.id));
                 } else {
                     let result = self.services.set_device(&choice.id);
                     self.report(result);
                     self.refresh_devices();
+                    self.inputs = self.services.input_channels();
                 }
             }
             Message::Slide {
@@ -898,24 +951,34 @@ impl App {
             let result = self.engine.locate(from, self.services.streams());
             self.report(result.map_err(|e| e.to_string()));
         }
-        if !self.engine.is_playing() && self.loaded.as_ref() != Some(&self.session.state().tracks) {
-            let sources = self.bridge.sources();
-            match self.services.track_feeds(self.session.state(), &sources) {
-                Ok(feeds) => {
-                    if let Err(error) = self.engine.set_tracks(feeds) {
-                        self.status = Some(error.to_string());
-                        return;
-                    }
-                    self.loaded = Some(self.session.state().tracks.clone());
-                }
-                Err(message) => {
-                    self.status = Some(message);
-                    return;
-                }
-            }
+        if !self.engine.is_playing() && !self.load_feeds() {
+            return;
         }
         let result = self.engine.play(self.services.streams());
         self.report(result.map_err(|e| e.to_string()));
+    }
+
+    /// Gives the engine feeds for the tracks if they changed since it last took them. Returns
+    /// `false`, with the reason on the status line, if that failed. Only while stopped.
+    pub(crate) fn load_feeds(&mut self) -> bool {
+        if self.loaded.as_ref() == Some(&self.session.state().tracks) {
+            return true;
+        }
+        let sources = self.bridge.sources();
+        match self.services.track_feeds(self.session.state(), &sources) {
+            Ok(feeds) => {
+                if let Err(error) = self.engine.set_tracks(feeds) {
+                    self.status = Some(error.to_string());
+                    return false;
+                }
+                self.loaded = Some(self.session.state().tracks.clone());
+                true
+            }
+            Err(message) => {
+                self.status = Some(message);
+                false
+            }
+        }
     }
 
     /// Imports through the file dialog: each file as a new track, or with `into`, as a clip on
@@ -1088,12 +1151,26 @@ impl App {
     }
 
     /// Reports and returns `true` while playing: `what` waits for the transport to stop.
-    fn refuse_while_playing(&mut self, what: &str) -> bool {
+    pub(crate) fn refuse_while_playing(&mut self, what: &str) -> bool {
         let playing = self.engine.is_playing();
         if playing {
             self.status = Some(format!("Stop playback to {what}."));
         }
         playing
+    }
+
+    /// The name of the device in use, if any.
+    pub(crate) fn current_device_name(&self) -> Option<String> {
+        let (choices, current) = &self.devices;
+        choices
+            .iter()
+            .find(|c| Some(&c.id) == current.as_ref())
+            .map(|c| c.name.clone())
+    }
+
+    /// The audio devices present when last read, for the device dropdown.
+    pub fn device_choices(&self) -> &[crate::services::DeviceChoice] {
+        &self.devices.0
     }
 
     /// Re-reads the device list and the device in use.
@@ -1111,6 +1188,10 @@ impl App {
             self.bridge.redo(&mut self.session)
         };
         self.report(result.map(|_| ()).map_err(|e| e.to_string()));
+        if !self.arming.is_empty() {
+            // Undo or redo may have removed an armed track.
+            self.sync_arming();
+        }
         self.refresh_lanes();
     }
 
@@ -1133,10 +1214,10 @@ impl App {
     }
 
     /// Stops playback that has reached the project's end, leaving the playhead there; the
-    /// return point is kept for Stop and the next Play.
+    /// return point is kept for Stop and the next Play. Recording runs on past the end.
     fn stop_at_end(&mut self) {
         let end = self.project_end();
-        if !self.engine.is_playing() || self.engine.playhead() < end {
+        if !self.engine.is_playing() || self.engine.is_recording() || self.engine.playhead() < end {
             return;
         }
         let result = self
@@ -1231,7 +1312,7 @@ impl App {
             .unwrap_or(0)
     }
 
-    fn report(&mut self, result: Result<(), String>) {
+    pub(crate) fn report(&mut self, result: Result<(), String>) {
         if let Err(message) = result {
             self.status = Some(message);
         }

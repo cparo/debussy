@@ -24,11 +24,12 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
-  switch projects), import, export, export mono, the audio device, and quit.
-- **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the position bar,
-  the playhead's time, and the status line.
-- **Track pane:** each track is a header (its name and a ≡ menu: rename, import audio into,
-  delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
+  switch projects), import, export, export mono, and quit.
+- **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
+  [Recording](#recording)), the position bar, the playhead's time, and the status line
+  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)).
+- **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
+  toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.
@@ -69,7 +70,9 @@ toolbar button, with no box or background of its own.
 The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
 light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
-outline, like the ≡ buttons. Any other icon takes its button's text colour; a disabled icon button
+outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the
+button's face, and black on a red face while recording
+([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). Any other icon takes its button's text colour; a disabled icon button
 keeps its face and greys its icon out towards the face. A tooltip that follows the cursor names the
 action. The ≡ buttons draw a menu icon in the chrome's text colour, centred in their button. Other
 toolbar buttons keep text labels
@@ -179,15 +182,38 @@ through the default output device, which must run at the project rate. With `--e
 the project to a file and exits instead. Command-line import and export stand in until the
 interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).
 
+## Recording
+
+A track header's arm toggle arms the track and is lit recording red while armed; an armed track
+shows a monitor toggle, off by default, an input choice: one device input for a mono track, a
+pair (1–2, 3–4, …) for a stereo track, defaulting to input 1 or 1–2, and an input meter, one bar
+per channel from −60 to 0 dBFS, red from −1 dBFS, that holds a peak and falls 1.5 dB per display
+frame. Arm, monitor and input are session state, not saved in the project, and change only while
+the transport is stopped or paused. The device's inputs are open only while a track is armed: arming the first track reopens
+the device duplex, and disarming the last reopens it output-only.
+
+Record is enabled while stopped or paused with a track armed, the device's inputs open and the
+previous take saved. It records every armed track from the playhead while the other tracks play,
+and runs on past the project's end. Stop or pause ends the pass. Once its files are written, one
+clip per armed track is placed as one undo step (see `docs/architecture/recording.md` "Take
+placement"); a pass that captured nothing or failed is discarded with its files. Overruns are
+reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-and-inputs-open-only.md)).
+
 ## Files and devices
 
 Import and export use the system's file dialogs through `rfd`, used only in `debussy`. Each
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
 Import is refused while playing.
 
-One audio device is chosen for both input and output. The choice is remembered in the application
-settings; at launch a remembered device that is gone falls back to the system default output. The
-device can be changed only while stopped: the engine's real-time side is handed back from the old
-stream and handed to the new one without being rebuilt, and if the new device fails to open the
-old one is reopened. An audio device that stops with an error stops playback and is reported on
-the status line ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).
+One audio device is chosen for both input and output, from a list re-read each time the device
+dropdown opens. The choice is remembered in the application settings; at launch a remembered device
+that is gone falls back to the system default output. The device can be changed only while stopped
+or paused: the engine's real-time side is handed back from the old stream and handed to the new one
+without being rebuilt, and if the new device fails to open the old one is reopened. An audio device
+that stops with an error pauses playback, holding the playhead, and is reported on the status line
+([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)). When its device has
+gone (the stream stopped with an error, or has not called back for 500 ms), the engine is rebuilt
+from the project, keeping the playhead, mono listening and armed tracks, and runs on the remembered
+device if present, else the default output; the gone device leaves the list, and any device present
+can be chosen afterwards. A take being recorded then is kept and placed as usual
+([ADR-0081](../adrs/0081-a-lost-audio-device-s-engine-is-rebuilt-from-the.md)).

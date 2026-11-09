@@ -12,7 +12,7 @@
 //!
 //! - `import`: [`import`], [`Imported`], [`ImportFormat`].
 //! - `export`: [`export`], [`ExportFormat`], [`WavDepth`], [`ExportChannels`], [`OfflineRender`].
-//! - `naming`: names for imported files.
+//! - `naming`: names for imported and recorded files: [`safe_stem`] and [`unique_names`].
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -25,3 +25,4 @@ mod naming;
 pub use error::Error;
 pub use export::{ExportChannels, ExportFormat, OfflineRender, WavDepth, export};
 pub use import::{ImportFormat, Imported, import};
+pub use naming::{safe_stem, unique_names};
