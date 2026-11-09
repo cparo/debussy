@@ -65,6 +65,15 @@ aggregate device to record with them.)
 
 Takes are saved in the project as WAV files. Arm settings are not saved with the project.
 
+### The click
+
+The metronome button after record turns the click on and off; it sounds while playing or
+recording, never in an export. Beside it, type the tempo in BPM and press Enter, and pick the
+meter (beats per bar / beat unit). The BPM counts the beat unit, so 6/8 at 120 clicks eighth
+notes. The tempo and meter are saved with the project and can be undone; change them while
+stopped. The ▾ menu picks the sound (Block, Click or Stick) and its level, remembered on this
+Mac. The first beat of each bar is louder.
+
 ## Exporting
 
 Click **Export…** or **Export mono…** and choose where; the file name's extension picks the

@@ -16,6 +16,9 @@
 //! [`Session`] keeps the undo and redo histories, one step per gesture, and the named versions;
 //! restoring a version is itself an undoable step.
 //!
+//! The state also holds the project's one [`Tempo`] and meter (`docs/architecture/project.md`
+//! "Musical time"), whose grid of bars and beats the click and the lanes follow.
+//!
 //! Range edits (`docs/architecture/project.md` "Range edits") cut, copy or delete a [`Range`] of
 //! frames across tracks, splitting clips at its edges, and paste the [`Excerpt`] a cut or copy
 //! returns.
@@ -27,6 +30,7 @@
 //! - `routing`: [`Node`], [`NodeKind`], [`Connection`], [`Endpoint`] and their ids.
 //! - `edit`: [`Edit`].
 //! - `range`: [`Range`], [`Excerpt`], [`Lane`].
+//! - `tempo`: [`Tempo`], [`Beat`] and the grid math.
 //! - `session`: [`Session`].
 //! - `error`: [`Error`].
 
@@ -38,6 +42,7 @@ mod range;
 mod routing;
 mod session;
 mod state;
+pub mod tempo;
 mod types;
 
 pub use edit::Edit;
@@ -49,4 +54,5 @@ pub use routing::{
 };
 pub use session::Session;
 pub use state::{Clip, State, Track};
+pub use tempo::{Beat, Tempo};
 pub use types::{AudioFile, ClipId, Source, TrackId};

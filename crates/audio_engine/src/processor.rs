@@ -8,6 +8,7 @@ use signal_graph::{NodeId, Runner};
 
 use crate::block::{self, Live};
 use crate::capture::{ArmedTrack, Input, end_takes};
+use crate::click::ClickTrack;
 use crate::engine::{Command, Retired, Shared, TransportState};
 use crate::error::Error;
 use crate::feed::TrackFeeds;
@@ -20,6 +21,7 @@ pub struct Processor {
     output: NodeId,
     tracks: Vec<TrackFeeds>,
     armed: Vec<ArmedTrack>,
+    click: Option<ClickTrack>,
     input: Input,
     commands: Consumer<Command>,
     retire: Producer<Retired>,
@@ -51,6 +53,7 @@ impl Processor {
             output,
             tracks: Vec::new(),
             armed: Vec::new(),
+            click: None,
             input,
             commands,
             retire,
@@ -69,9 +72,10 @@ impl Processor {
     /// pending commands, starts playback once every feed is primed, fills the track sources
     /// (silence unless playing; armed tracks' input or silence, see
     /// `docs/architecture/recording.md` "Input monitoring"), hands the input to the takes while
-    /// recording, publishes each input's peak for the meters while armed, runs the plan and
-    /// advances the playhead. The graph runs while stopped too, so
-    /// plans swap, tails ring out and monitored input is heard.
+    /// recording, publishes each input's peak for the meters while armed, runs the plan, adds
+    /// the click while playing with it on (`docs/architecture/recording.md` "Click track") and
+    /// advances the playhead. The graph runs while stopped too, so plans swap, tails ring out
+    /// and monitored input is heard.
     ///
     /// # Errors
     ///
@@ -122,6 +126,15 @@ impl Processor {
             left,
             right,
         );
+        if playing
+            && result.is_ok()
+            && self.shared.click()
+            && let Some(click) = &self.click
+        {
+            // At the timeline position heard, behind the playhead by the plan's latency.
+            let heard = self.playhead as i64 - self.runner.latency() as i64;
+            click.mix(heard, self.shared.click_gain(), left, right);
+        }
         if take_starts {
             // After the block, so the latency is that of the plan this block ran.
             self.shared
@@ -148,6 +161,10 @@ impl Processor {
                 Command::Tracks(tracks) => {
                     let old = std::mem::replace(&mut self.tracks, tracks);
                     self.send_back(Retired::Tracks(old));
+                }
+                Command::Click(click) => {
+                    let old = self.click.replace(click);
+                    self.send_back(Retired::Click(old));
                 }
                 Command::Arm(armed) => {
                     let mut old = std::mem::replace(&mut self.armed, armed);

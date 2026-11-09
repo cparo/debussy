@@ -102,4 +102,7 @@ pub enum Error {
     /// A parameter value, pan or delay time that is not finite or is out of range.
     #[error("the value is not finite or is out of range")]
     InvalidValue,
+    /// A tempo or meter outside the limits (`project_model::tempo`).
+    #[error("the tempo or meter is out of range")]
+    InvalidTempo,
 }

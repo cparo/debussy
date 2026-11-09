@@ -331,6 +331,18 @@ impl Session {
         self.apply(Edit::MoveOutput(y))
     }
 
+    /// Sets the project's tempo and meter, as one step; nothing if it is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidTempo`].
+    pub fn set_tempo(&mut self, tempo: crate::Tempo) -> Result<(), Error> {
+        if self.state().tempo == tempo {
+            return Ok(());
+        }
+        self.apply(Edit::SetTempo(tempo))
+    }
+
     /// Removes a connection, as one step.
     ///
     /// # Errors

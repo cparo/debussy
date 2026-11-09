@@ -15,7 +15,7 @@ pub const MAX_DEPTH: u64 = 64;
 pub(crate) type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`.
-const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three];
+const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three, three_to_four];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
 /// connection is a whole-port connection, which is what their absence means.
@@ -27,6 +27,19 @@ fn one_to_two(value: Value) -> Result<Value, String> {
 /// version 2 file leaves the patch board to the automatic layout, which is what their absence
 /// means.
 fn two_to_three(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
+
+/// Version 4 added a required `tempo` (ADR-0082); a version 3 file gets the default, 120 BPM
+/// in 4/4.
+fn three_to_four(mut value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("the file is not a JSON object")?;
+    object.insert(
+        "tempo".to_owned(),
+        serde_json::json!({"bpm": 120.0, "beats_per_bar": 4, "beat_unit": 4}),
+    );
     Ok(value)
 }
 
@@ -128,6 +141,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_three_to_the_default_tempo() -> Result<(), Box<dyn StdError>> {
+        let v3 = V1.replace("\"format_version\":1", "\"format_version\":3");
+        let saved = parse(Path::new("p"), &v3)?;
+        assert_eq!(saved.format_version, 4);
+        assert_eq!(
+            (
+                saved.tempo.bpm,
+                saved.tempo.beats_per_bar,
+                saved.tempo.beat_unit
+            ),
+            (120.0, 4, 4)
+        );
+        // A version 4 file must have its tempo.
+        let v4 = V1.replace("\"format_version\":1", "\"format_version\":4");
+        assert!(matches!(
+            parse(Path::new("p"), &v4),
+            Err(Error::Json { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -135,12 +170,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":4");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":5");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 4,
-                supported: 3,
+                found: 5,
+                supported: 4,
                 ..
             })
         ));
@@ -173,7 +208,7 @@ mod tests {
         fn two_to_three(mut v: Value) -> Result<Value, String> {
             let object = v.as_object_mut().ok_or("not an object")?;
             object.insert("nodes".into(), Value::Array(Vec::new()));
-            Ok(v)
+            three_to_four(v)
         }
         let old = r#"{"format_version":1,"rate":44100,"tracks":[],"nodes":[],"connections":[]}"#;
         let saved = parse_with(Path::new("p"), old, 3, &[one_to_two, two_to_three])?;

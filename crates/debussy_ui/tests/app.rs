@@ -13,8 +13,8 @@ use audio_buffers::Layout;
 use audio_effects::{Control, Mode};
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services, Spectrum, TakeFiles,
-    TakeStatus,
+    App, ClickPreferences, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services,
+    Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -49,6 +49,10 @@ struct Calls {
     started: Vec<Vec<String>>,
     kept: Vec<String>,
     discarded: Vec<String>,
+    /// The click preferences remembered.
+    click: ClickPreferences,
+    /// How many times they were remembered.
+    click_saves: usize,
 }
 
 /// What the fake take sinks report when they end.
@@ -284,6 +288,17 @@ impl Services for Fake {
 
     fn discard_takes(&mut self, files: &[String]) {
         self.calls.borrow_mut().discarded.extend_from_slice(files);
+    }
+
+    fn click_preferences(&mut self) -> ClickPreferences {
+        self.calls.borrow().click
+    }
+
+    fn set_click_preferences(&mut self, preferences: ClickPreferences) -> Result<(), String> {
+        let mut calls = self.calls.borrow_mut();
+        calls.click = preferences;
+        calls.click_saves += 1;
+        Ok(())
     }
 }
 
@@ -1757,5 +1772,59 @@ fn test_device_can_change_while_paused() -> Result<(), Box<dyn Error>> {
     block(&mut processor)?;
     app.update(Message::Device(app.device_choices()[1].clone()));
     assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}
+
+#[test]
+fn test_typed_tempo_and_meter_are_steps_refused_while_playing() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    assert_eq!(app.session().state().tempo, project_model::Tempo::default());
+    app.update(Message::TempoText("97.126".into()));
+    // Not recorded until submitted or something else is done.
+    assert!(!app.session().can_undo());
+    app.update(Message::CommitTempo);
+    assert_eq!(app.session().state().tempo.bpm, 97.13);
+    app.update(Message::SetBeatsPerBar(6));
+    app.update(Message::SetBeatUnit(8));
+    let tempo = app.session().state().tempo;
+    assert_eq!((tempo.beats_per_bar, tempo.beat_unit), (6, 8));
+    assert!(calls.borrow().saves >= 1);
+    // An out-of-range tempo is refused with a notice.
+    app.update(Message::TempoText("400".into()));
+    app.update(Message::Play);
+    assert!(app.status().is_some_and(|s| s.contains("not a tempo")));
+    block(&mut processor)?;
+    // While playing, the meter cannot change.
+    app.update(Message::SetBeatsPerBar(3));
+    assert_eq!(app.session().state().tempo.beats_per_bar, 6);
+    assert!(app.status().is_some_and(|s| s.contains("Stop playback")));
+    app.update(Message::Stop);
+    app.update(Message::Undo);
+    app.update(Message::Undo);
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().tempo, project_model::Tempo::default());
+    Ok(())
+}
+
+#[test]
+fn test_click_toggle_sound_and_level() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    assert!(!app.engine().click_on());
+    app.update(Message::SetClick(true));
+    assert!(app.engine().click_on());
+    // The click is session state: nothing is saved.
+    assert_eq!(calls.borrow().saves, 0);
+    app.update(Message::SetClickSound(engine_bridge::ClickSound::Block));
+    assert_eq!(calls.borrow().click.sound, engine_bridge::ClickSound::Block);
+    for db in [-3.0, -12.0, -40.0] {
+        app.update(Message::ClickLevel(db));
+    }
+    // Live, clamped, and remembered once on release.
+    assert!((app.engine().click_gain() - 0.0631).abs() < 0.001);
+    assert_eq!(calls.borrow().click_saves, 1);
+    app.update(Message::ReleaseClickLevel);
+    assert_eq!(calls.borrow().click_saves, 2);
+    assert_eq!(calls.borrow().click.level_db, -24.0);
+    assert!(app.status().is_none());
     Ok(())
 }

@@ -23,4 +23,12 @@ pub enum Error {
     /// A clip could not be prepared for the engine.
     #[error(transparent)]
     Engine(#[from] audio_engine::Error),
+    /// A bundled click sound could not be prepared.
+    #[error("the {sound} click could not be prepared: {reason}")]
+    ClickSound {
+        /// The sound's name.
+        sound: &'static str,
+        /// What went wrong.
+        reason: String,
+    },
 }

@@ -15,6 +15,9 @@
 //! [`TakeSink`]s take the captured input (normally a disk recorder), and places each finished
 //! take where [`TakeInfo::placement`] says.
 //!
+//! A [`ClickTrack`] set with [`Engine::set_click`] is mixed into the output after the plan
+//! while playing; offline render never includes it.
+//!
 //! [`Engine::new`] returns the control side, [`Engine`], and the real-time side, [`Processor`].
 //! Offline render ([`render`]) runs the same per-block step over [`RenderFeed`]s, which call the
 //! clip renderer directly, so it produces the same samples as playback.
@@ -23,6 +26,7 @@
 //!
 //! - `timeline`: [`ChannelClip`], [`ClipAudio`] and [`TrackRenderer`], a track channel's clips
 //!   mixed into one signal.
+//! - `click`: [`ClickTrack`], the metronome click.
 //! - `capture`: [`ArmedTrack`], [`TakeSink`], [`TakeInfo`] and the device input.
 //! - `feed`: [`TrackFeed`], [`TrackFeeds`], [`Streams`] and [`RenderFeed`].
 //! - `block`: the per-block step shared by playback and render.
@@ -35,6 +39,7 @@
 
 mod block;
 mod capture;
+mod click;
 mod engine;
 mod error;
 mod feed;
@@ -43,6 +48,7 @@ mod render;
 mod timeline;
 
 pub use capture::{ArmedTrack, MAX_INPUTS, TakeInfo, TakeSink};
+pub use click::{ClickTrack, OFFBEAT_GAIN};
 pub use engine::{Engine, TransportState};
 pub use error::Error;
 pub use feed::{RenderFeed, Streams, TrackFeed, TrackFeeds};

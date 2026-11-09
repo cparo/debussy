@@ -105,4 +105,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0079](0079-arm-state-is-session-only-and-inputs-open-only.md) | Arm state is session-only and inputs open only while a track is armed | Accepted | [Recording](../architecture/user-interface.md#recording) |
 | [ADR-0080](0080-record-and-arm-are-lit-in-a-fixed-recording-red.md) | Record and arm are lit in a fixed recording red and the audio device is picked in the bottom bar | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0081](0081-a-lost-audio-device-s-engine-is-rebuilt-from-the.md) | A lost audio device's engine is rebuilt from the project | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
+| [ADR-0082](0082-the-project-has-one-tempo-and-meter-saved-in.md) | The project has one tempo and meter, saved in project format 4 | Accepted | [Musical time](../architecture/project.md#musical-time) |
+| [ADR-0083](0083-the-click-is-mixed-at-the-output-stage-from.md) | The click is mixed at the output stage from bundled CC0 samples | Accepted | [Click track](../architecture/recording.md#click-track) |
 

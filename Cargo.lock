@@ -629,6 +629,7 @@ dependencies = [
  "project_model",
  "signal_graph",
  "thiserror 2.0.21",
+ "wav_files",
 ]
 
 [[package]]

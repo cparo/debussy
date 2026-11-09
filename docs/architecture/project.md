@@ -21,6 +21,17 @@ length. A track keeps its clips in layer order: a clip that is added, moved, or 
 position goes to the top layer, and a trim, gain or fade change keeps its layer. A clip keeps its
 id when it moves between tracks ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
 
+## Musical time
+
+A project has one tempo and meter for its whole length: `bpm` beats per minute (20 to 300, to
+0.01), where a beat is a `beat_unit` note, and `beats_per_bar` beats in a bar (1 to 16), with
+`beat_unit` 2, 4, 8 or 16. The default is 120 BPM in 4/4. Changing it is an undoable edit, refused
+while playing, and named versions carry it. Frames stay the stored unit of time: tempo places a
+grid over them and moves nothing. Beat `n` falls on frame `round(n × 60 × rate / bpm)`, computed
+from `n` each time and never accumulated; bar 1 beat 1 is frame 0, and the grid extends before
+frame 0 with negative beats. `project_model::tempo` holds the conversions
+([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)).
+
 ## Range edits
 
 A range is a half-open span of timeline frames across chosen tracks. Cutting or deleting a range
@@ -124,7 +135,9 @@ version files carry; unknown fields are refused. The file holds `format_version`
 format version 2 a connection may carry `from_side` and `to_side` (`left` or `right`); version 1
 files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-side-and-new-tracks.md)). Since version 3 a node may carry a
 `position` (`x`, `y`) and the project an `output_y`, both patch-board coordinates within
-±1,000,000; version 2 files migrate unchanged and use the automatic layout ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)). Times are
+±1,000,000; version 2 files migrate unchanged and use the automatic layout ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)). Since
+version 4 the project carries a required `tempo` (`bpm`, `beats_per_bar`, `beat_unit`; see
+[Musical time](#musical-time)); version 3 files migrate to 120 BPM in 4/4 ([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving
@@ -143,7 +156,7 @@ more than 10,000 tracks, 1,000,000 clips, 10,000 nodes, 100,000 connections or 1
 a sample rate outside the four project rates, names over 1024 bytes, and audio file names that are
 not plain names inside `audio/`. Every clip is checked against its track, ids must be unique, and
 every connection must join existing endpoints, never from the output or into a track, with a pan
-from −1 to 1. Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+from −1 to 1. The tempo and meter must be within the limits in [Musical time](#musical-time). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Cleanup
 
@@ -154,9 +167,12 @@ audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-p
 ## Application settings
 
 The application keeps per-machine settings, outside any project, in
-`~/Library/Application Support/Debussy/settings.json`: a `format_version` (1) and the chosen audio
+`~/Library/Application Support/Debussy/settings.json`: a `format_version` (2) and the chosen audio
 device's id. The file is written crash-safely and read as untrusted input; a missing, newer or
 invalid file gives the defaults ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).
+Since version 2 it also holds the click's `click_sound` (`block`, `click` or `stick`) and
+`click_level_db` (−24 to +6); a version 1 file keeps its device and takes the Click sound at
+0 dB, and a level out of range reads as 0 dB ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
 
 ## Stored audio
 

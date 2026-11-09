@@ -11,6 +11,7 @@ use audio_buffers::Layout;
 use crate::error::Error;
 use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, State, Track};
+use crate::tempo::Tempo;
 use crate::types::{ClipId, TrackId};
 
 /// One reversible change to the project state. A gesture made of several changes is a
@@ -120,6 +121,8 @@ pub enum Edit {
     /// Moves the project output's L and R up or down the patch board; `None` returns them to
     /// the automatic layout.
     MoveOutput(Option<f32>),
+    /// Sets the project's tempo and meter.
+    SetTempo(Tempo),
     /// Replaces the whole state, as when restoring a named version.
     Restore(State),
     /// Several edits applied in order, as one.
@@ -299,6 +302,10 @@ impl Edit {
                     routing::check_coordinate(y)?;
                 }
                 Ok(Edit::MoveOutput(std::mem::replace(&mut state.output_y, y)))
+            }
+            Edit::SetTempo(tempo) => {
+                tempo.check()?;
+                Ok(Edit::SetTempo(std::mem::replace(&mut state.tempo, tempo)))
             }
             Edit::Restore(new) => {
                 check_state(&new)?;
@@ -489,7 +496,9 @@ fn check_state(state: &State) -> Result<(), Error> {
         nodes: state.nodes.clone(),
         connections: Vec::with_capacity(state.connections.len()),
         output_y: state.output_y,
+        tempo: state.tempo,
     };
+    state.tempo.check()?;
     if let Some(y) = state.output_y {
         routing::check_coordinate(y)?;
     }

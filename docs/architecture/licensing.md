@@ -18,3 +18,9 @@ RUSTSEC-2026-0206 (`rustybuzz`), under `iced`'s `svg` feature ([ADR-0070](../adr
 
 Copyleft licences (GPL, LGPL, AGPL, and weak copyleft such as MPL) must not be added to the
 allowlist without human review, raised with the `flag-risk` skill ([ADR-0001](../adrs/0001-debussy-is-licensed-mit-or-apache-2-0-and-accepts.md)).
+
+## Bundled assets
+
+Audio and artwork compiled into the application are the project's own work or CC0-1.0. Each
+directory of bundled audio holds a `README.md` giving every file's licence and source; the click
+sounds' is `crates/engine_bridge/assets/clicks/README.md` ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).

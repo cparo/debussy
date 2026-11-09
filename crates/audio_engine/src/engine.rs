@@ -11,6 +11,7 @@ use audio_buffers::{Consumer, Producer, queue};
 use signal_graph::{NodeId, Runner};
 
 use crate::capture::{ArmedTrack, MAX_INPUTS, TakeInfo};
+use crate::click::ClickTrack;
 use crate::error::Error;
 use crate::feed::{Streams, TrackFeeds};
 use crate::processor::Processor;
@@ -63,13 +64,16 @@ impl Default for Peaks {
     }
 }
 
-/// What the real-time side publishes, and the mono switch the control side sets.
+/// What the real-time side publishes, and the mono and click switches the control side sets.
 #[derive(Debug, Default)]
 pub(crate) struct Shared {
     input_peaks: Peaks,
     playhead: AtomicU64,
     state: AtomicU8,
     mono: AtomicBool,
+    click: AtomicBool,
+    /// The click's gain, as `f32` bits.
+    click_gain: AtomicU32,
     /// Whether the last recording's capture has begun; `take_start` and `take_latency` are set
     /// before it.
     take_started: AtomicBool,
@@ -101,12 +105,21 @@ impl Shared {
     pub(crate) fn mono(&self) -> bool {
         self.mono.load(Ordering::Relaxed)
     }
+
+    pub(crate) fn click(&self) -> bool {
+        self.click.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn click_gain(&self) -> f32 {
+        f32::from_bits(self.click_gain.load(Ordering::Relaxed))
+    }
 }
 
 /// Something the real-time side replaced, sent back to be dropped.
 pub(crate) enum Retired {
     Tracks(#[allow(dead_code)] Vec<TrackFeeds>), // Held only to be dropped.
     Armed(#[allow(dead_code)] Vec<ArmedTrack>),  // Held only to be dropped.
+    Click(#[allow(dead_code)] Option<ClickTrack>), // Held only to be dropped.
 }
 
 /// A request from the control side to the real-time side.
@@ -115,6 +128,8 @@ pub(crate) enum Command {
     Tracks(Vec<TrackFeeds>),
     /// Replace the armed tracks, ending the old ones' takes.
     Arm(Vec<ArmedTrack>),
+    /// Replace the click.
+    Click(ClickTrack),
     /// Play from `from` once every feed is primed, recording the armed tracks if `record`; the
     /// feeds have been moved there.
     Play { from: u64, record: bool },
@@ -159,6 +174,9 @@ impl Engine {
         let (commands, commands_rx) = queue::channel(COMMANDS)?;
         let (retire, retired) = queue::channel(COMMANDS + 1)?;
         let shared = Arc::new(Shared::default());
+        shared
+            .click_gain
+            .store(1.0_f32.to_bits(), Ordering::Relaxed);
         let processor = Processor::new(
             runner,
             output,
@@ -349,6 +367,41 @@ impl Engine {
     /// Whether mono listening is on.
     pub fn mono(&self) -> bool {
         self.shared.mono()
+    }
+
+    /// Replaces the click (`docs/architecture/recording.md` "Click track"): its sound and beat
+    /// grid. Takes effect at the next block, also while playing.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Busy`].
+    pub fn set_click(&mut self, click: ClickTrack) -> Result<(), Error> {
+        self.collect();
+        self.send(Command::Click(click))
+    }
+
+    /// Turns the click on or off. It sounds only while playing. Not saved.
+    pub fn set_click_on(&self, on: bool) {
+        self.shared.click.store(on, Ordering::Relaxed);
+    }
+
+    /// Whether the click is on.
+    pub fn click_on(&self) -> bool {
+        self.shared.click()
+    }
+
+    /// Sets the click's level, in decibels.
+    pub fn set_click_level(&self, db: f32) {
+        let gain = dsp::db_to_gain(db);
+        let gain = if gain.is_finite() { gain } else { 1.0 };
+        self.shared
+            .click_gain
+            .store(gain.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The click's gain, linear.
+    pub fn click_gain(&self) -> f32 {
+        self.shared.click_gain()
     }
 
     /// The playhead: while stopped, where stop or locate left it; otherwise the frame the

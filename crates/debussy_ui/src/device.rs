@@ -9,7 +9,7 @@ use crate::app::App;
 
 impl App {
     /// Rebuilds the engine after its device was lost, keeping the playhead, mono listening, the
-    /// armed tracks and a recording pass in progress, and runs it on the device with `device`'s
+    /// click, the armed tracks and a recording pass in progress, and runs it on the device with `device`'s
     /// id, or with `None` on the remembered device if present, else the default output.
     pub(crate) fn recover_audio(&mut self, device: Option<&str>) {
         let config = *self.bridge.graph().config();
@@ -30,9 +30,13 @@ impl App {
         };
         self.keep_take_info();
         engine.set_mono(self.engine.mono());
+        engine.set_click_on(self.engine.click_on());
+        engine.set_click_level(self.click.preferences.level_db);
         let playhead = self.engine.playhead();
         self.bridge = bridge;
         self.engine = engine;
+        self.click.resend();
+        self.sync_click();
         // The lost processor held the track feeds; play loads new ones.
         self.loaded = None;
         let result = self.engine.locate(playhead, self.services.streams());
