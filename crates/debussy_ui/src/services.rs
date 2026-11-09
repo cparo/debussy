@@ -56,8 +56,10 @@ pub trait Services {
     ) -> Result<Vec<TrackFeeds>, String>;
 
     /// Summarises stored audio file `file` into `out`: one bucket per column of
-    /// `samples_per_column` frames, from frame `start`. Returns how many columns hold audio;
-    /// 0 if the file has no summary yet.
+    /// `samples_per_column` frames, from frame `start`. Columns finer than the summaries'
+    /// smallest bucket are summarised from the audio, each joined to the next column's first
+    /// frame. Returns how many columns hold audio; 0 if the file has no summary yet, or, at the
+    /// finer zooms, cannot be read.
     fn waveform(
         &mut self,
         file: &str,
@@ -67,7 +69,8 @@ pub trait Services {
     ) -> usize;
 
     /// Writes into `out` one spectrum per column of `samples_per_column` frames of stored audio
-    /// file `file`, from frame `start`: the frame starting each column, reduced with
+    /// file `file`, from frame `start`: the frame centred on each column, silent where it runs
+    /// past either end of the file, reduced with
     /// [`spectrum_bands`](crate::spectrum_bands). Returns how many columns hold audio; 0 if the
     /// file cannot be read.
     fn spectrogram(

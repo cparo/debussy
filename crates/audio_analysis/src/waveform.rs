@@ -73,6 +73,29 @@ impl Bucket {
     }
 }
 
+/// Summarises `samples` into consecutive columns of `samples_per_column` samples each, the first
+/// starting at the first sample, writing into `out`; returns how many columns hold samples (fewer
+/// than `out.len()` when the samples run out). Each column also takes in the first sample of the
+/// next column when there is one, so adjacent columns overlap and the outline stays continuous
+/// when single samples are visible. For views zoomed in past [`BASE_BUCKET`] samples per column
+/// (`docs/architecture/analysis.md` "Waveform summaries").
+pub fn sample_columns(samples: &[f32], samples_per_column: usize, out: &mut [Bucket]) -> usize {
+    let spc = samples_per_column.max(1);
+    let mut filled = 0;
+    for (index, column) in out.iter_mut().enumerate() {
+        let low = index.saturating_mul(spc);
+        if low >= samples.len() {
+            break;
+        }
+        let high = low.saturating_add(spc).saturating_add(1).min(samples.len());
+        if let Some(bucket) = Bucket::of(&samples[low..high]) {
+            *column = bucket;
+            filled += 1;
+        }
+    }
+    filled
+}
+
 /// A bucket being built: running minimum, maximum and sum of squares.
 #[derive(Debug, Clone, Copy)]
 struct Accumulator {
@@ -492,5 +515,46 @@ mod tests {
             rms: 0.75,
         };
         assert_eq!(Bucket::from_bytes(&bucket.to_bytes()), bucket);
+    }
+
+    #[test]
+    fn test_sample_columns_includes_the_next_columns_first_sample() {
+        let samples = [0.0, 1.0, -1.0, 0.5];
+        let blank = Bucket {
+            min: 0.0,
+            max: 0.0,
+            rms: 0.0,
+        };
+        let mut out = [blank; 2];
+        assert_eq!(sample_columns(&samples, 2, &mut out), 2);
+        // Column 0 is samples 0 and 1 plus sample 2; column 1 is samples 2 and 3.
+        assert_eq!((out[0].min, out[0].max), (-1.0, 1.0));
+        assert_eq!((out[1].min, out[1].max), (-1.0, 0.5));
+    }
+
+    #[test]
+    fn test_sample_columns_partial_last_column() {
+        let samples = [0.25, 0.5, 0.75];
+        let blank = Bucket {
+            min: 9.0,
+            max: 9.0,
+            rms: 9.0,
+        };
+        let mut out = [blank; 4];
+        assert_eq!(sample_columns(&samples, 2, &mut out), 2);
+        assert_eq!((out[1].min, out[1].max), (0.75, 0.75));
+        assert_eq!(out[2], blank);
+    }
+
+    #[test]
+    fn test_sample_columns_empty_input() {
+        let blank = Bucket {
+            min: 0.0,
+            max: 0.0,
+            rms: 0.0,
+        };
+        let mut out = [blank; 3];
+        assert_eq!(sample_columns(&[], 2, &mut out), 0);
+        assert_eq!(out, [blank; 3]);
     }
 }
