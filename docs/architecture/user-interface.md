@@ -90,6 +90,12 @@ The position bar shows the playhead as a red bar along a grey channel over the t
 (the end of the last clip, or more to take in the window and the playhead), with ticks at the
 visible window's edges.
 
+While playing, once the playhead is in view and reaches 80 % of the lane's width, the view moves
+to put it at 20 %, including when it has passed the right edge since the last display frame. A
+playhead that is out of view and was not followed there is not followed; panning or zooming during
+playback stops following until the playhead is in view again
+([ADR-0063](../adrs/0063-while-playing-the-view-pages-along-with-a-visible.md)).
+
 Zoom steps by √2: two steps halve or double the time shown, from 2 to 2^24 frames per waveform
 column. Zooming keeps the playhead at the same place on screen if it is visible, otherwise the
 view's centre. A mostly sideways two-finger scroll over a lane pans the view; there is no gesture
