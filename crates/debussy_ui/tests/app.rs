@@ -1462,7 +1462,8 @@ fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>
     app.update(Message::Stop);
     block(&mut processor)?;
     app.update(Message::Tick);
-    assert!(!app.wants_ticks());
+    // The pass is saved, so Record is available again.
+    assert!(app.can_record());
     assert_eq!(calls.borrow().kept, ["Vocal 0.wav"]);
     let clips = &app.session().state().track(track).ok_or("no track")?.clips;
     assert_eq!(clips.len(), 2);
@@ -1564,5 +1565,32 @@ fn test_recording_runs_on_past_the_project_end() -> Result<(), Box<dyn Error>> {
     app.update(Message::Tick);
     assert!(app.is_recording());
     assert_eq!(app.engine().real_time_state(), TransportState::Playing);
+    Ok(())
+}
+
+#[test]
+fn test_input_meter_follows_the_track_input_and_falls() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    assert!(!app.wants_ticks());
+    app.update(Message::Arm(track));
+    // Armed: ticks drive the meter.
+    assert!(app.wants_ticks());
+    let choices = app.input_choices(track);
+    app.update(Message::Input(track, choices[1]));
+    // Input 2 at half scale (−6 dBFS); input 1 silent.
+    let input: Vec<f32> = (0..256).flat_map(|_| [0.0, 0.5]).collect();
+    let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+    processor.process(&input, 2, &mut l, &mut r)?;
+    app.update(Message::Tick);
+    let level = app.input_levels(track)[0];
+    assert!((level - 20.0 * 0.5_f32.log10()).abs() < 1e-4, "{level}");
+    // No new input: it falls, not drops.
+    app.update(Message::Tick);
+    let fallen = app.input_levels(track)[0];
+    assert!(fallen < level && fallen > debussy_ui::METER_FLOOR_DB);
+    app.update(Message::Arm(track));
+    app.update(Message::Tick);
+    assert!(app.input_levels(track).is_empty());
     Ok(())
 }

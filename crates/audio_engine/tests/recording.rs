@@ -297,3 +297,26 @@ fn test_placed_take_lines_up_with_the_playback_it_recorded() -> Result<(), Box<d
     }
     Ok(())
 }
+
+#[test]
+fn test_input_peaks_are_published_while_armed_and_cleared_on_read() -> Result<(), Box<dyn Error>> {
+    let g = graph(0)?;
+    let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+    let mut at = 0;
+    // Not armed: not measured.
+    run(&mut processor, &mut at, 1)?;
+    assert_eq!(engine.take_input_peak(1), 0.0);
+    engine.arm(vec![ArmedTrack {
+        source: g.mono,
+        inputs: vec![0],
+        monitor: false,
+        sinks: Vec::new(),
+    }])?;
+    run(&mut processor, &mut at, 2)?;
+    // The largest input so far on each channel, across both blocks.
+    assert_eq!(engine.take_input_peak(0), input(at - 1, 0));
+    assert_eq!(engine.take_input_peak(1), input(at - 1, 1));
+    assert_eq!(engine.take_input_peak(0), 0.0);
+    assert_eq!(engine.take_input_peak(audio_engine::MAX_INPUTS), 0.0);
+    Ok(())
+}

@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
-    Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, responsive, row,
-    scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
+    Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
+    responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
@@ -17,6 +17,7 @@ use crate::app::{App, Message, NewNode};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
+use crate::recording::METER_FLOOR_DB;
 use crate::theme::{self, Place, Tone};
 use crate::transport::PositionBar;
 use crate::waveform::{CursorView, Display, LaneView};
@@ -114,6 +115,27 @@ fn chip<'a>(label: &'a str, message: Option<Message>, selected: bool) -> Element
         .padding([1, 6])
         .style(theme::tool_style(selected, Place::Alone, true))
         .into()
+}
+
+/// An armed track's input meter: one bar per channel, left above right, from
+/// [`METER_FLOOR_DB`] to 0 dBFS, red from −1 dBFS.
+fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
+    let girth = if levels.len() > 1 { 4.0 } else { 8.0 };
+    let bars = levels.iter().map(|&level| {
+        let clipping = level >= -1.0;
+        progress_bar(METER_FLOOR_DB..=0.0, level)
+            .length(Length::Fixed(64.0))
+            .girth(Length::Fixed(girth))
+            .style(move |theme: &iced::Theme| {
+                if clipping {
+                    iced::widget::progress_bar::danger(theme)
+                } else {
+                    iced::widget::progress_bar::success(theme)
+                }
+            })
+            .into()
+    });
+    column(bars).spacing(1).into()
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
@@ -556,6 +578,7 @@ impl App {
                     .text_size(12)
                     .padding([1, 6]),
             );
+            controls = controls.push(input_meter(self.input_levels(id)));
         }
         container(
             row![

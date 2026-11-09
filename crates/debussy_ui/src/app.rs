@@ -297,6 +297,8 @@ pub struct App {
     pub(crate) inputs: usize,
     /// A recording pass whose files are still being written.
     pub(crate) pass: Option<Pass>,
+    /// Each armed track's input meter, one level per channel in dBFS.
+    pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -355,6 +357,7 @@ impl App {
             input_open: false,
             inputs: 0,
             pass: None,
+            meters: BTreeMap::new(),
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -545,7 +548,8 @@ impl App {
 
     /// Whether the interface needs a tick every display frame: while playing or starting.
     pub fn wants_ticks(&self) -> bool {
-        self.engine.is_playing() || self.recording_pending()
+        // While armed, ticks drive the input meters.
+        self.engine.is_playing() || self.recording_pending() || !self.arming.is_empty()
     }
 
     /// Handles `message`, then saves the project if it changed
@@ -643,6 +647,7 @@ impl App {
             Message::Tick => {
                 self.engine.collect();
                 self.poll_recording();
+                self.update_meters();
                 self.stop_at_end();
                 self.follow_playhead();
                 let result = self.bridge.commit();
