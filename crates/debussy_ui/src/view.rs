@@ -48,8 +48,8 @@ pub(crate) const RENAME_INPUT: &str = "rename-track";
 const ICON_SIZE: f32 = 16.0;
 /// A toolbar button's text size.
 const TOOL_TEXT: f32 = 13.0;
-/// The width of the playhead time beside the position bar: room for "99999.99 s".
-const TIME_WIDTH: f32 = 84.0;
+/// The width of the playhead time beside the position bar: room for "00:00:00.000".
+const TIME_WIDTH: f32 = 100.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
@@ -277,7 +277,6 @@ impl App {
         let engine = self.engine();
         let playing = engine.is_playing();
         let mono = engine.mono();
-        let seconds = engine.playhead() as f64 / f64::from(self.sample_rate());
         let position = canvas(PositionBar {
             playhead: engine.playhead(),
             start: self.view_start(),
@@ -302,13 +301,12 @@ impl App {
                 (Face::Icon(Icon::Record), None, false),
             ]),
             gap(16.0),
-            // A fixed width, so the position bar beside it does not move as the digits change.
-            text(format!("{seconds:.2} s"))
-                .size(14)
-                .width(Length::Fixed(TIME_WIDTH))
-                .align_x(iced::alignment::Horizontal::Right),
-            gap(12.0),
             position,
+            gap(12.0),
+            // A fixed width, so the position bar beside it does not move as the digits change.
+            text(self.playhead_time())
+                .size(14)
+                .width(Length::Fixed(TIME_WIDTH)),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
