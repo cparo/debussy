@@ -21,6 +21,27 @@ length. A track keeps its clips in layer order: a clip that is added, moved, or 
 position goes to the top layer, and a trim, gain or fade change keeps its layer. A clip keeps its
 id when it moves between tracks ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
 
+## Range edits
+
+A range is a half-open span of timeline frames across chosen tracks. Cutting or deleting a range
+removes what lies inside it on those tracks and splits clips at its edges. Nothing moves to close
+the gap: a cut leaves silence.
+
+The pieces of a split clip keep its layer. The left piece keeps the clip's id; when a clip
+straddles the whole range, its right piece gets a new id and goes one layer above the left piece.
+A new edge made by a split has no fade. A piece keeps the clip's fade-in or fade-out only at an
+edge that was the clip's own, shortened to fit the piece.
+
+Copying captures, for each chosen track in display order, the parts of its clips inside the range
+as a lane: the track's layout and the clip parts, positioned relative to the range start, bottom
+layer first. Pasting at a track and a position is an overlay: the excerpt's lanes go in order onto
+that track and the tracks below it, and each pasted clip goes on the top layer of its track with a
+new id. A paste is refused as a whole if its lanes run past the last track or if a lane's layout
+differs from its track's.
+
+Cutting, deleting and pasting are each one undo step, and one that changes nothing adds no step.
+Copying is not an edit. An excerpt is held by the caller and never saved ([ADR-0073](../adrs/0073-range-edits-split-clips-without-new-fades-never.md)).
+
 ## Undo history
 
 Every edit is a reversible command in an in-memory history of unlimited depth. The history belongs
