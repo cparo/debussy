@@ -2,7 +2,7 @@
 //! [`Theme`] for each, and the widget styles built from them (`docs/architecture/
 //! user-interface.md` "Layout").
 
-use iced::widget::{button, container};
+use iced::widget::{button, container, svg};
 use iced::{Background, Border, Color, Theme, border};
 
 /// Audio signals: waveforms, audio ports and wires. The same in both tones.
@@ -176,6 +176,11 @@ impl Place {
     }
 }
 
+/// The logo: drawn in the accent of a selected toolbar button, straight onto the bar.
+pub fn logo(_theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style { color: Some(AUDIO) }
+}
+
 /// The outer corner radius of a toolbar button or strip.
 const TOOL_RADIUS: f32 = 6.0;
 
@@ -274,6 +279,15 @@ mod tests {
     fn test_mix_clamps() {
         assert_eq!(mix(Color::BLACK, Color::WHITE, 2.0), Color::WHITE);
         assert_eq!(mix(Color::BLACK, Color::WHITE, -1.0), Color::BLACK);
+    }
+
+    #[test]
+    fn test_logo_takes_the_selected_button_accent() {
+        for tone in [Tone::Light, Tone::Dark] {
+            let accent = tool(true, Place::Alone)(&theme(tone), button::Status::Active).background;
+            let logo = logo(&theme(tone), svg::Status::Idle).color;
+            assert_eq!(logo.map(Background::Color), accent);
+        }
     }
 
     #[test]

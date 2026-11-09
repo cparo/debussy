@@ -16,6 +16,8 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "compile-time only, under iced/wgpu (ADR-0055)" },
     # ttf-parser: parses system fonts for cosmic-text, never project or imported files.
     { id = "RUSTSEC-2026-0192", reason = "parses system fonts only, under iced (ADR-0055)" },
+    # rustybuzz: shapes text inside SVGs for resvg; our icons are compiled in and hold no text.
+    { id = "RUSTSEC-2026-0206", reason = "shapes SVG text only; our own icons hold none (ADR-0070)" },
 ]
 
 [licenses]
