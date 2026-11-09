@@ -1,12 +1,9 @@
-//! The palette: signal colours shared by both tones, chrome tokens per tone, the `iced`
+//! The palette: shared signal colours, chrome and audio tokens per tone, the `iced`
 //! [`Theme`] for each, and the widget styles built from them (`docs/architecture/
 //! user-interface.md` "Layout").
 
 use iced::widget::{button, container, svg};
 use iced::{Background, Border, Color, Theme, border};
-
-/// Audio signals: waveforms, audio ports and wires. The same in both tones.
-pub const AUDIO: Color = Color::from_rgb(1.0, 0.5, 0.0);
 
 /// The playhead: the lane cursor and the position bar.
 pub const CURSOR: Color = Color::from_rgb(0.9, 0.2, 0.2);
@@ -31,7 +28,7 @@ impl Tone {
     }
 }
 
-/// The chrome colours of one tone.
+/// The chrome and audio colours of one tone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
     /// The top and bottom bars and track headers.
@@ -50,6 +47,10 @@ pub struct Tokens {
     pub line: Color,
     /// The position bar's channel.
     pub channel: Color,
+    /// Audio signals (waveforms, audio ports and wires) and a selected button's face.
+    pub audio: Color,
+    /// Text on an `audio` fill.
+    pub audio_text: Color,
 }
 
 const DARK: Tokens = Tokens {
@@ -62,6 +63,8 @@ const DARK: Tokens = Tokens {
     face_text: Color::WHITE,
     line: Color::from_rgb(0.1, 0.1, 0.1),
     channel: Color::from_rgb(0.45, 0.45, 0.45),
+    audio: Color::from_rgb(1.0, 0.5, 0.0),
+    audio_text: Color::BLACK,
 };
 
 const LIGHT: Tokens = Tokens {
@@ -73,6 +76,8 @@ const LIGHT: Tokens = Tokens {
     face_text: Color::BLACK,
     line: Color::from_rgb(0.55, 0.55, 0.55),
     channel: Color::from_rgb(0.62, 0.62, 0.62),
+    audio: Color::from_rgb(0.0, 0.45, 0.9),
+    audio_text: Color::WHITE,
 };
 
 /// The tokens of `tone`.
@@ -103,7 +108,7 @@ pub fn theme(tone: Tone) -> Theme {
         iced::theme::Palette {
             background: t.chrome,
             text: t.text,
-            primary: AUDIO,
+            primary: t.audio,
             success: Color::from_rgb(0.3, 0.7, 0.3),
             warning: Color::from_rgb(0.95, 0.75, 0.2),
             danger: CURSOR,
@@ -177,8 +182,10 @@ impl Place {
 }
 
 /// The logo: drawn in the accent of a selected toolbar button, straight onto the bar.
-pub fn logo(_theme: &Theme, _status: svg::Status) -> svg::Style {
-    svg::Style { color: Some(AUDIO) }
+pub fn logo(theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: Some(tokens(tone_of(theme)).audio),
+    }
 }
 
 /// The outer corner radius of a toolbar button or strip.
@@ -188,8 +195,8 @@ const TOOL_RADIUS: f32 = 6.0;
 pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(tone_of(theme));
-        let face = if selected { AUDIO } else { t.face };
-        let ink = if selected { Color::BLACK } else { t.face_text };
+        let face = if selected { t.audio } else { t.face };
+        let ink = if selected { t.audio_text } else { t.face_text };
         let (background, text) = match status {
             button::Status::Disabled => (Color { a: 0.35, ..face }, Color { a: 0.45, ..ink }),
             button::Status::Hovered => (mix(face, ink, 0.08), ink),
@@ -301,8 +308,17 @@ mod tests {
         assert_eq!(unselected.text_color, Color::WHITE);
         assert_eq!(
             tool(true, Place::Alone)(&dark, button::Status::Active).text_color,
-            Color::BLACK
+            DARK.audio_text
         );
+    }
+
+    #[test]
+    fn test_tokens_audio_differs_by_tone() {
+        assert_ne!(LIGHT.audio, DARK.audio);
+        assert_eq!(LIGHT.audio_text, Color::WHITE);
+        let light = tool(true, Place::Alone)(&theme(Tone::Light), button::Status::Active);
+        assert_eq!(light.background, Some(Background::Color(LIGHT.audio)));
+        assert_eq!(light.text_color, Color::WHITE);
     }
 
     #[test]

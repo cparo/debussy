@@ -13,7 +13,7 @@ use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State};
 
 use crate::app::Message;
-use crate::theme::{AUDIO, mix, tokens, tone_of};
+use crate::theme::{mix, tokens, tone_of};
 
 /// The distance between two port circles on a node, in logical pixels.
 pub const PORT_SPACING: f32 = 48.0;
@@ -399,13 +399,13 @@ fn curve(a: Point, b: Point) -> Path {
     })
 }
 
-/// A port circle at `at`.
-fn pin(frame: &mut Frame, at: Point, radius: f32, fill: iced::Color) {
+/// A port circle at `at`, filled with `fill` and outlined in `stroke`.
+fn pin(frame: &mut Frame, at: Point, radius: f32, fill: iced::Color, stroke: iced::Color) {
     let circle = Path::circle(at, radius);
     frame.fill(&circle, fill);
     frame.stroke(
         &circle,
-        Stroke::default().with_width(WIRE_WIDTH).with_color(AUDIO),
+        Stroke::default().with_width(WIRE_WIDTH).with_color(stroke),
     );
 }
 
@@ -551,7 +551,7 @@ impl Program<Message> for BoardView {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let t = tokens(tone_of(theme));
-        let selected = mix(AUDIO, iced::Color::WHITE, 0.6);
+        let selected = mix(t.audio, t.text, 0.6);
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
@@ -560,7 +560,7 @@ impl Program<Message> for BoardView {
                 let chosen = self.selection == Some(Selection::Wire(w.connection));
                 let stroke = Stroke::default()
                     .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
-                    .with_color(if chosen { selected } else { AUDIO });
+                    .with_color(if chosen { selected } else { t.audio });
                 frame.stroke(&curve(*a, *b), stroke);
             }
         }
@@ -595,7 +595,7 @@ impl Program<Message> for BoardView {
                 // Drawn in the gutter; the wire starts at the board's edge.
                 Endpoint::Track(_) => {}
                 Endpoint::Output => {
-                    pin(&mut frame, *at, OUTPUT_RADIUS, t.lane);
+                    pin(&mut frame, *at, OUTPUT_RADIUS, t.lane, t.audio);
                     frame.fill_text(Text {
                         content: if p.side == Some(Side::Right) {
                             "R"
@@ -611,7 +611,7 @@ impl Program<Message> for BoardView {
                         ..Text::default()
                     });
                 }
-                Endpoint::Node(_) => pin(&mut frame, *at, PIN_RADIUS, t.lane),
+                Endpoint::Node(_) => pin(&mut frame, *at, PIN_RADIUS, t.lane, t.audio),
             }
         }
         vec![frame.into_geometry()]
@@ -686,9 +686,9 @@ impl Program<Message> for GutterView {
             frame.fill_rectangle(
                 Point::new(x, y - WIRE_WIDTH / 2.0),
                 Size::new(bounds.width - x, WIRE_WIDTH),
-                AUDIO,
+                t.audio,
             );
-            pin(&mut frame, Point::new(x, y), PIN_RADIUS, t.lane);
+            pin(&mut frame, Point::new(x, y), PIN_RADIUS, t.lane, t.audio);
         }
         vec![frame.into_geometry()]
     }
