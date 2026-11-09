@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<title>Paste</title>
+<path fill="#000" fill-rule="evenodd" d="M6 4h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM6 6v14h12V6Z"/>
+<rect x="8" y="2" width="8" height="5" rx="1.5" fill="#000"/>
+<rect x="8.5" y="10" width="7" height="7.5" rx="1" fill="#000"/>
+</svg>

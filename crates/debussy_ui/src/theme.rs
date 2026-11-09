@@ -191,14 +191,37 @@ pub fn logo(theme: &Theme, _status: svg::Status) -> svg::Style {
 /// The outer corner radius of a toolbar button or strip.
 const TOOL_RADIUS: f32 = 6.0;
 
+/// A toolbar button's face and ink colours, before its status changes them.
+fn tool_colours(t: &Tokens, selected: bool) -> (Color, Color) {
+    if selected {
+        (t.audio, t.audio_text)
+    } else {
+        (t.face, t.face_text)
+    }
+}
+
+/// A disabled toolbar button's ink.
+fn disabled_ink(ink: Color) -> Color {
+    Color { a: 0.45, ..ink }
+}
+
+/// A toolbar button's icon: tinted with the ink its text label would have.
+pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
+    move |theme, _status| {
+        let (_, ink) = tool_colours(tokens(tone_of(theme)), selected);
+        svg::Style {
+            color: Some(if enabled { ink } else { disabled_ink(ink) }),
+        }
+    }
+}
+
 /// A toolbar button at `place`; `selected` marks the active side of a toggle.
 pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(tone_of(theme));
-        let face = if selected { t.audio } else { t.face };
-        let ink = if selected { t.audio_text } else { t.face_text };
+        let (face, ink) = tool_colours(t, selected);
         let (background, text) = match status {
-            button::Status::Disabled => (Color { a: 0.35, ..face }, Color { a: 0.45, ..ink }),
+            button::Status::Disabled => (Color { a: 0.35, ..face }, disabled_ink(ink)),
             button::Status::Hovered => (mix(face, ink, 0.08), ink),
             button::Status::Pressed => (mix(face, ink, 0.18), ink),
             button::Status::Active => (face, ink),
