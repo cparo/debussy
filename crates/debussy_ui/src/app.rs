@@ -615,6 +615,7 @@ impl App {
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::Tick => {
                 self.engine.collect();
+                self.stop_at_end();
                 self.follow_playhead();
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
@@ -885,6 +886,18 @@ impl App {
     }
 
     fn play(&mut self) {
+        // From the end there is nothing to play: start from the return point, or from the top
+        // if that is at the end too.
+        let end = self.project_end();
+        if !self.engine.is_playing() && self.engine.playhead() >= end {
+            let from = if self.return_point < end {
+                self.return_point
+            } else {
+                0
+            };
+            let result = self.engine.locate(from, self.services.streams());
+            self.report(result.map_err(|e| e.to_string()));
+        }
         if !self.engine.is_playing() && self.loaded.as_ref() != Some(&self.session.state().tracks) {
             let sources = self.bridge.sources();
             match self.services.track_feeds(self.session.state(), &sources) {
@@ -1113,6 +1126,20 @@ impl App {
             self.start = self.start.min(self.max_start());
         }
         self.refresh_lanes();
+    }
+
+    /// Stops playback that has reached the project's end, leaving the playhead there; the
+    /// return point is kept for Stop and the next Play.
+    fn stop_at_end(&mut self) {
+        let end = self.project_end();
+        if !self.engine.is_playing() || self.engine.playhead() < end {
+            return;
+        }
+        let result = self
+            .engine
+            .stop()
+            .and_then(|()| self.engine.locate(end, self.services.streams()));
+        self.report(result.map_err(|e| e.to_string()));
     }
 
     /// Pages the view along with a playing playhead (`docs/architecture/user-interface.md`
