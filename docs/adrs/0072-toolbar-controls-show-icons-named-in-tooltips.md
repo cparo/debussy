@@ -1,7 +1,7 @@
 # ADR-0072 — Toolbar controls show icons named in tooltips
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-09
 - **Issue:** —
 - **Architecture:** [Icons](../architecture/user-interface.md#icons)
