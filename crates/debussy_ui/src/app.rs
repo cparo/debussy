@@ -283,7 +283,7 @@ pub struct App {
     /// A feedback delay's time being typed.
     pub(crate) delay_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
-    loaded: Option<Vec<Track>>,
+    pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
     /// The audio devices present, and the one in use.
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
@@ -656,9 +656,16 @@ impl App {
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
                 if let Some(error) = self.services.audio_error() {
-                    // Nothing more can play until another device is chosen.
                     let _ = self.engine.stop();
-                    self.status = Some(format!("Audio stopped: {error}"));
+                    let mut notice = format!("Audio stopped: {error}");
+                    if self.services.audio_lost() {
+                        // Its device is gone: carry on with the remembered or default device.
+                        self.recover_audio(None);
+                        if let Some(device) = self.current_device_name() {
+                            notice.push_str(&format!(". Now using {device}."));
+                        }
+                    }
+                    self.status = Some(self.status.take().unwrap_or(notice));
                 }
             }
             Message::ZoomIn => {
@@ -864,6 +871,8 @@ impl App {
             Message::Device(choice) => {
                 if self.engine.is_playing() {
                     self.status = Some("Stop playback to change the audio device.".to_owned());
+                } else if self.services.audio_lost() {
+                    self.recover_audio(Some(&choice.id));
                 } else {
                     let result = self.services.set_device(&choice.id);
                     self.report(result);
@@ -1147,6 +1156,15 @@ impl App {
         playing
     }
 
+    /// The name of the device in use, if any.
+    pub(crate) fn current_device_name(&self) -> Option<String> {
+        let (choices, current) = &self.devices;
+        choices
+            .iter()
+            .find(|c| Some(&c.id) == current.as_ref())
+            .map(|c| c.name.clone())
+    }
+
     /// The audio devices present when last read, for the device dropdown.
     pub fn device_choices(&self) -> &[crate::services::DeviceChoice] {
         &self.devices.0
@@ -1291,7 +1309,7 @@ impl App {
             .unwrap_or(0)
     }
 
-    fn report(&mut self, result: Result<(), String>) {
+    pub(crate) fn report(&mut self, result: Result<(), String>) {
         if let Err(message) = result {
             self.status = Some(message);
         }

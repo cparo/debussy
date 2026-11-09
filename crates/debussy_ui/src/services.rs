@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
-use audio_engine::{Streams, TakeSink, TrackFeeds};
+use audio_engine::{Processor, Streams, TakeSink, TrackFeeds};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
@@ -143,6 +143,19 @@ pub trait Services {
     /// An error that has stopped the audio device since the last call, such as it being
     /// unplugged.
     fn audio_error(&mut self) -> Option<String>;
+
+    /// Whether the audio device has stopped and taken the engine's real-time side with it, so
+    /// the engine must be rebuilt and given to [`Services::adopt_engine`].
+    fn audio_lost(&mut self) -> bool;
+
+    /// Runs a rebuilt engine's real-time side, dropping the lost one, on the device with
+    /// `device`'s id (remembering the choice), or with `None` on the remembered device if
+    /// present, else the default output.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; the processor is kept for a later device choice.
+    fn adopt_engine(&mut self, processor: Processor, device: Option<&str>) -> Result<(), String>;
 
     /// Switches to the device with `id`, remembering the choice. Called only while stopped.
     ///
