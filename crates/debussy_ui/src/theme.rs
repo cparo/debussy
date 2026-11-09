@@ -10,7 +10,7 @@ pub const CURSOR: Color = Color::from_rgb(0.9, 0.2, 0.2);
 
 /// Recording red, the same in both tones: the record button's dot, and its face and an armed
 /// track's arm toggle while active.
-pub const RECORD: Color = Color::from_rgb8(0x99, 0x33, 0x33);
+pub const RECORD: Color = Color::from_rgb8(0xBB, 0x00, 0x00);
 
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -230,15 +230,19 @@ pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) 
     }
 }
 
-/// The record button's dot: [`RECORD`] red on the button's face, black on red while
-/// `recording`; greyed towards the face when disabled.
+/// The record button's dot: [`RECORD`] red on the button's face, greyed towards the face when
+/// disabled; black on red while `recording`, when the button is disabled but must still read
+/// as on.
 pub fn record_icon(recording: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
     move |theme, _status| {
-        let (face, _) = tool_colours(tokens(tone_of(theme)), recording, Accent::Record);
-        let ink = if recording { Color::BLACK } else { RECORD };
-        svg::Style {
-            color: Some(if enabled { ink } else { mix(face, ink, 0.4) }),
-        }
+        let color = if recording {
+            Color::BLACK
+        } else if enabled {
+            RECORD
+        } else {
+            mix(tokens(tone_of(theme)).face, RECORD, 0.4)
+        };
+        svg::Style { color: Some(color) }
     }
 }
 
@@ -408,8 +412,11 @@ mod tests {
             let theme = theme(tone);
             let idle = record_icon(false, true)(&theme, svg::Status::Idle).color;
             assert_eq!(idle, Some(RECORD));
-            let active = record_icon(true, true)(&theme, svg::Status::Idle).color;
+            // Record is disabled while recording; the dot stays black.
+            let active = record_icon(true, false)(&theme, svg::Status::Idle).color;
             assert_eq!(active, Some(Color::BLACK));
+            let disabled = record_icon(false, false)(&theme, svg::Status::Idle).color;
+            assert_ne!(disabled, Some(RECORD));
             let face = accent_style(true, Place::Alone, false, Accent::Record)(
                 &theme,
                 button::Status::Active,
@@ -425,7 +432,7 @@ mod tests {
                 tool(false, Place::Alone)(&theme, button::Status::Active).background
             );
         }
-        assert_eq!(RECORD, Color::from_rgb8(0x99, 0x33, 0x33));
+        assert_eq!(RECORD, Color::from_rgb8(0xBB, 0x00, 0x00));
     }
 
     #[test]
