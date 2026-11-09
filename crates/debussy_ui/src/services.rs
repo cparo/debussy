@@ -55,11 +55,9 @@ pub trait Services {
         sources: &BTreeMap<TrackId, NodeId>,
     ) -> Result<Vec<TrackFeeds>, String>;
 
-    /// Summarises stored audio file `file` into `out`: one bucket per column of
-    /// `samples_per_column` frames, from frame `start`. Columns finer than the summaries'
-    /// smallest bucket are summarised from the audio, each joined to the next column's first
-    /// frame. Returns how many columns hold audio; 0 if the file has no summary yet, or, at the
-    /// finer zooms, cannot be read.
+    /// Summarises stored audio file `file` into `out` from its waveform summary: one bucket per
+    /// column of `samples_per_column` frames (at least the summaries' smallest bucket), from
+    /// frame `start`. Returns how many columns hold audio; 0 if the file has no summary yet.
     fn waveform(
         &mut self,
         file: &str,
@@ -67,6 +65,11 @@ pub trait Services {
         samples_per_column: u64,
         out: &mut [Bucket],
     ) -> usize;
+
+    /// Reads stored audio file `file`'s frames from frame `start` into `out`, for zooms finer than
+    /// the waveform summaries. Returns how many were read: fewer at the end of the file, 0 if it
+    /// cannot be read.
+    fn samples(&mut self, file: &str, start: u64, out: &mut [f32]) -> usize;
 
     /// Writes into `out` one spectrum per column of `samples_per_column` frames of stored audio
     /// file `file`, from frame `start`: the frame centred on each column, silent where it runs

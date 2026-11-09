@@ -6,9 +6,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use audio_analysis::{
-    BASE_BUCKET, BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader, sample_columns,
-};
+use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{DeviceChoice, ImportedTrack, Services, Spectrum, spectrum_bands};
@@ -49,8 +47,6 @@ pub struct AppServices {
     /// Open stored audio files for spectrograms and the finest zooms, by name; `None` where one
     /// cannot be read.
     audio_files: BTreeMap<String, Option<WavReader<BufReader<File>>>>,
-    /// The samples behind waveform columns finer than the summaries' smallest bucket.
-    waveform_samples: Vec<f32>,
     /// The spectrogram calculator and its buffers, made on first use.
     spectrogram: Option<SpectrogramScratch>,
 }
@@ -80,7 +76,6 @@ impl AppServices {
             no_streams: NoStreams,
             waveforms: BTreeMap::new(),
             audio_files: BTreeMap::new(),
-            waveform_samples: Vec::new(),
             spectrogram: None,
         }
     }
@@ -155,24 +150,18 @@ impl Services for AppServices {
             .collect())
     }
 
-    fn waveform(&mut self, file: &str, start: u64, spc: u64, out: &mut [Bucket]) -> usize {
-        if spc < BASE_BUCKET {
-            // Finer than the summaries: summarise the audio itself, one sample past the last
-            // column so it joins the next (`docs/architecture/analysis.md` "Waveform
-            // summaries"). Stored files are mono.
-            let Some(reader) = audio_file(&mut self.audio_files, &self.bundle, file) else {
-                return 0;
-            };
-            if start >= reader.frames() || reader.seek(start).is_err() {
-                return 0;
-            }
-            let wanted = out.len() * spc as usize + 1;
-            self.waveform_samples.resize(wanted, 0.0);
-            let Ok(read) = reader.read(&mut [&mut self.waveform_samples[..]]) else {
-                return 0;
-            };
-            return sample_columns(&self.waveform_samples[..read], spc as usize, out);
+    fn samples(&mut self, file: &str, start: u64, out: &mut [f32]) -> usize {
+        // Stored files are mono.
+        let Some(reader) = audio_file(&mut self.audio_files, &self.bundle, file) else {
+            return 0;
+        };
+        if start >= reader.frames() || reader.seek(start).is_err() {
+            return 0;
         }
+        reader.read(&mut [out]).unwrap_or(0)
+    }
+
+    fn waveform(&mut self, file: &str, start: u64, spc: u64, out: &mut [Bucket]) -> usize {
         let bundle = &self.bundle;
         let reader = self.waveforms.entry(file.to_owned()).or_insert_with(|| {
             File::open(waveform_cache(bundle, file))

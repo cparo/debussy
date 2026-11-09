@@ -31,5 +31,5 @@ pub use spectrogram::{
     overview_db,
 };
 pub use waveform::{
-    BASE_BUCKET, Bucket, LEVEL_FACTOR, WaveformReader, WaveformWriter, sample_columns,
+    BASE_BUCKET, Bucket, LEVEL_FACTOR, WaveformReader, WaveformWriter, trace_density,
 };
