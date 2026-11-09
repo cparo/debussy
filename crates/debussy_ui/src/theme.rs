@@ -181,8 +181,9 @@ impl Place {
     }
 }
 
-/// The logo: drawn in the accent of a selected toolbar button, straight onto the bar.
-pub fn logo(theme: &Theme, _status: svg::Status) -> svg::Style {
+/// The logo and the tone toggle's icon: drawn in the accent of a selected toolbar button,
+/// straight onto the bar.
+pub fn accent_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(tokens(tone_of(theme)).audio),
     }
@@ -191,14 +192,53 @@ pub fn logo(theme: &Theme, _status: svg::Status) -> svg::Style {
 /// The outer corner radius of a toolbar button or strip.
 const TOOL_RADIUS: f32 = 6.0;
 
-/// A toolbar button at `place`; `selected` marks the active side of a toggle.
+/// A toolbar button's face and ink colours, before its status changes them.
+fn tool_colours(t: &Tokens, selected: bool) -> (Color, Color) {
+    if selected {
+        (t.audio, t.audio_text)
+    } else {
+        (t.face, t.face_text)
+    }
+}
+
+/// A disabled toolbar button's ink.
+fn disabled_ink(ink: Color) -> Color {
+    Color { a: 0.45, ..ink }
+}
+
+/// A toolbar button's icon: tinted with the ink its text label would have, or greyed out
+/// towards the button's face when the button is disabled.
+pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
+    move |theme, _status| {
+        let (face, ink) = tool_colours(tokens(tone_of(theme)), selected);
+        svg::Style {
+            color: Some(if enabled { ink } else { mix(face, ink, 0.4) }),
+        }
+    }
+}
+
+/// A toolbar button at `place` showing text; `selected` marks the active side of a toggle.
+/// Disabled, its face fades as well as its text.
 pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
+    tool_style(selected, place, true)
+}
+
+/// A toolbar button's style; `fade_disabled` fades a disabled button's face. A button showing an
+/// icon passes `false`: disabled, its face is unchanged and only its icon greys out
+/// ([`tool_icon`]).
+pub fn tool_style(
+    selected: bool,
+    place: Place,
+    fade_disabled: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(tone_of(theme));
-        let face = if selected { t.audio } else { t.face };
-        let ink = if selected { t.audio_text } else { t.face_text };
+        let (face, ink) = tool_colours(t, selected);
         let (background, text) = match status {
-            button::Status::Disabled => (Color { a: 0.35, ..face }, Color { a: 0.45, ..ink }),
+            button::Status::Disabled if fade_disabled => {
+                (Color { a: 0.35, ..face }, disabled_ink(ink))
+            }
+            button::Status::Disabled => (face, disabled_ink(ink)),
             button::Status::Hovered => (mix(face, ink, 0.08), ink),
             button::Status::Pressed => (mix(face, ink, 0.18), ink),
             button::Status::Active => (face, ink),
@@ -236,6 +276,13 @@ pub fn strip(theme: &Theme) -> container::Style {
             radius: border::radius(TOOL_RADIUS),
         },
         ..container::Style::default()
+    }
+}
+
+/// An icon on a flat button: drawn in the chrome's text colour.
+pub fn flat_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: Some(tokens(tone_of(theme)).text),
     }
 }
 
@@ -289,11 +336,11 @@ mod tests {
     }
 
     #[test]
-    fn test_logo_takes_the_selected_button_accent() {
+    fn test_accent_icon_takes_the_selected_button_accent() {
         for tone in [Tone::Light, Tone::Dark] {
             let accent = tool(true, Place::Alone)(&theme(tone), button::Status::Active).background;
-            let logo = logo(&theme(tone), svg::Status::Idle).color;
-            assert_eq!(logo.map(Background::Color), accent);
+            let icon = accent_icon(&theme(tone), svg::Status::Idle).color;
+            assert_eq!(icon.map(Background::Color), accent);
         }
     }
 

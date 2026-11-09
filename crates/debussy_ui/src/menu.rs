@@ -2,11 +2,12 @@
 //! while it is open, with the rest of the window catching a click that closes it
 //! (`docs/architecture/user-interface.md` "Layout").
 
-use iced::widget::{Space, button, column, container, rule, text};
+use iced::widget::{Space, button, column, container, rule, svg, text};
 use iced::{Element, Length};
 use project_model::TrackId;
 
 use crate::app::Message;
+use crate::icon::Icon;
 use crate::theme;
 
 /// The width of a dropdown menu, in logical pixels.
@@ -63,13 +64,18 @@ pub(crate) fn dropdown<'a>(entries: Vec<Entry>) -> Element<'a, Message> {
         .into()
 }
 
-/// A ≡ button opening `menu`.
-pub(crate) fn burger<'a>(menu: Menu, size: f32) -> Element<'a, Message> {
-    button(text("≡").size(size))
-        .on_press(Message::OpenMenu(menu))
-        .padding([0, 8])
-        .style(theme::flat)
-        .into()
+/// A ≡ button opening `menu`: an `icon`-pixel menu icon centred in `padding` on every side.
+pub(crate) fn burger<'a>(menu: Menu, icon: f32, padding: f32) -> Element<'a, Message> {
+    button(
+        svg(Icon::Menu.handle())
+            .width(icon)
+            .height(icon)
+            .style(theme::flat_icon),
+    )
+    .on_press(Message::OpenMenu(menu))
+    .padding(padding)
+    .style(theme::flat)
+    .into()
 }
 
 /// A gap of `width` pixels in a bar.

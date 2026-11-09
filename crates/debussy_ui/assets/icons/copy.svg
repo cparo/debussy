@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<title>Copy</title>
+<defs><mask id="copy-front" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24"><rect width="24" height="24" fill="#fff"/><rect x="9" y="9" width="12" height="12" rx="2" fill="#000"/></mask></defs>
+<path mask="url(#copy-front)" fill="#000" fill-rule="evenodd" d="M5 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM5 5v8h8V5Z"/>
+<path fill="#000" fill-rule="evenodd" d="M11 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2ZM11 11v8h8v-8Z"/>
+</svg>
