@@ -10,7 +10,7 @@
 //! new one.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
@@ -29,18 +29,25 @@ const PREFERRED_BUFFER: u32 = 128;
 /// How long to wait for a running callback to hand the processor back.
 const HANDBACK_WAIT: Duration = Duration::from_secs(2);
 
+/// How long a stream may go without calling back before it counts as lost: its device has gone
+/// even if the platform has not said so.
+const STALL: Duration = Duration::from_millis(500);
+
 /// Runs the engine on the device's real-time thread. Allocates nothing per buffer.
 struct EngineCallback {
     processor: Option<Processor>,
     incoming: Consumer<Processor>,
     release: Arc<AtomicBool>,
     back: Producer<Processor>,
+    /// Callbacks run, for telling a stalled stream from a running one.
+    beats: Arc<AtomicU64>,
     left: Vec<f32>,
     right: Vec<f32>,
 }
 
 impl AudioCallback for EngineCallback {
     fn process(&mut self, buffers: Buffers<'_>) {
+        self.beats.fetch_add(1, Ordering::Relaxed);
         // Collect a processor handed over, even if a release is already asked for, so the
         // release can hand it straight back.
         if self.processor.is_none() {
@@ -97,6 +104,9 @@ struct Running {
     device: String,
     /// Why the stream stopped, once it has (its device gone); it never calls back again.
     lost: Option<String>,
+    /// The callback count, the count last seen, and when it last changed.
+    beats: Arc<AtomicU64>,
+    last_beat: (u64, Instant),
     /// Whether `lost` has been reported through [`AudioOutput::take_error`].
     reported: bool,
 }
@@ -282,10 +292,12 @@ impl AudioOutput {
         let (back_tx, back) = queue::channel(1)?;
         let (mut send, incoming) = queue::channel(1)?;
         let release = Arc::new(AtomicBool::new(false));
+        let beats = Arc::new(AtomicU64::new(0));
         let callback = EngineCallback {
             processor: None,
             incoming,
             release: Arc::clone(&release),
+            beats: Arc::clone(&beats),
             back: back_tx,
             left: vec![0.0; buffer as usize],
             right: vec![0.0; buffer as usize],
@@ -305,6 +317,8 @@ impl AudioOutput {
                     device: device.id.0,
                     lost: None,
                     reported: false,
+                    beats,
+                    last_beat: (0, Instant::now()),
                 });
                 Ok(())
             }
@@ -345,13 +359,26 @@ impl AudioOutput {
         self.open(&id)
     }
 
-    /// Records an error that has stopped the running stream.
+    /// Records an error that has stopped the running stream, or that it has stopped calling back
+    /// for [`STALL`]: some platforms stop a stream whose device has gone without saying so, or
+    /// say so late.
     fn poll(&mut self) {
-        if let Some(running) = &mut self.running
-            && running.lost.is_none()
-            && let Some(error) = running.stream.take_error()
-        {
+        let Some(running) = &mut self.running else {
+            return;
+        };
+        if running.lost.is_some() {
+            return;
+        }
+        if let Some(error) = running.stream.take_error() {
             running.lost = Some(error.to_string());
+            return;
+        }
+        let beats = running.beats.load(Ordering::Relaxed);
+        let now = Instant::now();
+        if beats != running.last_beat.0 {
+            running.last_beat = (beats, now);
+        } else if now.duration_since(running.last_beat.1) > STALL {
+            running.lost = Some(format!("{} stopped responding", running.device));
         }
     }
 }
@@ -402,6 +429,76 @@ mod tests {
         // A rebuilt engine is kept for later when no device can take it.
         assert!(audio.adopt(processor()?, None).is_err());
         assert!(audio.parked.is_some() && audio.current().is_none());
+        Ok(())
+    }
+
+    /// A device whose stream never calls back and never reports an error, as a stream stopped
+    /// without notice.
+    struct StalledDevices;
+
+    struct StalledStream {
+        config: StreamConfig,
+        _callback: Box<dyn AudioCallback>,
+    }
+
+    impl AudioStream for StalledStream {
+        fn config(&self) -> &StreamConfig {
+            &self.config
+        }
+
+        fn latency(&self) -> Latency {
+            Latency::default()
+        }
+
+        fn take_error(&mut self) -> Option<platform_interfaces::Error> {
+            None
+        }
+    }
+
+    impl AudioDevices for StalledDevices {
+        fn devices(&self) -> Result<Vec<DeviceInfo>, platform_interfaces::Error> {
+            Ok(vec![DeviceInfo {
+                id: DeviceId("stalled".into()),
+                name: "Stalled".into(),
+                input_channels: 0,
+                output_channels: 2,
+                sample_rates: vec![48_000],
+                buffer_frames: (32, 1024),
+                is_default: true,
+            }])
+        }
+
+        fn open(
+            &self,
+            config: &StreamConfig,
+            callback: Box<dyn AudioCallback>,
+        ) -> Result<Box<dyn AudioStream>, platform_interfaces::Error> {
+            Ok(Box::new(StalledStream {
+                config: config.clone(),
+                _callback: callback,
+            }))
+        }
+    }
+
+    #[test]
+    fn test_stream_that_stops_calling_back_is_lost() -> Result<(), Box<dyn Error>> {
+        let (mut audio, started) =
+            AudioOutput::start(Box::new(StalledDevices), 48_000, processor()?, None);
+        started.map_err(|e| e.to_string())?;
+        assert!(!audio.is_lost());
+        std::thread::sleep(STALL + Duration::from_millis(100));
+        assert!(audio.is_lost());
+        assert_eq!(
+            audio.take_error().as_deref(),
+            Some("stalled stopped responding")
+        );
+        let started = Instant::now();
+        assert!(audio.switch("stalled").is_err());
+        assert!(started.elapsed() < HANDBACK_WAIT);
+        // The rebuilt engine opens again on the same device.
+        audio.adopt(processor()?, None).map_err(|e| e.to_string())?;
+        assert_eq!(audio.current(), Some("stalled"));
+        assert!(!audio.is_lost());
         Ok(())
     }
 }
