@@ -218,7 +218,7 @@ impl App {
             text(self.project_name.clone()).size(24),
             gap(16.0),
             self.tone_toggle(),
-            burger(Menu::App, 26.0),
+            burger(Menu::App, ICON_SIZE, 8.0),
         ]
         .spacing(4)
         .align_y(Alignment::Center);
@@ -495,7 +495,7 @@ impl App {
             row![
                 label,
                 Space::new().width(Fill),
-                burger(Menu::Track(id), 18.0)
+                burger(Menu::Track(id), 14.0, 4.0)
             ]
             .align_y(Alignment::Center),
         )

@@ -25,6 +25,8 @@ buttons keep text.
   face it has when enabled; only its icon greys out, mixed 40 % of the way from the face to the
   ink.
 - An icon button names its action in a tooltip that follows the cursor.
+- The ≡ menu buttons draw a menu icon in the chrome's text colour instead of the ≡ character,
+  whose glyph sat low in its button and below the top bar's other controls.
 - An icon is 16 logical pixels square, padded so its button is as tall as a text button.
 - Icon artwork is one colour, but may vary its opacity; the spectrogram icon shades its cells
   that way, and tinting keeps the opacity.
