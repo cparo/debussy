@@ -22,10 +22,10 @@ use crate::theme::{AUDIO, CURSOR, mix, tokens, tone_of};
 pub const LANE_COLUMNS: usize = 1024;
 
 /// Spectrogram columns per lane: each spans `LANE_COLUMNS / SPECTRUM_COLUMNS` waveform columns.
-pub const SPECTRUM_COLUMNS: usize = 256;
+pub const SPECTRUM_COLUMNS: usize = 512;
 
 /// Frequency bands per spectrogram column, log-spaced from the lowest bin to the highest.
-pub const SPECTRUM_BANDS: usize = 64;
+pub const SPECTRUM_BANDS: usize = 192;
 
 /// The finest zoom: frames per waveform column. Below the summaries' smallest bucket, columns
 /// are summarised from the audio itself.
@@ -39,7 +39,7 @@ const TRACE_LEVELS: f32 = 32.0;
 const SPECTRUM_FLOOR_DB: f32 = -96.0;
 
 /// The blur over each lane, in physical pixels: the Gaussian's standard deviation.
-const BLUR_SIGMA: f32 = 1.0;
+const BLUR_SIGMA: f32 = 0.5;
 
 /// One band's level in dB per spectrogram column.
 pub type Spectrum = [f32; SPECTRUM_BANDS];
