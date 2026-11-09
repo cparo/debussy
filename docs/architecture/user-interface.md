@@ -5,6 +5,8 @@
 The graphical user interface must be written in Rust with the `iced` toolkit ([ADR-0003](../adrs/0003-the-user-interface-is-built-with-iced.md)), version
 0.14 with its GPU (`wgpu`) and software (`tiny-skia`) renderers, `canvas`, and the `thread-pool`
 executor; only `debussy_ui` depends on it ([ADR-0055](../adrs/0055-iced-0-14-is-added-the-msrv-rises-to-1-90-and-cc0.md)).
+Image support is on without codecs (`image-without-codecs`), for drawing in-memory pixels
+([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
 
 ## Interface structure
 
@@ -41,6 +43,9 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   summaries"), or spectrograms: one spectrum per four waveform columns, computed on demand
   from the stored audio as 64 log-spaced bands, each from a frame centred on its column
   ([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
+  Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
+  σ = 1 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
+  ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
   chrome changes between light and dark. The tone follows the system's appearance at launch and
   when it changes; the toggle is not saved.

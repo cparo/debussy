@@ -11,6 +11,7 @@
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
 //! - `waveform`: track lanes from the stored files, and their canvas.
+//! - `raster`: lanes painted into memory at the display scale and blurred.
 //! - `transport`: zoom steps and the position bar.
 //! - `menu`: [`Menu`] and dropdowns.
 //! - `patch_board`: the routing laid out as nodes and wires, the port gutter and the divider.
@@ -22,6 +23,7 @@
 mod app;
 mod menu;
 mod patch_board;
+mod raster;
 mod services;
 mod theme;
 mod transport;
@@ -54,7 +56,12 @@ pub fn run(app: App) -> iced::Result {
         move || {
             (
                 Shell(initial.lock().ok().and_then(|mut a| a.take())),
-                iced::system::theme().map(|mode| Message::SystemTone(tone(mode))),
+                iced::Task::batch([
+                    iced::system::theme().map(|mode| Message::SystemTone(tone(mode))),
+                    iced::window::latest()
+                        .and_then(iced::window::scale_factor)
+                        .map(Message::Rescaled),
+                ]),
             )
         },
         Shell::update,
@@ -104,12 +111,17 @@ impl Shell {
 
     fn subscription(&self) -> iced::Subscription<Message> {
         let appearance = iced::system::theme_changes().map(|mode| Message::SystemTone(tone(mode)));
+        let rescaled = iced::window::events().filter_map(|(_, event)| match event {
+            iced::window::Event::Rescaled(scale) => Some(Message::Rescaled(scale)),
+            _ => None,
+        });
         match &self.0 {
             Some(app) if app.wants_ticks() => iced::Subscription::batch([
                 appearance,
+                rescaled,
                 iced::window::frames().map(|_| Message::Tick),
             ]),
-            _ => appearance,
+            _ => iced::Subscription::batch([appearance, rescaled]),
         }
     }
 }

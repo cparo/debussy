@@ -611,6 +611,19 @@ fn test_tone_toggles_and_follows_the_system() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn test_rescaled_sets_scale_factor_and_ignores_nonsense() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    assert_eq!(app.scale_factor(), 1.0);
+    app.update(Message::Rescaled(2.0));
+    assert_eq!(app.scale_factor(), 2.0);
+    app.update(Message::Rescaled(0.0));
+    app.update(Message::Rescaled(f32::NAN));
+    assert_eq!(app.scale_factor(), 2.0);
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
 fn test_menus_open_toggle_and_close_on_a_choice() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     app.update(Message::OpenMenu(debussy_ui::Menu::App));
