@@ -14,8 +14,9 @@ device, now chosen for input as well as output, was buried in the ≡ applicatio
 
 ## Decision
 
-- Recording red is `#993333` in both tones. The record button's dot is red on the button's
-  usual face; while recording, the button's face is red and its dot black. An armed track's
+- Recording red is `#BB0000` in both tones. The record button's dot is red on the button's
+  usual face; while recording, the button's face is red and its dot black, though the button is
+  disabled then. An armed track's
   arm toggle is red with black text. Other selected buttons keep the tone's audio accent.
 - The audio device is a dropdown at the bottom bar's left end, before the mono/stereo listening
   toggle, and is no longer in the application menu. Choosing another device while playing is
