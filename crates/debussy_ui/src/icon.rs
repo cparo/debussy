@@ -32,8 +32,10 @@ pub enum Icon {
     Stop,
     /// Record.
     Record,
-    /// Turn the click on or off.
+    /// Open the click dialog; lit while the click is on.
     Click,
+    /// Open the audio device list.
+    Device,
     /// Switch to the light tone.
     Light,
     /// Switch to the dark tone.
@@ -80,6 +82,7 @@ artwork! {
     Stop: STOP = "stop.svg";
     Record: RECORD = "record.svg";
     Click: CLICK = "click.svg";
+    Device: DEVICE = "device.svg";
     Light: LIGHT = "light.svg";
     Dark: DARK = "dark.svg";
     Menu: MENU = "menu.svg";
@@ -102,6 +105,7 @@ impl Icon {
             Icon::Stop => "Stop",
             Icon::Record => "Record",
             Icon::Click => "Click",
+            Icon::Device => "Audio Device",
             Icon::Light => "Light Mode",
             Icon::Dark => "Dark Mode",
             Icon::Menu => "Menu",
@@ -113,7 +117,7 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 16] = [
+    const ALL: [Icon; 17] = [
         Icon::Waveform,
         Icon::Spectrogram,
         Icon::Grid,
@@ -127,6 +131,7 @@ mod tests {
         Icon::Stop,
         Icon::Record,
         Icon::Click,
+        Icon::Device,
         Icon::Light,
         Icon::Dark,
         Icon::Menu,

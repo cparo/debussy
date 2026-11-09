@@ -221,7 +221,7 @@ pub enum Message {
     Export(bool),
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
-    /// The device dropdown opened: re-read the devices present, so one plugged in since shows.
+    /// Re-read the devices present, so one plugged in since shows.
     RefreshDevices,
     /// A mixer gain or pan slider moved: applied live, recorded on [`Message::Release`].
     Slide {
@@ -615,7 +615,18 @@ impl App {
     /// Handles `message`, without saving.
     fn handle(&mut self, message: Message) {
         // A frame tick, a scroll or typing leaves the status line and the open menu alone;
-        // anything else replaces the status and closes the menu.
+        // anything else replaces the status and closes the menu, except the click dialog's own
+        // controls, which leave it open.
+        let in_click_dialog = self.menu == Some(Menu::Click)
+            && matches!(
+                message,
+                Message::SetClick(_)
+                    | Message::CommitTempo
+                    | Message::SetBeatsPerBar(_)
+                    | Message::SetBeatUnit(_)
+                    | Message::SetClickSound(_)
+                    | Message::SetCountIn(_)
+            );
         if !matches!(
             message,
             Message::Tick
@@ -635,7 +646,9 @@ impl App {
                 | Message::ReleaseClickLevel
         ) {
             self.status = None;
-            self.menu = None;
+            if !in_click_dialog {
+                self.menu = None;
+            }
         }
         // Doing anything else while typing a tempo records it.
         if !matches!(
@@ -783,6 +796,10 @@ impl App {
             }
             Message::OpenMenu(menu) => {
                 self.menu = (self.menu != Some(menu)).then_some(menu);
+                // The device menu lists the devices present now, so one plugged in since shows.
+                if self.menu == Some(Menu::Device) {
+                    self.refresh_devices();
+                }
             }
             Message::CloseMenu | Message::Quit => {}
             Message::Scrolled(offset) => self.scrolled = offset,

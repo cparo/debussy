@@ -13,7 +13,7 @@ use audio_buffers::Layout;
 use audio_effects::{Control, Mode};
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services,
+    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, SPECTRUM_BANDS, Services,
     Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
@@ -1884,5 +1884,57 @@ fn test_grid_toggle_is_session_state() -> Result<(), Box<dyn Error>> {
     assert!(!app.grid());
     assert_eq!(calls.borrow().saves, 0);
     assert!(!app.session().can_undo());
+    Ok(())
+}
+
+#[test]
+fn test_click_dialog_stays_open_for_its_own_controls() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::OpenMenu(Menu::Click));
+    for message in [
+        Message::SetClick(true),
+        Message::TempoText("90".into()),
+        Message::CommitTempo,
+        Message::SetBeatsPerBar(3),
+        Message::SetBeatUnit(8),
+        Message::SetClickSound(engine_bridge::ClickSound::Stick),
+        Message::ClickLevel(-6.0),
+        Message::ReleaseClickLevel,
+        Message::SetCountIn(2),
+    ] {
+        app.update(message.clone());
+        assert_eq!(app.menu(), Some(Menu::Click), "{message:?}");
+    }
+    // The click button is lit while the click is on; switching it is the dialog's.
+    assert!(app.engine().click_on());
+    let tempo = app.session().state().tempo;
+    assert_eq!(
+        (tempo.bpm, tempo.beats_per_bar, tempo.beat_unit),
+        (90.0, 3, 8)
+    );
+    // Anything else closes it, as does pressing the click button again.
+    app.update(Message::ZoomIn);
+    assert_eq!(app.menu(), None);
+    app.update(Message::OpenMenu(Menu::Click));
+    app.update(Message::OpenMenu(Menu::Click));
+    assert_eq!(app.menu(), None);
+    // Outside the dialog, the same messages still close a menu.
+    app.update(Message::OpenMenu(Menu::App));
+    app.update(Message::SetClick(false));
+    assert_eq!(app.menu(), None);
+    Ok(())
+}
+
+#[test]
+fn test_device_menu_rereads_the_devices_when_opened() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    let before = app.device_choices().len();
+    calls.borrow_mut().plugged.push(DeviceChoice {
+        id: "usb".into(),
+        name: "USB Interface".into(),
+    });
+    app.update(Message::OpenMenu(Menu::Device));
+    assert_eq!(app.menu(), Some(Menu::Device));
+    assert_eq!(app.device_choices().len(), before + 1);
     Ok(())
 }

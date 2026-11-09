@@ -109,4 +109,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0083](0083-the-click-is-mixed-at-the-output-stage-from.md) | The click is mixed at the output stage from bundled CC0 samples | Accepted | [Click track](../architecture/recording.md#click-track) |
 | [ADR-0084](0084-recording-s-count-in-splits-the-block-it-ends-in.md) | Recording's count-in splits the block it ends in | Accepted | [Count-in](../architecture/recording.md#count-in) |
 | [ADR-0085](0085-the-bars-and-beats-grid-is-a-sharp-overlay-thinned.md) | The bars and beats grid is a sharp overlay thinned by zoom | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0086](0086-the-bottom-bar-opens-the-audio-device-list-and-the.md) | The bottom bar opens the audio device list and the click dialog from icon buttons | Accepted | [Layout](../architecture/user-interface.md#layout) |
 

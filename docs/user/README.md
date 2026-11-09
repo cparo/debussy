@@ -38,10 +38,11 @@ mixer existed send tracks straight to the output.)
 - **View:** **−** and **+** zoom the track lanes out and in; ◀ and ▶▶ scroll.
 - **Undo / Redo / Save.** Undo and redo are unavailable while playing.
 - **Import… / Export… / Export mono…** open file dialogs.
-- **Audio device:** the dropdown at the bottom left picks the device used for playback and
+- **Audio device:** the headphones-and-microphone button at the bottom left lists the devices;
+  pick the one used for playback and
   recording. Change it while stopped or paused; the choice is remembered. If the device is
   unplugged, playback pauses and moves to the default output (a take being recorded is kept);
-  plug it back in and pick it again from the dropdown.
+  plug it back in and pick it again from that list.
 - **Tracks:** one row per track with its waveform and the playhead.
 - **Mixer:** one strip per mixer channel, with gain, pan, **M**ute and **S**olo. Changes are heard
   while you drag; letting go makes one undo step.
@@ -67,18 +68,19 @@ Takes are saved in the project as WAV files. Arm settings are not saved with the
 
 ### The click
 
-The metronome button after record turns the click on and off; it sounds while playing or
-recording, never in an export. Beside it, type the tempo in BPM and press Enter, and pick the
-meter (beats per bar / beat unit). The BPM counts the beat unit, so 6/8 at 120 clicks eighth
-notes. The tempo and meter are saved with the project and can be undone; change them while
-stopped. The ▾ menu picks the sound (Block, Click or Stick) and its level, remembered on this
-Mac. The first beat of each bar is louder.
+The metronome button after record opens the click dialog, and is lit while the click is on. In
+the dialog, turn the click **On** or **Off**; it sounds while playing or recording, never in an
+export. Type the tempo in BPM and press Enter, and pick the meter (beats per bar / beat unit). The
+BPM counts the beat unit, so 6/8 at 120 clicks eighth notes. The tempo and meter are saved with
+the project and can be undone; change them while stopped. The sound (Block, Click or Stick) and
+level are remembered on this Mac. The first beat of each bar is louder. Click outside the dialog
+to close it.
 
 The grid button beside the waveform and spectrogram buttons draws bar and beat lines over the
 tracks; zoomed out, it shows fewer bars.
 
 Recording counts in one bar first, with the click, even when the click is off; the status line
-shows **Count-in**. Pick **Off** or **2 bars** in the ▾ menu. The take starts where the playhead
+shows **Count-in**. Pick **Off** or **2 bars** in the click dialog. The take starts where the playhead
 is, after the count-in.
 
 ## Exporting
