@@ -17,8 +17,10 @@ dead stream's callback, and getting it out without the callback running would ne
 
 ## Decision
 
-- The device layer records that a stream has stopped with an error, reports it once, and refuses
-  to switch from it instead of waiting for a handback.
+- The device layer records that a stream has stopped with an error, or has not called back for
+  500 ms, reports it once, and refuses to switch from it instead of waiting for a handback. In
+  testing, unplugging an interface during playback stopped its stream with no error reported in
+  time; the engine then took no commands, and resuming from pause reported it busy.
 - The interface then builds a new bridge and engine from the project's current state, keeps the
   playhead, mono listening and the armed tracks, and hands the new processor to the device
   layer, which drops the dead stream (and the old processor with it, off the real-time thread)
@@ -37,6 +39,9 @@ dead stream's callback, and getting it out without the callback running would ne
 - **Ask the user to restart** — loses no data but is a poor answer to unplugging a cable.
 
 ## Consequences
+
+- A stream the system pauses for longer than 500 ms, such as across sleep, counts as lost, and
+  the engine is rebuilt on waking.
 
 - A live slider drag at the moment of loss is lost; its value was not yet recorded.
 - The rebuilt graph starts from silence: effect tails and delay lines restart.
