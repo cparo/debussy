@@ -38,8 +38,8 @@ mixer existed send tracks straight to the output.)
 - **View:** **−** and **+** zoom the track lanes out and in; ◀ and ▶▶ scroll.
 - **Undo / Redo / Save.** Undo and redo are unavailable while playing.
 - **Import… / Export… / Export mono…** open file dialogs.
-- **Audio device:** the device used for playback and recording. Change it while stopped; the
-  choice is remembered.
+- **Audio device:** the dropdown at the bottom left picks the device used for playback and
+  recording. Change it while stopped; the choice is remembered.
 - **Tracks:** one row per track with its waveform and the playhead.
 - **Mixer:** one strip per mixer channel, with gain, pan, **M**ute and **S**olo. Changes are heard
   while you drag; letting go makes one undo step.
@@ -54,9 +54,9 @@ aggregate device to record with them.)
    inputs; macOS asks for microphone access the first time.
 2. Choose the track's input (**In 1**, or **In 1–2** for a stereo track): the meter beside it
    moves when you play or speak into that input, and turns red when it clips. Turn **Monitor** on
-   to hear the input through the track's mixer channel.
+   to hear the input through the track's mixer channel. **Arm** turns red while armed.
 3. Move the playhead where the take should start and press record (⏺). The other tracks play
-   while you record.
+   while you record. The record button turns red with a black dot while recording.
 4. Press stop or pause. Each armed track gets a new clip on top of what it overlaps, lined up with
    what you heard; one **Undo** removes the whole take.
 

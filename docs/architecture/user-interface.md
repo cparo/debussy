@@ -24,9 +24,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
-  switch projects), import, export, export mono, the audio device, and quit.
-- **Bottom bar:** mono/stereo listening, play/pause, stop, record (see [Recording](#recording)),
-  the position bar, the playhead's time, and the status line.
+  switch projects), import, export, export mono, and quit.
+- **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
+  [Recording](#recording)), the position bar, the playhead's time, and the status line
+  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
@@ -69,7 +70,9 @@ toolbar button, with no box or background of its own.
 The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
 light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
-outline, like the ≡ buttons. Any other icon takes its button's text colour; a disabled icon button
+outline, like the ≡ buttons. The record icon is recording red (`#993333`, both tones) on the
+button's face, and black on a red face while recording
+([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). Any other icon takes its button's text colour; a disabled icon button
 keeps its face and greys its icon out towards the face. A tooltip that follows the cursor names the
 action. The ≡ buttons draw a menu icon in the chrome's text colour, centred in their button. Other
 toolbar buttons keep text labels
@@ -181,12 +184,12 @@ interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-expo
 
 ## Recording
 
-A track header's arm toggle arms the track; an armed track shows a monitor toggle, off by default,
-an input choice: one device input for a mono track, a pair (1–2, 3–4, …) for a stereo track,
-defaulting to input 1 or 1–2, and an input meter, one bar per channel from −60 to 0 dBFS, red
-from −1 dBFS, that holds a peak and falls 1.5 dB per display frame. Arm, monitor and input are
-session state, not saved in the project, and change only while the transport is stopped or
-paused. The device's inputs are open only while a track is armed: arming the first track reopens
+A track header's arm toggle arms the track and is lit recording red while armed; an armed track
+shows a monitor toggle, off by default, an input choice: one device input for a mono track, a
+pair (1–2, 3–4, …) for a stereo track, defaulting to input 1 or 1–2, and an input meter, one bar
+per channel from −60 to 0 dBFS, red from −1 dBFS, that holds a peak and falls 1.5 dB per display
+frame. Arm, monitor and input are session state, not saved in the project, and change only while
+the transport is stopped or paused. The device's inputs are open only while a track is armed: arming the first track reopens
 the device duplex, and disarming the last reopens it output-only.
 
 Record is enabled while stopped or paused with a track armed, the device's inputs open and the
