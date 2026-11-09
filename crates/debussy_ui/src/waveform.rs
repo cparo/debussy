@@ -232,14 +232,13 @@ pub struct LaneState {
     scale: Cell<Option<f32>>,
 }
 
-/// Draws a lane with the cursor over it; a click seeks there and a sideways scroll pans.
+/// Draws a lane; a click seeks there and a sideways scroll pans. The cursor is a
+/// [`CursorView`] stacked over it.
 pub struct LaneView<'a> {
     /// The lane.
     pub lane: &'a Lane,
     /// Changes whenever any lane's contents or the tone change, to redraw.
     pub generation: u64,
-    /// Where the cursor is, as a fraction of the lane's width, if visible.
-    pub cursor: Option<f32>,
     /// The first timeline frame shown.
     pub start: u64,
     /// The frames shown across the lane's width.
@@ -316,17 +315,7 @@ impl Program<Message> for LaneView<'_> {
                 canvas::Image::new(handle).filter_method(image::FilterMethod::Nearest),
             );
         });
-        let mut geometry = vec![lane];
-        if let Some(at) = self.cursor {
-            let mut frame = Frame::new(renderer, bounds.size());
-            frame.fill_rectangle(
-                Point::new(at * bounds.width - 0.75, 0.0),
-                Size::new(1.5, bounds.height),
-                CURSOR,
-            );
-            geometry.push(frame.into_geometry());
-        }
-        geometry
+        vec![lane]
     }
 
     fn mouse_interaction(
@@ -340,6 +329,39 @@ impl Program<Message> for LaneView<'_> {
         } else {
             mouse::Interaction::default()
         }
+    }
+}
+
+/// The playhead cursor over a lane. It is a canvas of its own, stacked above the lane's: the
+/// renderer draws a layer's vector shapes before its images, so a cursor in the lane's own
+/// canvas would be hidden under the lane image. It takes no events and sets no mouse pointer,
+/// so they reach the lane beneath.
+pub struct CursorView {
+    /// Where the cursor is, as a fraction of the lane's width, if visible.
+    pub at: Option<f32>,
+}
+
+impl Program<Message> for CursorView {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let Some(at) = self.at else {
+            return Vec::new();
+        };
+        let mut frame = Frame::new(renderer, bounds.size());
+        frame.fill_rectangle(
+            Point::new(at * bounds.width - 0.75, 0.0),
+            Size::new(1.5, bounds.height),
+            CURSOR,
+        );
+        vec![frame.into_geometry()]
     }
 }
 
