@@ -21,11 +21,13 @@ dead stream's callback, and getting it out without the callback running would ne
   500 ms, reports it once, and refuses to switch from it instead of waiting for a handback. In
   testing, unplugging an interface during playback stopped its stream with no error reported in
   time; the engine then took no commands, and resuming from pause reported it busy.
+- Playback pauses, holding the playhead and the return point; a take being recorded ends.
 - The interface then builds a new bridge and engine from the project's current state, keeps the
   playhead, mono listening and the armed tracks, and hands the new processor to the device
   layer, which drops the dead stream (and the old processor with it, off the real-time thread)
   and opens a device: the one the user picked, or after an unplug the remembered device if
-  present, else the default output.
+  present, else the default output. The device list is re-read, so the gone device leaves it.
+  A device can be chosen while paused as well as stopped.
 - A recording pass in progress when the device goes keeps its start frame and plan latency in the
   interface; dropping the old processor ends its takes, which are written and placed as usual.
 

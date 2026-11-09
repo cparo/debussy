@@ -656,15 +656,17 @@ impl App {
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
                 if let Some(error) = self.services.audio_error() {
-                    let _ = self.engine.stop();
-                    let mut notice = format!("Audio stopped: {error}");
+                    // Pause, holding the playhead; a take being recorded ends here.
+                    let _ = self.engine.pause();
+                    let mut notice = format!("Audio stopped: {error}. Paused");
                     if self.services.audio_lost() {
                         // Its device is gone: carry on with the remembered or default device.
                         self.recover_audio(None);
                         if let Some(device) = self.current_device_name() {
-                            notice.push_str(&format!(". Now using {device}."));
+                            notice.push_str(&format!("; now using {device}"));
                         }
                     }
+                    notice.push('.');
                     self.status = Some(self.status.take().unwrap_or(notice));
                 }
             }
@@ -870,7 +872,8 @@ impl App {
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
-                    self.status = Some("Stop playback to change the audio device.".to_owned());
+                    self.status =
+                        Some("Pause or stop playback to change the audio device.".to_owned());
                 } else if self.services.audio_lost() {
                     self.recover_audio(Some(&choice.id));
                 } else {

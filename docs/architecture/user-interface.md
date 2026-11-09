@@ -207,13 +207,13 @@ Import is refused while playing.
 
 One audio device is chosen for both input and output, from a list re-read each time the device
 dropdown opens. The choice is remembered in the application settings; at launch a remembered device
-that is gone falls back to the system default output. The device can be changed only while stopped:
-the engine's real-time side is handed back from the old stream and handed to the new one without
-being rebuilt, and if the new device fails to open the old one is reopened. An audio device that
-stops with an error stops playback and is reported on the status line
+that is gone falls back to the system default output. The device can be changed only while stopped
+or paused: the engine's real-time side is handed back from the old stream and handed to the new one
+without being rebuilt, and if the new device fails to open the old one is reopened. An audio device
+that stops with an error pauses playback, holding the playhead, and is reported on the status line
 ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)). When its device has
 gone (the stream stopped with an error, or has not called back for 500 ms), the engine is rebuilt
 from the project, keeping the playhead, mono listening and armed tracks, and runs on the remembered
-device if present, else the default output; any device can be chosen afterwards. A take being
-recorded then is kept and placed as usual
+device if present, else the default output; the gone device leaves the list, and any device present
+can be chosen afterwards. A take being recorded then is kept and placed as usual
 ([ADR-0081](../adrs/0081-a-lost-audio-device-s-engine-is-rebuilt-from-the.md)).
