@@ -1707,3 +1707,55 @@ fn test_arming_after_an_unnoticed_unplug_recovers_first() -> Result<(), Box<dyn 
     assert!(app.arming(track).is_some());
     Ok(())
 }
+
+#[test]
+fn test_device_lost_while_playing_pauses_and_any_device_can_then_be_chosen()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    app.update(Message::Seek(5000));
+    app.update(Message::Play);
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    let held = app.engine().playhead();
+    assert!(held > 5000);
+    drop(processor);
+    calls.borrow_mut().plugged.clear();
+    {
+        let mut calls = calls.borrow_mut();
+        calls.audio_error = Some("Interface stopped responding".into());
+        calls.lost = true;
+    }
+    app.update(Message::Tick);
+    assert!(!app.engine().is_playing());
+    assert_eq!(app.engine().playhead(), held);
+    assert_eq!(
+        app.status(),
+        Some("Audio stopped: Interface stopped responding. Paused; now using Built-in.")
+    );
+    // Not refused as if still playing.
+    let interface = app.device_choices()[1].clone();
+    app.update(Message::Device(interface));
+    assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    // Stop still returns to where playback started.
+    app.update(Message::Stop);
+    assert_eq!(app.engine().playhead(), 5000);
+    Ok(())
+}
+
+#[test]
+fn test_device_can_change_while_paused() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Device(app.device_choices()[1].clone()));
+    assert_eq!(
+        app.status(),
+        Some("Pause or stop playback to change the audio device.")
+    );
+    app.update(Message::Pause);
+    block(&mut processor)?;
+    app.update(Message::Device(app.device_choices()[1].clone()));
+    assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}

@@ -39,9 +39,9 @@ mixer existed send tracks straight to the output.)
 - **Undo / Redo / Save.** Undo and redo are unavailable while playing.
 - **Import… / Export… / Export mono…** open file dialogs.
 - **Audio device:** the dropdown at the bottom left picks the device used for playback and
-  recording. Change it while stopped; the choice is remembered. If the device is unplugged,
-  playback stops and moves to the default output (a take being recorded is kept); plug it back
-  in and pick it again from the dropdown.
+  recording. Change it while stopped or paused; the choice is remembered. If the device is
+  unplugged, playback pauses and moves to the default output (a take being recorded is kept);
+  plug it back in and pick it again from the dropdown.
 - **Tracks:** one row per track with its waveform and the playhead.
 - **Mixer:** one strip per mixer channel, with gain, pan, **M**ute and **S**olo. Changes are heard
   while you drag; letting go makes one undo step.

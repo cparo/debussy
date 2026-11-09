@@ -331,11 +331,12 @@ impl AudioOutput {
     pub fn take_error(&mut self) -> Option<String> {
         self.poll();
         let running = self.running.as_mut()?;
+        let lost = running.lost.clone()?;
         if running.reported {
             return None;
         }
         running.reported = true;
-        running.lost.clone()
+        Some(lost)
     }
 
     /// Whether the running stream has stopped, taking the processor with it; it can run again
@@ -412,6 +413,8 @@ mod tests {
             AudioOutput::start(Box::new(devices.clone()), 48_000, processor()?, None);
         started.map_err(|e| e.to_string())?;
         assert!(!audio.is_lost());
+        // Asked every display frame while all is well, as the window does.
+        assert_eq!(audio.take_error(), None);
         devices.unplug();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !audio.is_lost() {
