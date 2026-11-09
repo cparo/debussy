@@ -321,13 +321,14 @@ fn test_zoom_and_lanes_follow_the_clips() -> Result<(), Box<dyn Error>> {
         .cloned()
         .ok_or("no waveform reads")?;
     assert_eq!(last.2, 68);
-    // Back on the grid at 64 frames per column, scrolling forward past the clip's start reads
-    // from inside the file.
+    // Back on the grid, finer than 64 frames per column so the view is short enough to scroll,
+    // scrolling forward past the clip's start reads samples from inside the file.
+    app.update(Message::ZoomIn);
     app.update(Message::ZoomIn);
     app.update(Message::Pan(0.1));
     let last = calls
         .borrow()
-        .waveform
+        .samples
         .last()
         .cloned()
         .ok_or("no waveform reads")?;
@@ -532,6 +533,44 @@ fn test_zoom_out_stops_at_the_project_length() -> Result<(), Box<dyn Error>> {
     app.update(Message::ZoomOut);
     assert_eq!((app.view_start(), app.samples_per_column()), (start, spc));
     let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_pan_stops_at_the_project_end() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    for _ in 0..12 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Pan(100.0));
+    assert_eq!(app.view_start() + app.view_span(), PROJECT_END);
+    app.update(Message::Pan(1.0));
+    assert_eq!(app.view_start() + app.view_span(), PROJECT_END);
+    app.update(Message::Pan(-100.0));
+    assert_eq!(app.view_start(), 0);
+    Ok(())
+}
+
+#[test]
+fn test_pan_forward_keeps_a_view_past_the_end() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::Seek(2_000_000));
+    let start = app.view_start();
+    assert!(start > PROJECT_END);
+    app.update(Message::Pan(1.0));
+    assert_eq!(app.view_start(), start);
+    Ok(())
+}
+
+#[test]
+fn test_zoom_out_near_the_end_stays_within_the_project() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    for _ in 0..12 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Pan(100.0));
+    app.update(Message::ZoomOut);
+    assert!(app.view_start() + app.view_span() <= PROJECT_END);
     Ok(())
 }
 
