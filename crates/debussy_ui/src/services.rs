@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
-use audio_engine::{Streams, TrackFeeds};
+use audio_engine::{Streams, TakeSink, TrackFeeds};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
@@ -35,6 +35,35 @@ impl std::fmt::Display for DeviceChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
     }
+}
+
+/// The new files of one armed track's take, and the sinks the engine records them through, one
+/// per channel, left first.
+pub struct TakeFiles {
+    /// The files' names in the bundle's audio directory.
+    pub files: Vec<String>,
+    /// Where each channel's input goes.
+    pub sinks: Vec<Box<dyn TakeSink>>,
+}
+
+/// What became of one take file, numbered across a recording pass in the order
+/// [`Services::start_takes`] returned them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TakeStatus {
+    /// The file is complete.
+    Finished {
+        /// The file's number in the pass.
+        take: usize,
+        /// Its length, in frames.
+        frames: u64,
+    },
+    /// Writing the file failed.
+    Failed {
+        /// The file's number in the pass.
+        take: usize,
+        /// What went wrong.
+        message: String,
+    },
 }
 
 /// I/O and platform services, implemented by the application with `disk_streaming`,
@@ -121,4 +150,42 @@ pub trait Services {
     ///
     /// A message for the status line; the previous device stays in use.
     fn set_device(&mut self, id: &str) -> Result<(), String>;
+
+    /// Opens the audio device's inputs as well as its outputs (`true`), or outputs only. Called
+    /// only while stopped, when the first track is armed or the last disarmed.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn set_input(&mut self, input: bool) -> Result<(), String>;
+
+    /// The input channels open on the device; 0 when none are.
+    fn input_channels(&mut self) -> usize;
+
+    /// The device's input plus output latency, in frames, for placing takes (ADR-0022).
+    fn device_latency(&mut self) -> u64;
+
+    /// Starts recording one take per armed track, each named after the track and holding
+    /// `channels` channels: creates the files and starts writing what the sinks are given.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; no files are left behind.
+    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String>;
+
+    /// What has become of the current pass's files since the last call.
+    fn take_status(&mut self) -> Vec<TakeStatus>;
+
+    /// How many times the current pass's writing fell behind and dropped audio.
+    fn take_overruns(&mut self) -> u64;
+
+    /// Ends the pass, keeping `files` as stored audio: summarises them for the lanes.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; the files are kept regardless.
+    fn keep_takes(&mut self, files: &[String]) -> Result<(), String>;
+
+    /// Ends the pass, deleting `files`.
+    fn discard_takes(&mut self, files: &[String]);
 }

@@ -25,10 +25,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
   switch projects), import, export, export mono, the audio device, and quit.
-- **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the position bar,
-  the playhead's time, and the status line.
-- **Track pane:** each track is a header (its name and a ≡ menu: rename, import audio into,
-  delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
+- **Bottom bar:** mono/stereo listening, play/pause, stop, record (see [Recording](#recording)),
+  the position bar, the playhead's time, and the status line.
+- **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
+  toggle and the input choice, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.
@@ -178,6 +178,22 @@ Cut, delete and paste are refused while the transport is playing; copy is not.
 through the default output device, which must run at the project rate. With `--export` it renders
 the project to a file and exits instead. Command-line import and export stand in until the
 interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).
+
+## Recording
+
+A track header's arm toggle arms the track; an armed track shows a monitor toggle, off by default,
+and an input choice: one device input for a mono track, a pair (1–2, 3–4, …) for a stereo track,
+defaulting to input 1 or 1–2. Arm, monitor and input are session state, not saved in the project,
+and change only while the transport is stopped or paused. The device's inputs are open only while
+a track is armed: arming the first track reopens the device duplex, and disarming the last
+reopens it output-only.
+
+Record is enabled while stopped or paused with a track armed, the device's inputs open and the
+previous take saved. It records every armed track from the playhead while the other tracks play,
+and runs on past the project's end. Stop or pause ends the pass. Once its files are written, one
+clip per armed track is placed as one undo step (see `docs/architecture/recording.md` "Take
+placement"); a pass that captured nothing or failed is discarded with its files. Overruns are
+reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-and-inputs-open-only.md)).
 
 ## Files and devices
 

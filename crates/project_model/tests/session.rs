@@ -529,3 +529,39 @@ fn test_revision_counts_versions() -> TestResult {
     assert_eq!(session.revision(), 3);
     Ok(())
 }
+
+#[test]
+fn test_add_clips_puts_each_on_top_as_one_step() -> TestResult {
+    let mut session = Session::new();
+    let vocals = session.add_track("Vocals", Layout::Mono)?;
+    let keys = session.add_track("Keys", Layout::Stereo)?;
+    let old = session.add_clip(vocals, Clip::new(mono("old.wav", 1_000), 0, 1_000, 0))?;
+    let before = session.state().clone();
+    let ids = session.add_clips(vec![
+        (vocals, Clip::new(mono("take.wav", 500), 0, 500, 200)),
+        (keys, Clip::new(stereo(500), 0, 500, 200)),
+    ])?;
+    let track = session.state().track(vocals).ok_or("no track")?;
+    let layers: Vec<_> = track.clips.iter().map(|(id, _)| *id).collect();
+    assert_eq!(layers, [old, ids[0]]);
+    assert!(
+        session
+            .state()
+            .track(keys)
+            .ok_or("no track")?
+            .clip(ids[1])
+            .is_some()
+    );
+    session.undo();
+    assert_eq!(session.state(), &before);
+    // A bad clip adds nothing.
+    assert_eq!(
+        session.add_clips(vec![
+            (vocals, Clip::new(mono("take.wav", 500), 0, 500, 200)),
+            (keys, Clip::new(mono("x.wav", 500), 0, 500, 0)),
+        ]),
+        Err(Error::LayoutMismatch)
+    );
+    assert_eq!(session.state(), &before);
+    Ok(())
+}

@@ -38,11 +38,28 @@ mixer existed send tracks straight to the output.)
 - **View:** **−** and **+** zoom the track lanes out and in; ◀ and ▶▶ scroll.
 - **Undo / Redo / Save.** Undo and redo are unavailable while playing.
 - **Import… / Export… / Export mono…** open file dialogs.
-- **Audio device:** the device used for playback (and, later, recording). Change it while
-  stopped; the choice is remembered.
+- **Audio device:** the device used for playback and recording. Change it while stopped; the
+  choice is remembered.
 - **Tracks:** one row per track with its waveform and the playhead.
 - **Mixer:** one strip per mixer channel, with gain, pan, **M**ute and **S**olo. Changes are heard
   while you drag; letting go makes one undo step.
+
+## Recording
+
+Recording needs a device with both inputs and outputs, such as an audio interface. (A Mac's
+built-in speakers and microphone are separate devices; combine them in Audio MIDI Setup as an
+aggregate device to record with them.)
+
+1. While stopped, click **Arm** on each track to record. The first armed track opens the device's
+   inputs; macOS asks for microphone access the first time.
+2. Choose the track's input (**In 1**, or **In 1–2** for a stereo track) and turn **Monitor** on
+   to hear the input through the track's mixer channel.
+3. Move the playhead where the take should start and press record (⏺). The other tracks play
+   while you record.
+4. Press stop or pause. Each armed track gets a new clip on top of what it overlaps, lined up with
+   what you heard; one **Undo** removes the whole take.
+
+Takes are saved in the project as WAV files. Arm settings are not saved with the project.
 
 ## Exporting
 
@@ -59,5 +76,5 @@ Export renders the whole project and exits without opening the window.
 
 ## Not yet available
 
-Recording, editing clips in the window, adding mixers and effects (the patch board), and
-spectrograms.
+Punch-in and loop recording, editing clips in the window, adding mixers and effects (the patch
+board), and spectrograms.

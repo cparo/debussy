@@ -65,10 +65,10 @@ queues. The engine took no input and had no arm state.
 
 - Monitored input is undelayed only while no node reports latency, since today plan latency is
   always 0. Keeping ADR-0032 once latency-adding effects exist (#58 and later) needs a
-  `signal_graph` change; a follow-up issue tracks it.
+  `signal_graph` change (#109).
 - After a crash mid-take the unreferenced `.wav` is deleted by bundle cleanup on the next open
-  (ADR-0049). Take recovery is a follow-up issue.
-- Punch-in/out and loop recording are a follow-up issue. The click track and the rest of #57
+  (ADR-0049). Take recovery is #110.
+- Punch-in/out and loop recording are #111. The click track and the rest of #57
   remain.
 - Monitor can only be toggled while stopped or paused, since arming is refused while playing.
 - Inputs beyond `MAX_INPUTS` (64) cannot be recorded.

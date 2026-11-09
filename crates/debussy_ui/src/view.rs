@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
-    Space, button, canvas, column, container, mouse_area, opaque, pin, responsive, row, scrollable,
-    slider, stack, svg, text, text_input, tooltip, vertical_slider,
+    Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, responsive, row,
+    scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
@@ -105,6 +105,15 @@ fn button_at<'a>(
         )
         .into(),
     }
+}
+
+/// A small toggle for a track header, labelled `label`, lit when `selected`.
+fn chip<'a>(label: &'a str, message: Option<Message>, selected: bool) -> Element<'a, Message> {
+    button(text(label).size(12).center())
+        .on_press_maybe(message)
+        .padding([1, 6])
+        .style(theme::tool_style(selected, Place::Alone, true))
+        .into()
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
@@ -298,7 +307,11 @@ impl App {
                     (Face::Icon(Icon::Play), Some(Message::Play), false)
                 },
                 (Face::Icon(Icon::Stop), Some(Message::Stop), false),
-                (Face::Icon(Icon::Record), None, false),
+                (
+                    Face::Icon(Icon::Record),
+                    self.can_record().then_some(Message::Record),
+                    self.is_recording()
+                ),
             ]),
             gap(16.0),
             position,
@@ -519,10 +532,37 @@ impl App {
                 .into(),
             _ => text(name.to_owned()).size(15).into(),
         };
+        let playing = self.engine().is_playing();
+        let unless_playing = |message: Message| (!playing).then_some(message);
+        let arming = self.arming(id);
+        let mut controls = row![chip(
+            "Arm",
+            unless_playing(Message::Arm(id)),
+            arming.is_some()
+        )]
+        .spacing(4)
+        .align_y(Alignment::Center);
+        if let Some((monitor, input)) = arming {
+            controls = controls.push(chip(
+                "Monitor",
+                unless_playing(Message::Monitor(id)),
+                monitor,
+            ));
+            let choices = self.input_choices(id);
+            let selected = choices.contains(&input).then_some(input);
+            controls = controls.push(
+                pick_list(choices, selected, move |choice| Message::Input(id, choice))
+                    .placeholder("No input")
+                    .text_size(12)
+                    .padding([1, 6]),
+            );
+        }
         container(
             row![
                 label,
                 Space::new().width(Fill),
+                controls,
+                gap(6.0),
                 burger(Menu::Track(id), 14.0, 4.0)
             ]
             .align_y(Alignment::Center),
