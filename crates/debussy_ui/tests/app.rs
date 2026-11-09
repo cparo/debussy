@@ -1223,3 +1223,56 @@ fn test_range_edits_wait_for_the_transport_but_copy_does_not() -> Result<(), Box
     assert_eq!(lane, Some(1));
     Ok(())
 }
+
+/// The fixture's project end: its clip at 4096 for 65536 frames.
+const CLIP_END: u64 = 4096 + 65_536;
+
+/// Plays, a block and a tick at a time, until playback stops by itself or `blocks` run out.
+fn play_until_stopped(
+    app: &mut App,
+    processor: &mut Processor,
+    blocks: usize,
+) -> Result<(), Box<dyn Error>> {
+    app.update(Message::Play);
+    for _ in 0..blocks {
+        block(processor)?;
+        app.update(Message::Tick);
+        if !app.engine().is_playing() {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_playback_stops_at_the_project_end() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::Seek(CLIP_END - 2_000));
+    block(&mut processor)?;
+    play_until_stopped(&mut app, &mut processor, 100)?;
+    assert!(!app.engine().is_playing());
+    assert_eq!(app.engine().playhead(), CLIP_END);
+    // Play from the end starts again from the return point.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    let resumed = app.engine().playhead();
+    assert!((CLIP_END - 2_000..CLIP_END - 1_000).contains(&resumed));
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    assert_eq!(app.engine().playhead(), CLIP_END - 2_000);
+    Ok(())
+}
+
+#[test]
+fn test_play_from_past_the_end_starts_from_the_top() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    // A seek past the end is kept, for importing or pasting there.
+    app.update(Message::Seek(CLIP_END + 10_000));
+    block(&mut processor)?;
+    assert_eq!(app.engine().playhead(), CLIP_END + 10_000);
+    app.update(Message::Play);
+    block(&mut processor)?;
+    assert!(app.engine().playhead() < CLIP_END);
+    assert!(app.engine().is_playing());
+    Ok(())
+}
