@@ -40,11 +40,12 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   or a feedback delay's time in seconds; a bus has only the header.
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform
-  summaries"), or spectrograms: one spectrum per four waveform columns, computed on demand
-  from the stored audio as 64 log-spaced bands, each from a frame centred on its column
-  ([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
+  summaries"), or spectrograms: one spectrum per two waveform columns, computed on demand
+  from the stored audio as 192 log-spaced bands, each from a frame centred on its column
+  ([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md),
+  [ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
   Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
-  σ = 1 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
+  σ = 0.5 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
   ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
   chrome changes between light and dark. The tone follows the system's appearance at launch and
