@@ -176,12 +176,12 @@ impl App {
             gap(16.0),
             group(vec![
                 (
-                    Face::Label("Waveform"),
+                    Face::Icon(Icon::Waveform),
                     Some(Message::SetDisplay(Display::Waveform)),
                     display == Display::Waveform
                 ),
                 (
-                    Face::Label("Spectrogram"),
+                    Face::Icon(Icon::Spectrogram),
                     Some(Message::SetDisplay(Display::Spectrogram)),
                     display == Display::Spectrogram
                 ),

@@ -8,6 +8,10 @@ use iced::widget::svg;
 /// A control icon drawn on a toolbar button in place of a text label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
+    /// Show lanes as waveforms.
+    Waveform,
+    /// Show lanes as spectrograms.
+    Spectrogram,
     /// Undo the last edit.
     Undo,
     /// Redo the last undone edit.
@@ -57,6 +61,8 @@ macro_rules! artwork {
 }
 
 artwork! {
+    Waveform: WAVEFORM = "waveform.svg";
+    Spectrogram: SPECTROGRAM = "spectrogram.svg";
     Undo: UNDO = "undo.svg";
     Redo: REDO = "redo.svg";
     Cut: CUT = "cut.svg";
@@ -74,6 +80,8 @@ impl Icon {
     /// What the control does, shown as its tooltip.
     pub fn name(self) -> &'static str {
         match self {
+            Icon::Waveform => "Waveform",
+            Icon::Spectrogram => "Spectrogram",
             Icon::Undo => "Undo",
             Icon::Redo => "Redo",
             Icon::Cut => "Cut",
@@ -93,7 +101,9 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 11] = [
+    const ALL: [Icon; 13] = [
+        Icon::Waveform,
+        Icon::Spectrogram,
         Icon::Undo,
         Icon::Redo,
         Icon::Cut,

@@ -66,7 +66,8 @@ transparent background; the interface tints it with a theme colour, so a file's 
 never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
 toolbar button, with no box or background of its own.
 
-Undo, redo, cut, copy, paste, play/pause, stop, record and the light/dark toggle show 16 px
+The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
+light/dark toggle show 16 px
 icons instead of text, padded to a text button's height; the light/dark toggle shows the tone it
 switches to. An icon takes its button's text colour; a disabled icon button keeps its face and
 greys its icon out towards the face. A tooltip that follows the cursor names the action. Other toolbar buttons keep text labels

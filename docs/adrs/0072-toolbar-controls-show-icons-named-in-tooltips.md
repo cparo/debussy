@@ -8,23 +8,25 @@
 
 ## Context
 
-ADR-0070 planned icons for interface controls. A first set was drawn (undo, redo, cut, copy,
-paste, play, pause, stop, record, and sun and moon for the light and dark tones) and approved by
-the developer, who asked for it to replace the text on the matching buttons. That raised how an
-icon is coloured on a button whose face changes with selection and disablement, how it is named
-once its text is gone, and which buttons keep text.
+ADR-0070 planned icons for interface controls. A first set was drawn (undo, redo, cut, copy, paste,
+play, pause, stop, record, sun and moon for the light and dark tones, a sine cycle for the waveform
+view and a 5×5 grid for the spectrogram view) and approved by the developer, who asked for it to
+replace the text on the matching buttons. That raised how an icon is coloured on a button whose
+face changes with selection and disablement, how it is named once its text is gone, and which
+buttons keep text.
 
 ## Decision
 
-- Undo, redo, cut, copy, paste, play/pause, stop, record and the tone toggle show an icon in
-  place of their text. The tone toggle shows the tone it switches to, as its text did.
+- The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and
+  the tone toggle show an icon in place of their text. The tone toggle shows the tone it switches to, as its text did.
 - An icon is tinted with the ink its button's text would have. A disabled icon button keeps the
   face it has when enabled; only its icon greys out, mixed 40 % of the way from the face to the
   ink.
 - An icon button names its action in a tooltip that follows the cursor.
 - An icon is 16 logical pixels square, padded so its button is as tall as a text button.
-- Buttons with no icon in the set keep their text: the waveform/spectrogram and mono/stereo
-  toggles, zoom, and the mixer and patch-board buttons.
+- Icon artwork is one colour, but may vary its opacity; the spectrogram icon shades its cells
+  that way, and tinting keeps the opacity.
+- Buttons with no icon in the set keep their text: the mono/stereo toggle, zoom, and the mixer and patch-board buttons.
 
 ## Alternatives considered
 
