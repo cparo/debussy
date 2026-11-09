@@ -11,6 +11,7 @@
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
 //! - `click`: the click, the tempo and the meter.
+//! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
 //! - `range_selection`: the range selected in the lanes.
 //! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
@@ -28,6 +29,7 @@
 mod app;
 mod click;
 mod device;
+mod grid;
 mod icon;
 mod menu;
 mod patch_board;

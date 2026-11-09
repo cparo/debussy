@@ -74,6 +74,9 @@ notes. The tempo and meter are saved with the project and can be undone; change 
 stopped. The ▾ menu picks the sound (Block, Click or Stick) and its level, remembered on this
 Mac. The first beat of each bar is louder.
 
+The grid button beside the waveform and spectrogram buttons draws bar and beat lines over the
+tracks; zoomed out, it shows fewer bars.
+
 Recording counts in one bar first, with the click, even when the click is off; the status line
 shows **Count-in**. Pick **Off** or **2 bars** in the ▾ menu. The take starts where the playhead
 is, after the count-in.

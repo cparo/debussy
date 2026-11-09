@@ -1873,3 +1873,16 @@ fn test_record_counts_in_then_places_the_take_at_the_playhead() -> Result<(), Bo
     );
     Ok(())
 }
+
+#[test]
+fn test_grid_toggle_is_session_state() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    assert!(!app.grid());
+    app.update(Message::SetGrid(true));
+    assert!(app.grid());
+    app.update(Message::SetGrid(false));
+    assert!(!app.grid());
+    assert_eq!(calls.borrow().saves, 0);
+    assert!(!app.session().can_undo());
+    Ok(())
+}

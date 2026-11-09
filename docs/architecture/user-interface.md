@@ -21,7 +21,7 @@ The window is laid out as described under [Layout](#layout).
 
 The window is a top bar, a track pane beside a right pane, and a bottom bar.
 
-- **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
+- **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
   switch projects), import, export, export mono, and quit.
@@ -53,6 +53,11 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
   σ = 0.5 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
   ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
+  With the grid toggle on (session state, off at launch), bar and beat lines of the project's
+  grid (see `docs/architecture/project.md` "Musical time") are drawn sharp over the lanes too,
+  one physical pixel wide, bars stronger than beats. Beat lines are hidden when they would fall
+  closer than 6 logical pixels; bar lines then thin to every 2^k bars, for the least k that keeps
+  them 6 pixels apart ([ADR-0085](../adrs/0085-the-bars-and-beats-grid-is-a-sharp-overlay-thinned.md)).
 - **Colours:** audio signals (and a selected button's face, and the logo) are orange in the dark
   tone and blue in the light tone
   ([ADR-0071](../adrs/0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md)); control
@@ -72,7 +77,7 @@ transparent background; the interface tints it with a theme colour, so a file's 
 never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
 toolbar button, with no box or background of its own.
 
-The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
+The waveform/spectrogram toggle, the grid toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
 click toggle (an in-house metronome) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
 outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the

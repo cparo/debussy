@@ -153,6 +153,8 @@ pub enum Message {
     Pan(f32),
     /// Show waveforms or spectrograms.
     SetDisplay(Display),
+    /// Show the bars and beats grid over the lanes (`true`) or hide it.
+    SetGrid(bool),
     /// Switch between light and dark chrome.
     ToggleTone,
     /// The system's appearance, at launch or when it changes.
@@ -276,6 +278,8 @@ pub struct App {
     /// Changes whenever the lanes' contents or the tone change.
     pub(crate) generation: u64,
     pub(crate) display: Display,
+    /// Whether the bars and beats grid is drawn over the lanes; not saved.
+    pub(crate) grid: bool,
     pub(crate) tone: Tone,
     /// The window's physical pixels per logical pixel, which the lanes are drawn at.
     pub(crate) scale_factor: f32,
@@ -360,6 +364,7 @@ impl App {
             lanes: Vec::new(),
             generation: 0,
             display: Display::default(),
+            grid: false,
             tone: Tone::default(),
             scale_factor: 1.0,
             menu: None,
@@ -474,6 +479,11 @@ impl App {
     /// The window's physical pixels per logical pixel, which the lanes are drawn at.
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
+    }
+
+    /// Whether the bars and beats grid is shown over the lanes.
+    pub fn grid(&self) -> bool {
+        self.grid
     }
 
     /// Waveforms or spectrograms.
@@ -763,6 +773,7 @@ impl App {
                 self.display = display;
                 self.refresh_lanes();
             }
+            Message::SetGrid(grid) => self.grid = grid,
             Message::ToggleTone => self.set_tone(self.tone.toggled()),
             Message::SystemTone(tone) => self.set_tone(tone),
             Message::Rescaled(scale) => {
