@@ -33,5 +33,5 @@ device, now chosen for input as well as output, was buried in the ≡ applicatio
 ## Consequences
 
 - The bottom bar is 216 px wider at its left; the position bar shrinks to make room.
-- The device list is read at launch and after a change; a device plugged in later appears only
-  after restarting, as before.
+- The device list is re-read each time the dropdown opens, so a device plugged in after launch
+  appears there.
