@@ -44,7 +44,7 @@ static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
-/// The size of a toolbar button's icon, in logical pixels.
+/// The size of a toolbar button's icon, and of the project name's text, in logical pixels.
 const ICON_SIZE: f32 = 16.0;
 /// A toolbar button's text size.
 const TOOL_TEXT: f32 = 13.0;
@@ -215,7 +215,7 @@ impl App {
                 (Face::Label("+"), Some(Message::ZoomIn), false),
             ]),
             Space::new().width(Fill),
-            text(self.project_name.clone()).size(24),
+            text(self.project_name.clone()).size(ICON_SIZE),
             gap(16.0),
             self.tone_toggle(),
             burger(Menu::App, ICON_SIZE, 8.0),
