@@ -385,6 +385,7 @@ impl App {
                         cursor,
                         start,
                         span,
+                        scale: self.scale_factor,
                     })
                     .width(Fill)
                     .height(Length::Fixed(LANE_HEIGHT)),
