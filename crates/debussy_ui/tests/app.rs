@@ -1495,6 +1495,8 @@ fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>
     assert_eq!(calls.borrow().input, [true]);
     assert!(app.can_record());
     app.update(Message::Seek(10_000));
+    // These recording tests start capture at once.
+    app.update(Message::SetCountIn(0));
     app.update(Message::Record);
     assert!(app.is_recording());
     // Arming and the other track edits wait for the transport.
@@ -1602,6 +1604,8 @@ fn test_recording_runs_on_past_the_project_end() -> Result<(), Box<dyn Error>> {
     let track = vocal(&app)?;
     app.update(Message::Arm(track));
     app.update(Message::Seek(4096 + 65_536 - 256));
+    // These recording tests start capture at once.
+    app.update(Message::SetCountIn(0));
     app.update(Message::Record);
     for _ in 0..3 {
         block(&mut processor)?;
@@ -1643,6 +1647,8 @@ fn test_input_meter_follows_the_track_input_and_falls() -> Result<(), Box<dyn Er
 fn test_opening_the_device_dropdown_rereads_the_devices() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, calls, _) = app()?;
     // A notice survives opening the dropdown.
+    // These recording tests start capture at once.
+    app.update(Message::SetCountIn(0));
     app.update(Message::Record);
     calls.borrow_mut().plugged.push(DeviceChoice {
         id: "c".into(),
@@ -1688,6 +1694,8 @@ fn test_device_lost_while_recording_falls_back_and_keeps_the_take() -> Result<()
     let track = vocal(&app)?;
     app.update(Message::Arm(track));
     app.update(Message::Seek(10_000));
+    // These recording tests start capture at once.
+    app.update(Message::SetCountIn(0));
     app.update(Message::Record);
     for _ in 0..4 {
         block(&mut processor)?;
@@ -1826,5 +1834,42 @@ fn test_click_toggle_sound_and_level() -> Result<(), Box<dyn Error>> {
     assert_eq!(calls.borrow().click_saves, 2);
     assert_eq!(calls.borrow().click.level_db, -24.0);
     assert!(app.status().is_none());
+    Ok(())
+}
+
+#[test]
+fn test_record_counts_in_then_places_the_take_at_the_playhead() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    // A bar of 4/4 at 300 BPM: 38 400 frames at 48 kHz, 150 blocks of 256.
+    app.update(Message::TempoText("300".into()));
+    app.update(Message::CommitTempo);
+    app.update(Message::Arm(track));
+    app.update(Message::Seek(10_000));
+    app.update(Message::Record);
+    assert!(app.is_recording());
+    block(&mut processor)?;
+    assert!(app.is_counting_in());
+    for _ in 0..148 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Tick);
+    assert!(app.is_counting_in());
+    assert_eq!(app.engine().playhead(), 10_000);
+    // The 150th block ends the count-in; capture starts with the next.
+    block(&mut processor)?;
+    assert!(!app.is_counting_in());
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    let clips = &app.session().state().track(track).ok_or("no track")?.clips;
+    let (_, take) = clips.last().ok_or("no take")?;
+    assert_eq!(
+        (take.position, take.offset, take.length),
+        (10_000 - LATENCY, 0, 4 * 256)
+    );
     Ok(())
 }

@@ -28,7 +28,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the position bar, the playhead's time, and the status line
   ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). After record
-  come the click toggle with a ▾ menu (the sound, ticked, and a level slider), the tempo field in
+  come the click toggle with a ▾ menu (the sound, ticked, a level slider, and the count-in before
+  recording: off, 1 bar or 2 bars), the tempo field in
   BPM, and the meter as two pickers, beats per bar over beat unit. A typed tempo is recorded on
   Enter or the next other action; changing the tempo or meter is refused while playing
   ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
@@ -198,7 +199,8 @@ the device duplex, and disarming the last reopens it output-only.
 
 Record is enabled while stopped or paused with a track armed, the device's inputs open and the
 previous take saved. It records every armed track from the playhead while the other tracks play,
-and runs on past the project's end. Stop or pause ends the pass. Once its files are written, one
+after the chosen count-in, and runs on past the project's end. Record is lit from the press, and
+the status line reads "Count-in" while counting in. Stop or pause ends the pass. Once its files are written, one
 clip per armed track is placed as one undo step (see `docs/architecture/recording.md` "Take
 placement"); a pass that captured nothing or failed is discarded with its files. Overruns are
 reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-and-inputs-open-only.md)).

@@ -76,8 +76,9 @@ stored WAV files ([ADR-0047](../adrs/0047-audio-engine-defines-its-feeds-and-dis
 Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last
 started. Clip and track edits are accepted only while the transport is stopped or paused; the
 engine takes the project's clips when the transport starts or jumps. Record starts like play and
-captures the armed tracks' inputs; the playhead cannot be moved while recording (see
-`docs/architecture/recording.md` "Capture").
+captures the armed tracks' inputs, after an optional count-in during which the transport is
+counting in and the playhead holds; the playhead cannot be moved while recording (see
+`docs/architecture/recording.md` "Capture" and "Count-in").
 
 A mono listening switch in the engine's output stage, after the plan, sends `(L + R) × 0.7071`
 to both output channels. It is a monitoring setting and is not saved in the project ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).

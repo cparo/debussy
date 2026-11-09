@@ -26,6 +26,9 @@ pub enum TransportState {
     Stopped,
     /// Asked to play, waiting until every track has 100 ms ready; outputs silence meanwhile.
     Starting,
+    /// Recording's count-in: primed, the tracks silent and the playhead held while the click
+    /// counts in (`docs/architecture/recording.md` "Count-in").
+    CountingIn,
     /// Playing.
     Playing,
     /// Not playing; the playhead holds where it paused.
@@ -39,6 +42,7 @@ impl TransportState {
             TransportState::Starting => 1,
             TransportState::Playing => 2,
             TransportState::Paused => 3,
+            TransportState::CountingIn => 4,
         }
     }
 
@@ -47,6 +51,7 @@ impl TransportState {
             1 => TransportState::Starting,
             2 => TransportState::Playing,
             3 => TransportState::Paused,
+            4 => TransportState::CountingIn,
             _ => TransportState::Stopped,
         }
     }
@@ -130,9 +135,13 @@ pub(crate) enum Command {
     Arm(Vec<ArmedTrack>),
     /// Replace the click.
     Click(ClickTrack),
-    /// Play from `from` once every feed is primed, recording the armed tracks if `record`; the
-    /// feeds have been moved there.
-    Play { from: u64, record: bool },
+    /// Play from `from` once every feed is primed, recording the armed tracks if `record`
+    /// after a count-in of `count_in` frames; the feeds have been moved there.
+    Play {
+        from: u64,
+        record: bool,
+        count_in: u64,
+    },
     /// Hold the playhead.
     Pause,
     /// Stop and move the playhead to `to`.
@@ -229,16 +238,18 @@ impl Engine {
         Ok(())
     }
 
-    /// Starts recording from the playhead: plays as [`Engine::play`] does, and captures the
-    /// armed tracks' input into their takes from the first block played. Stop or pause ends the
-    /// takes; arm new ones before recording again. [`Engine::take`] then tells where the take
-    /// began.
+    /// Starts recording from the playhead: once every feed is primed, counts in for `count_in`
+    /// frames (the click sounds, the tracks are silent and the playhead holds), then plays as
+    /// [`Engine::play`] does and captures the armed tracks' input into their takes from the
+    /// playhead's frame exactly (`docs/architecture/recording.md` "Count-in"). Stop or pause
+    /// ends the takes; arm new ones before recording again. [`Engine::take`] then tells where
+    /// the take began.
     ///
     /// # Errors
     ///
     /// [`Error::NotArmed`] if no takes are armed; [`Error::Playing`] if already playing;
     /// otherwise as [`Engine::play`].
-    pub fn record(&mut self, streams: &mut dyn Streams) -> Result<(), Error> {
+    pub fn record(&mut self, streams: &mut dyn Streams, count_in: u64) -> Result<(), Error> {
         if self.is_playing() {
             return Err(Error::Playing);
         }
@@ -247,7 +258,7 @@ impl Engine {
         }
         let from = self.resume_point()?;
         self.shared.take_started.store(false, Ordering::Release);
-        self.begin(from, true, streams)?;
+        self.begin(from, true, count_in, streams)?;
         self.takes_armed = false;
         Ok(())
     }
@@ -296,7 +307,9 @@ impl Engine {
     /// Where play or record starts: the playhead, or where a pause held it.
     fn resume_point(&self) -> Result<u64, Error> {
         Ok(match self.state {
-            TransportState::Starting | TransportState::Playing => self.playhead(),
+            TransportState::Starting | TransportState::Playing | TransportState::CountingIn => {
+                self.playhead()
+            }
             TransportState::Stopped => self.position,
             TransportState::Paused => {
                 if self.real_time_state() != TransportState::Paused {
@@ -380,7 +393,8 @@ impl Engine {
         self.send(Command::Click(click))
     }
 
-    /// Turns the click on or off. It sounds only while playing. Not saved.
+    /// Turns the click on or off. It sounds only while playing; a count-in clicks either way.
+    /// Not saved.
     pub fn set_click_on(&self, on: bool) {
         self.shared.click.store(on, Ordering::Relaxed);
     }
@@ -418,12 +432,12 @@ impl Engine {
         TransportState::from_u8(self.shared.state.load(Ordering::Acquire))
     }
 
-    /// Whether the transport is starting or playing, as last set here. Clip editing is disabled
-    /// while it is.
+    /// Whether the transport is starting, counting in or playing, as last set here. Clip
+    /// editing is disabled while it is.
     pub fn is_playing(&self) -> bool {
         matches!(
             self.state,
-            TransportState::Starting | TransportState::Playing
+            TransportState::Starting | TransportState::Playing | TransportState::CountingIn
         )
     }
 
@@ -436,13 +450,24 @@ impl Engine {
 
     /// Moves the feeds to `from` and asks the real-time side to play from there.
     fn start(&mut self, from: u64, streams: &mut dyn Streams) -> Result<(), Error> {
-        self.begin(from, false, streams)
+        self.begin(from, false, 0, streams)
     }
 
-    /// Moves the feeds to `from` and asks the real-time side to play, or record, from there.
-    fn begin(&mut self, from: u64, record: bool, streams: &mut dyn Streams) -> Result<(), Error> {
+    /// Moves the feeds to `from` and asks the real-time side to play, or record after a count-in
+    /// of `count_in` frames, from there.
+    fn begin(
+        &mut self,
+        from: u64,
+        record: bool,
+        count_in: u64,
+        streams: &mut dyn Streams,
+    ) -> Result<(), Error> {
         streams.seek(from).map_err(Error::Streams)?;
-        self.send(Command::Play { from, record })?;
+        self.send(Command::Play {
+            from,
+            record,
+            count_in,
+        })?;
         self.started_from = from;
         self.state = TransportState::Starting;
         self.recording = record;

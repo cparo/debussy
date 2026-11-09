@@ -14,7 +14,7 @@ use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
 
 use crate::app::{App, Message, NewNode};
-use crate::click::format_bpm;
+use crate::click::{COUNT_IN_BARS, format_bpm};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
@@ -62,7 +62,7 @@ const METER_WIDTH: f32 = 56.0;
 /// Where the click menu opens from the window's left edge: about under the click's ▾.
 const CLICK_MENU_X: f32 = 560.0;
 /// The click menu's height, to open it above the bottom bar.
-const CLICK_MENU_HEIGHT: f32 = 170.0;
+const CLICK_MENU_HEIGHT: f32 = 290.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
@@ -387,7 +387,12 @@ impl App {
         ]
         .spacing(4)
         .align_y(Alignment::Center);
-        if let Some(status) = self.status() {
+        let status = if self.is_counting_in() {
+            Some("Count-in")
+        } else {
+            self.status()
+        };
+        if let Some(status) = status {
             bar = bar.push(gap(12.0)).push(text(status.to_owned()).size(13));
         }
         container(bar)
@@ -772,19 +777,15 @@ impl App {
         dropdown(entries)
     }
 
-    /// The click menu: the sound, ticked, and the level.
+    /// The click menu: the sound, ticked, the level, and the count-in before recording.
     fn click_menu(&self) -> Vec<Entry> {
         let preferences = self.click.preferences;
+        let ticked = |on: bool, label: &str| format!("{}{label}", if on { "✓ " } else { "    " });
         let mut entries: Vec<Entry> = engine_bridge::ClickSound::ALL
             .into_iter()
             .map(|sound| {
-                let tick = if sound == preferences.sound {
-                    "✓ "
-                } else {
-                    "    "
-                };
                 Entry::item(
-                    format!("{tick}{}", sound.name()),
+                    ticked(sound == preferences.sound, sound.name()),
                     Some(Message::SetClickSound(sound)),
                 )
             })
@@ -797,6 +798,19 @@ impl App {
             on_change: Message::ClickLevel,
             on_release: Message::ReleaseClickLevel,
         });
+        entries.push(Entry::Separator);
+        entries.push(Entry::item("Count-in before recording", None));
+        for bars in COUNT_IN_BARS {
+            let label = match bars {
+                0 => "Off".to_owned(),
+                1 => "1 bar".to_owned(),
+                n => format!("{n} bars"),
+            };
+            entries.push(Entry::item(
+                ticked(bars == self.click.count_in_bars, &label),
+                Some(Message::SetCountIn(bars)),
+            ));
+        }
         entries
     }
 

@@ -141,6 +141,8 @@ pub enum Message {
     ClickLevel(f32),
     /// The click level slider was released: remember the level.
     ReleaseClickLevel,
+    /// Count in this many bars (0, 1 or 2) before recording.
+    SetCountIn(u32),
     /// A display frame while playing: refresh the playhead and finish pending work.
     Tick,
     /// Show less time: one √2 step.
@@ -696,6 +698,7 @@ impl App {
             Message::SetClickSound(sound) => self.set_click_sound(sound),
             Message::ClickLevel(db) => self.set_click_level(db),
             Message::ReleaseClickLevel => self.save_click_preferences(),
+            Message::SetCountIn(bars) => self.set_count_in(bars),
             Message::Tick => {
                 self.engine.collect();
                 self.poll_recording();

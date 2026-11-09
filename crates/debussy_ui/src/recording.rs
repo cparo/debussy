@@ -259,10 +259,11 @@ impl App {
             sinks.insert(id, s);
         }
         let armed = self.armed_tracks(Some(sinks));
+        let count_in = self.count_in_frames();
         let result = self
             .engine
             .arm(armed)
-            .and_then(|()| self.engine.record(self.services.streams()));
+            .and_then(|()| self.engine.record(self.services.streams(), count_in));
         let pass = Pass {
             status: vec![None; pass_tracks.iter().map(|(_, _, f)| f.len()).sum()],
             tracks: pass_tracks,

@@ -22,6 +22,8 @@ pub(crate) struct Click {
     sent: Option<(ClickSound, Tempo)>,
     /// The tempo being typed, in beats per minute.
     pub(crate) tempo_text: Option<String>,
+    /// Bars of count-in before recording: 0, 1 or 2. Session state.
+    pub(crate) count_in_bars: u32,
 }
 
 impl Click {
@@ -29,6 +31,7 @@ impl Click {
     pub(crate) fn new(preferences: ClickPreferences) -> Click {
         Click {
             preferences,
+            count_in_bars: DEFAULT_COUNT_IN_BARS,
             ..Click::default()
         }
     }
@@ -39,6 +42,11 @@ impl Click {
         self.sent = None;
     }
 }
+
+/// The count-in lengths offered, in bars.
+pub(crate) const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
+/// The count-in at launch, in bars.
+const DEFAULT_COUNT_IN_BARS: u32 = 1;
 
 /// `bpm` for display: up to two decimals, without trailing zeros.
 pub(crate) fn format_bpm(bpm: f64) -> String {
@@ -93,6 +101,26 @@ impl App {
                 self.status = Some(error.to_string());
                 self.click.sent = Some((sound, tempo));
             }
+        }
+    }
+
+    /// The count-in before recording, in frames: the chosen bars at the project's tempo.
+    pub(crate) fn count_in_frames(&self) -> u64 {
+        self.session
+            .state()
+            .tempo
+            .bars_length(self.click.count_in_bars, self.sample_rate())
+    }
+
+    /// Whether recording is counting in.
+    pub fn is_counting_in(&self) -> bool {
+        self.engine.real_time_state() == audio_engine::TransportState::CountingIn
+    }
+
+    /// Chooses the count-in before recording, in bars (0, 1 or 2).
+    pub(crate) fn set_count_in(&mut self, bars: u32) {
+        if COUNT_IN_BARS.contains(&bars) {
+            self.click.count_in_bars = bars;
         }
     }
 

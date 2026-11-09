@@ -74,6 +74,10 @@ notes. The tempo and meter are saved with the project and can be undone; change 
 stopped. The ▾ menu picks the sound (Block, Click or Stick) and its level, remembered on this
 Mac. The first beat of each bar is louder.
 
+Recording counts in one bar first, with the click, even when the click is off; the status line
+shows **Count-in**. Pick **Off** or **2 bars** in the ▾ menu. The take starts where the playhead
+is, after the count-in.
+
 ## Exporting
 
 Click **Export…** or **Export mono…** and choose where; the file name's extension picks the
