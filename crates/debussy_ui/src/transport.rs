@@ -45,6 +45,26 @@ pub(crate) fn zoomed_start(start: u64, old: u64, new: u64, anchor: u64) -> u64 {
     anchor.saturating_sub(offset.round() as u64)
 }
 
+/// The playhead's time for the bottom bar: `HH:MM:SS.000`, or `MM:SS.000` while `longest` (the
+/// later of the project's end and the playhead) is under an hour, or `SS.000` while it is under a
+/// minute. All are frames at `rate`; milliseconds are truncated.
+pub(crate) fn clock(frame: u64, rate: u32, longest: u64) -> String {
+    let rate = u128::from(rate.max(1));
+    let millis = |frames: u64| u128::from(frames) * 1_000 / rate;
+    let ms = millis(frame);
+    let (h, m, s, ms) = (
+        ms / 3_600_000,
+        ms / 60_000 % 60,
+        ms / 1_000 % 60,
+        ms % 1_000,
+    );
+    match millis(longest) {
+        n if n >= 3_600_000 => format!("{h:02}:{m:02}:{s:02}.{ms:03}"),
+        n if n >= 60_000 => format!("{:02}:{s:02}.{ms:03}", h * 60 + m),
+        _ => format!("{:02}.{ms:03}", (h * 60 + m) * 60 + s),
+    }
+}
+
 /// What the position bar shows: the playhead and the visible window, all in frames, over a
 /// timeline of `length` frames.
 pub struct PositionBar {
@@ -175,6 +195,22 @@ mod tests {
             let tolerance = if level < 8 { 0.1 } else { 0.01 };
             assert!((between - std::f64::consts::SQRT_2).abs() < tolerance);
         }
+    }
+
+    #[test]
+    fn test_clock_drops_hours_and_minutes_for_short_projects() {
+        let rate = 48_000;
+        let at = |s: u64| s * 48_000;
+        // 1 h 2 min 3.5 s.
+        let frame = at(3_723) + 24_000;
+        assert_eq!(clock(frame, rate, frame), "01:02:03.500");
+        assert_eq!(clock(at(5), rate, at(3_600)), "00:00:05.000");
+        assert_eq!(clock(at(65) + 1, rate, at(3_599)), "01:05.000");
+        assert_eq!(clock(at(7), rate, at(60)), "00:07.000");
+        assert_eq!(clock(at(7) + 47_999, rate, at(59)), "07.999");
+        assert_eq!(clock(0, rate, 0), "00.000");
+        // Over 99 hours the hours widen rather than wrap.
+        assert_eq!(clock(at(360_000), rate, at(360_000)), "100:00:00.000");
     }
 
     #[test]

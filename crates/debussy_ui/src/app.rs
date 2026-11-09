@@ -1156,6 +1156,14 @@ impl App {
         (at < span).then(|| at as f32 / span as f32)
     }
 
+    /// The playhead's time for the bottom bar, as [`clock`](crate::transport::clock) formats it
+    /// for this project's length.
+    pub fn playhead_time(&self) -> String {
+        let playhead = self.engine.playhead();
+        let longest = self.project_end().max(playhead);
+        crate::transport::clock(playhead, self.sample_rate, longest)
+    }
+
     /// The timeline's length for the position bar: the end of the last clip, or further to
     /// take in the visible window and the playhead.
     pub(crate) fn timeline_length(&self) -> u64 {
