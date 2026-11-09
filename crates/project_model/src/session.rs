@@ -441,6 +441,33 @@ impl Session {
         Ok(id)
     }
 
+    /// Adds one clip to each of several tracks as one step, each on top of any it overlaps, such
+    /// as the takes of one recording pass.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], or a clip's [`Clip::check`] error; nothing is added then.
+    pub fn add_clips(&mut self, clips: Vec<(TrackId, Clip)>) -> Result<Vec<ClipId>, Error> {
+        let mut edits = Vec::with_capacity(clips.len());
+        let mut ids = Vec::with_capacity(clips.len());
+        let mut added: BTreeMap<TrackId, usize> = BTreeMap::new();
+        for (track, clip) in clips {
+            let above = added.entry(track).or_default();
+            let layer = self.top_layer(track, None)? + *above;
+            *above += 1;
+            let id = self.new_clip_id();
+            ids.push(id);
+            edits.push(Edit::InsertClip {
+                track,
+                layer,
+                id,
+                clip,
+            });
+        }
+        self.apply(Edit::Batch(edits))?;
+        Ok(ids)
+    }
+
     /// Moves a clip to `position` on `track` (its own or another of the same layout), on top of
     /// any it overlaps there.
     ///

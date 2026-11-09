@@ -1,6 +1,6 @@
 //! The audio device: the engine's [`Processor`] running on the chosen device, and switching
-//! devices without rebuilding the engine (`docs/architecture/platform.md` "Audio device I/O",
-//! ADR-0059).
+//! devices, or opening its inputs while a track is armed, without rebuilding the engine
+//! (`docs/architecture/platform.md` "Audio device I/O", ADR-0059, ADR-0079).
 //!
 //! The processor reaches a callback over a lock-free queue only once its stream has opened, so a
 //! device that fails to open never takes it. To switch, the control side asks the running
@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use audio_buffers::{Consumer, Producer, queue};
-use audio_engine::Processor;
+use audio_engine::{MAX_INPUTS, Processor};
 use platform_interfaces::{
-    AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, StreamConfig,
+    AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, Latency, StreamConfig,
 };
 
 use crate::project::MAX_BLOCK;
@@ -102,6 +102,8 @@ pub struct AudioOutput {
     running: Option<Running>,
     /// The processor while no stream runs it.
     parked: Option<Processor>,
+    /// Whether to open the device's inputs: while a track is armed.
+    input: bool,
 }
 
 impl AudioOutput {
@@ -123,6 +125,7 @@ impl AudioOutput {
             sample_rate,
             running: None,
             parked: Some(processor),
+            input: false,
         };
         let result = output.choose(preferred).and_then(|id| output.open(&id));
         (output, result)
@@ -156,6 +159,44 @@ impl AudioOutput {
                 Err(error)
             }
         }
+    }
+
+    /// Opens the device's inputs as well as its outputs (`true`), or its outputs only, by
+    /// reopening it. Does nothing if that is already so. Call only while the transport is
+    /// stopped: the output drops out briefly.
+    ///
+    /// # Errors
+    ///
+    /// As [`AudioOutput::switch`]; the setting is kept for the next device opened.
+    pub fn set_input(&mut self, input: bool) -> Result<()> {
+        if self.input == input {
+            return Ok(());
+        }
+        self.input = input;
+        match self.current().map(str::to_owned) {
+            Some(id) => self.switch(&id),
+            None => Ok(()),
+        }
+    }
+
+    /// The input channels open on the running stream; 0 when output only.
+    pub fn input_channels(&self) -> u16 {
+        self.running
+            .as_ref()
+            .map_or(0, |r| r.stream.config().input_channels)
+    }
+
+    /// The running stream's input and output latency, in frames; 0 when none runs.
+    pub fn latency(&self) -> u64 {
+        let Latency {
+            input_frames,
+            output_frames,
+        } = self
+            .running
+            .as_ref()
+            .map(|r| r.stream.latency())
+            .unwrap_or_default();
+        u64::from(input_frames) + u64::from(output_frames)
     }
 
     /// `preferred` if present, else the default output device.
@@ -221,7 +262,12 @@ impl AudioOutput {
             device: DeviceId(device.id.0.clone()),
             sample_rate: self.sample_rate,
             buffer_frames: buffer,
-            input_channels: 0,
+            input_channels: if self.input {
+                // The engine reads at most this many; MAX_INPUTS is 64, so it fits.
+                device.input_channels.min(MAX_INPUTS as u16)
+            } else {
+                0
+            },
             output_channels: device.output_channels.min(2),
         };
         let (back_tx, back) = queue::channel(1)?;

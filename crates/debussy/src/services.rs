@@ -1,5 +1,6 @@
 //! [`AppServices`]: `debussy_ui`'s I/O, from the bundle, disk streaming, the waveform caches,
-//! file dialogs, the audio device and the app settings (ADR-0056, ADR-0059).
+//! file dialogs, the audio device, the take recorder and the app settings (ADR-0056, ADR-0059,
+//! ADR-0078).
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -8,11 +9,17 @@ use std::path::PathBuf;
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
+use audio_engine::TakeSink;
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
-use debussy_ui::{DeviceChoice, ImportedTrack, Services, Spectrum, spectrum_bands};
-use disk_streaming::{FrameSource, Streamer, StreamerConfig, TimelineSource, WavClipAudio};
+use debussy_ui::{
+    DeviceChoice, ImportedTrack, Services, Spectrum, TakeFiles, TakeStatus, spectrum_bands,
+};
+use disk_streaming::{
+    FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
+    WavClipAudio,
+};
 use engine_bridge::track_renderers;
-use import_export::import;
+use import_export::{import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{AppSettings, Bundle};
@@ -49,6 +56,8 @@ pub struct AppServices {
     audio_files: BTreeMap<String, Option<WavReader<BufReader<File>>>>,
     /// The spectrogram calculator and its buffers, made on first use.
     spectrogram: Option<SpectrogramScratch>,
+    /// The recording pass's writer, until its takes are kept or discarded.
+    recorder: Option<Recorder>,
 }
 
 /// A spectrogram calculator with a frame's samples and levels.
@@ -77,8 +86,35 @@ impl AppServices {
             waveforms: BTreeMap::new(),
             audio_files: BTreeMap::new(),
             spectrogram: None,
+            recorder: None,
         }
     }
+}
+
+/// New file names in `dir` for each of `tracks`' takes: `<track name> <n>[ L| R].wav`, none
+/// existing and none repeated across the tracks.
+fn take_names(dir: &std::path::Path, tracks: &[(String, usize)]) -> Vec<Vec<String>> {
+    let mut chosen: Vec<Vec<String>> = Vec::with_capacity(tracks.len());
+    for (name, channels) in tracks {
+        let stem = safe_stem(name);
+        let names = (1u64..)
+            .map(|k| {
+                let stem = if k == 1 {
+                    stem.clone()
+                } else {
+                    format!("{stem}-{k}")
+                };
+                unique_names(dir, &stem, *channels)
+            })
+            .find(|names| {
+                !names
+                    .iter()
+                    .any(|n| chosen.iter().flatten().any(|c| c == n))
+            })
+            .unwrap_or_default();
+        chosen.push(names);
+    }
+    chosen
 }
 
 /// Stored audio file `file` from `bundle`, opened on first use and kept in `audio_files`; `None`
@@ -316,6 +352,73 @@ impl Services for AppServices {
 
     fn audio_error(&mut self) -> Option<String> {
         self.audio.take_error()
+    }
+
+    fn set_input(&mut self, input: bool) -> Result<(), String> {
+        self.audio.set_input(input).map_err(|e| format!("{e:#}"))
+    }
+
+    fn input_channels(&mut self) -> usize {
+        usize::from(self.audio.input_channels())
+    }
+
+    fn device_latency(&mut self) -> u64 {
+        self.audio.latency()
+    }
+
+    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String> {
+        let dir = self.bundle.audio_dir();
+        let names = take_names(&dir, tracks);
+        let paths: Vec<PathBuf> = names.iter().flatten().map(|n| dir.join(n)).collect();
+        // A pass still held is finished first, keeping its files on disk.
+        self.recorder = None;
+        let config = RecorderConfig::new(self.bundle.sample_rate());
+        let (recorder, takes) = Recorder::start(&paths, config).map_err(|e| e.to_string())?;
+        self.recorder = Some(recorder);
+        let mut takes = takes.into_iter();
+        Ok(names
+            .into_iter()
+            .map(|files| TakeFiles {
+                sinks: takes
+                    .by_ref()
+                    .take(files.len())
+                    .map(|t| Box::new(t) as Box<dyn TakeSink>)
+                    .collect(),
+                files,
+            })
+            .collect())
+    }
+
+    fn take_status(&mut self) -> Vec<TakeStatus> {
+        let Some(recorder) = &mut self.recorder else {
+            return Vec::new();
+        };
+        std::iter::from_fn(|| recorder.poll_event())
+            .map(|event| match event {
+                TakeEvent::Finished { take, frames } => TakeStatus::Finished { take, frames },
+                TakeEvent::Failed { take, message } => TakeStatus::Failed { take, message },
+            })
+            .collect()
+    }
+
+    fn take_overruns(&mut self) -> u64 {
+        self.recorder
+            .as_ref()
+            .map_or(0, |r| (0..r.takes()).filter_map(|t| r.overruns(t)).sum())
+    }
+
+    fn keep_takes(&mut self, files: &[String]) -> Result<(), String> {
+        self.recorder = None;
+        let names: Vec<&str> = files.iter().map(String::as_str).collect();
+        build_waveform_caches_for(&self.bundle, &names).map_err(|e| format!("{e:#}"))
+    }
+
+    fn discard_takes(&mut self, files: &[String]) {
+        self.recorder = None;
+        let dir = self.bundle.audio_dir();
+        for file in files {
+            let _ = std::fs::remove_file(dir.join(file));
+        }
     }
 
     fn set_device(&mut self, id: &str) -> Result<(), String> {
