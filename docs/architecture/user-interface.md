@@ -141,6 +141,30 @@ While a slider is dragged its value goes straight to the running graph's paramet
 records one undo step. A mute or solo press is one step. Undo and redo are refused while the
 transport is playing ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
 
+## Range selection and shortcuts
+
+A press in a lane seeks there, makes its track the current track, and clears the range selection.
+Dragging from it selects a range ([`project.md` "Range edits"](project.md#range-edits)): the frames
+between the press and the pointer, on the tracks from the pressed one to the one under the
+pointer. Shift-press moves the selection's nearer edge to the press and its tracks to reach the
+pressed one, keeping the far end; with no selection it selects from the playhead on the current
+track to the press. Neither seeks. Escape clears the
+selection. The selection is drawn as a light band over its tracks' lanes.
+
+Cut, copy and paste work on an in-app clipboard holding one excerpt. Paste puts it at the
+playhead, its first lane on the top track of the selection, or on the current track without one.
+Cut, delete and paste are refused while the transport is playing; copy is not.
+
+| Key | Action |
+|---|---|
+| ⌘X, ⌘C, ⌘V | Cut, copy, paste |
+| Delete, Backspace | Delete the patch board's selection if it has one, otherwise the range |
+| ⌘Z, ⇧⌘Z | Undo, redo |
+| Escape | Clear the range selection |
+
+⌘ is Ctrl off macOS. A key typed into a text field goes to the field
+([ADR-0074](../adrs/0074-a-drag-in-the-lanes-selects-a-range-and-edit.md)).
+
 ## Application startup
 
 `debussy` opens the project named on its command line, creating it if missing, imports any
