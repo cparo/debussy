@@ -15,8 +15,10 @@ use crate::menu::Menu;
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::services::Services;
 use crate::theme::Tone;
-use crate::transport::{DEFAULT_ZOOM, MAX_ZOOM, samples_per_column, zoomed_start};
-use crate::waveform::{Display, LANE_COLUMNS, Lane, lanes};
+use crate::transport::{
+    DEFAULT_ZOOM, MAX_SAMPLES_PER_COLUMN, MAX_ZOOM, level_below, samples_per_column, zoomed_start,
+};
+use crate::waveform::{Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, lanes};
 
 /// The track pane's share of the window's width at launch.
 const DEFAULT_SPLIT: f32 = 0.6;
@@ -193,8 +195,8 @@ pub struct App {
     pub(crate) project_name: String,
     /// The first timeline frame shown.
     pub(crate) start: u64,
-    /// The zoom level; see [`samples_per_column`].
-    zoom: u32,
+    /// The zoom: a step on the grid or a fit to the project.
+    zoom: Zoom,
     /// Whether the view pages along with the playhead: set once a playing playhead is seen in
     /// view, cleared when playback stops or the view is panned or zoomed.
     following: bool,
@@ -230,6 +232,15 @@ pub struct App {
     pub(crate) status: Option<String>,
 }
 
+/// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Zoom {
+    /// A step on the √2 grid; see [`samples_per_column`].
+    Level(u32),
+    /// Frame 0 to the project's end, the farthest zoom out.
+    Fit,
+}
+
 impl App {
     /// The interface over a project at `sample_rate`: its `session`, the `bridge` running its
     /// routing, the engine's control side, and the application's `services`.
@@ -248,7 +259,7 @@ impl App {
             sample_rate: sample_rate.max(1),
             project_name: String::new(),
             start: 0,
-            zoom: DEFAULT_ZOOM,
+            zoom: Zoom::Level(DEFAULT_ZOOM),
             following: false,
             return_point: 0,
             lanes: Vec::new(),
@@ -310,7 +321,24 @@ impl App {
 
     /// Frames per lane column at the current zoom.
     pub fn samples_per_column(&self) -> u64 {
-        samples_per_column(self.zoom)
+        match self.zoom {
+            Zoom::Level(level) => samples_per_column(level),
+            Zoom::Fit => match self.project_end() {
+                0 => samples_per_column(DEFAULT_ZOOM),
+                end => end
+                    .div_ceil(LANE_COLUMNS as u64)
+                    .clamp(MIN_SAMPLES_PER_COLUMN, MAX_SAMPLES_PER_COLUMN),
+            },
+        }
+    }
+
+    /// Whether zooming out would show more: the view is on the grid, not yet as long as the
+    /// project, and not at the coarsest level.
+    pub(crate) fn can_zoom_out(&self) -> bool {
+        match self.zoom {
+            Zoom::Level(level) => level < MAX_ZOOM && self.view_span() < self.project_end(),
+            Zoom::Fit => false,
+        }
     }
 
     /// The first timeline frame shown.
@@ -469,8 +497,29 @@ impl App {
                     self.status = Some(format!("Audio stopped: {error}"));
                 }
             }
-            Message::ZoomIn => self.zoom(self.zoom.saturating_sub(1)),
-            Message::ZoomOut => self.zoom((self.zoom + 1).min(MAX_ZOOM)),
+            Message::ZoomIn => {
+                let level = match self.zoom {
+                    Zoom::Level(level) => level.saturating_sub(1),
+                    Zoom::Fit => level_below(self.samples_per_column()).unwrap_or(0),
+                };
+                self.zoom(Zoom::Level(level));
+            }
+            Message::ZoomOut => {
+                if let Zoom::Level(level) = self.zoom
+                    && self.can_zoom_out()
+                {
+                    let next = level + 1;
+                    let spans = samples_per_column(next).saturating_mul(LANE_COLUMNS as u64);
+                    if spans < self.project_end() {
+                        self.zoom(Zoom::Level(next));
+                    } else {
+                        self.following = false;
+                        self.zoom = Zoom::Fit;
+                        self.start = 0;
+                        self.refresh_lanes();
+                    }
+                }
+            }
             Message::Pan(fraction) => {
                 // The next tick follows again if the playhead is still in view.
                 self.following = false;
@@ -830,15 +879,15 @@ impl App {
         self.refresh_lanes();
     }
 
-    /// Zooms to `level`, keeping the playhead in place if it is in view, else the view's centre.
-    fn zoom(&mut self, level: u32) {
+    /// Zooms to `zoom`, keeping the playhead in place if it is in view, else the view's centre.
+    fn zoom(&mut self, zoom: Zoom) {
         self.following = false;
         let old = self.samples_per_column();
         let anchor = match self.playhead_fraction() {
             Some(_) => self.engine.playhead(),
             None => self.start.saturating_add(self.view_span() / 2),
         };
-        self.zoom = level;
+        self.zoom = zoom;
         self.start = zoomed_start(self.start, old, self.samples_per_column(), anchor);
         self.refresh_lanes();
     }
@@ -887,18 +936,21 @@ impl App {
     /// The timeline's length for the position bar: the end of the last clip, or further to
     /// take in the visible window and the playhead.
     pub(crate) fn timeline_length(&self) -> u64 {
-        let clips = self
-            .session
+        self.project_end()
+            .max(self.start.saturating_add(self.view_span()))
+            .max(self.engine.playhead())
+            .max(1)
+    }
+
+    /// The project's end: the end of its last clip, or 0 if it has none.
+    fn project_end(&self) -> u64 {
+        self.session
             .state()
             .tracks
             .iter()
             .flat_map(|t| t.clips.iter().map(|(_, c)| c.end()))
             .max()
-            .unwrap_or(0);
-        clips
-            .max(self.start.saturating_add(self.view_span()))
-            .max(self.engine.playhead())
-            .max(1)
+            .unwrap_or(0)
     }
 
     fn report(&mut self, result: Result<(), String>) {

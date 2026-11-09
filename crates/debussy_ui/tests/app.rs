@@ -307,18 +307,17 @@ fn test_zoom_and_lanes_follow_the_clips() -> Result<(), Box<dyn Error>> {
     for _ in 0..40 {
         app.update(Message::ZoomOut);
     }
+    // Zoom out stops at the project: 69 632 frames over 1024 columns.
     let last = calls
         .borrow()
         .waveform
         .last()
         .cloned()
         .ok_or("no waveform reads")?;
-    assert_eq!(last.2, debussy_ui::MAX_SAMPLES_PER_COLUMN);
+    assert_eq!(last.2, 68);
+    // Back on the grid at 64 frames per column, scrolling forward past the clip's start reads
+    // from inside the file.
     app.update(Message::ZoomIn);
-    // Scrolling forward past the clip's start reads from inside the file.
-    for _ in 0..30 {
-        app.update(Message::ZoomIn);
-    }
     app.update(Message::Pan(0.1));
     let last = calls
         .borrow()
@@ -489,6 +488,11 @@ fn test_seek_out_of_view_brings_it_into_view() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test_two_zoom_steps_halve_or_double_the_time_shown() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
+    // Ten steps in, to 32 frames per column, so the view is shorter than the project and can
+    // zoom out again.
+    for _ in 0..10 {
+        app.update(Message::ZoomIn);
+    }
     let spc = app.samples_per_column();
     app.update(Message::ZoomIn);
     let step = app.samples_per_column();
@@ -499,6 +503,57 @@ fn test_two_zoom_steps_halve_or_double_the_time_shown() -> Result<(), Box<dyn Er
         app.update(Message::ZoomOut);
     }
     assert_eq!(app.samples_per_column(), spc * 2);
+    Ok(())
+}
+
+/// The fixture's end: its clip at frame 4096 for 65 536 frames.
+const PROJECT_END: u64 = 4096 + 65_536;
+
+#[test]
+fn test_zoom_out_stops_at_the_project_length() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    for _ in 0..12 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Pan(1.0));
+    for _ in 0..20 {
+        app.update(Message::ZoomOut);
+    }
+    assert_eq!(app.view_start(), 0);
+    assert!(app.view_span() >= PROJECT_END);
+    assert!(app.view_span() < PROJECT_END + debussy_ui::LANE_COLUMNS as u64);
+    let (start, spc) = (app.view_start(), app.samples_per_column());
+    app.update(Message::ZoomOut);
+    assert_eq!((app.view_start(), app.samples_per_column()), (start, spc));
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_zoom_out_disabled_when_project_fits() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    let (start, spc) = (app.view_start(), app.samples_per_column());
+    let reads = calls.borrow().waveform.len();
+    app.update(Message::ZoomOut);
+    assert_eq!((app.view_start(), app.samples_per_column()), (start, spc));
+    assert_eq!(calls.borrow().waveform.len(), reads);
+    Ok(())
+}
+
+#[test]
+fn test_zoom_in_from_fit_returns_to_the_grid() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    for _ in 0..12 {
+        app.update(Message::ZoomIn);
+    }
+    for _ in 0..20 {
+        app.update(Message::ZoomOut);
+    }
+    let fit = app.samples_per_column();
+    app.update(Message::ZoomIn);
+    // The coarsest grid level under the fit's 68: 64 frames per column.
+    assert_eq!(app.samples_per_column(), 64);
+    assert!(app.samples_per_column() < fit);
     Ok(())
 }
 
