@@ -43,6 +43,7 @@ pub fn render(
             runner,
             output,
             tracks,
+            None,
             true,
             false,
             &mut left[..n],

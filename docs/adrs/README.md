@@ -101,4 +101,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0075](0075-the-playhead-time-reads-hh-mm-ss-000-dropping.md) | The playhead time reads HH:MM:SS.000, dropping leading units a short project does not need | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0076](0076-playback-stops-by-itself-at-the-project-s-end.md) | Playback stops by itself at the project's end | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0077](0077-every-view-move-stops-at-the-scroll-bound.md) | Every view move stops at the scroll bound | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
+| [ADR-0078](0078-recording-captures-armed-inputs-on-the-real-time.md) | Recording captures armed inputs on the real-time thread and writes takes on a separate thread | Accepted | [Capture](../architecture/recording.md#capture) |
 

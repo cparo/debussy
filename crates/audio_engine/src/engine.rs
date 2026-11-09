@@ -1,5 +1,6 @@
-//! The control side: transport commands and track feeds, sent to the [`Processor`] over a
-//! lock-free queue (`docs/architecture/engine.md` "Transport").
+//! The control side: transport commands, track feeds and armed tracks, sent to the [`Processor`]
+//! over a lock-free queue (`docs/architecture/engine.md` "Transport",
+//! `docs/architecture/recording.md` "Capture").
 //!
 //! These calls run off the real-time thread.
 
@@ -9,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use audio_buffers::{Consumer, Producer, queue};
 use signal_graph::{NodeId, Runner};
 
+use crate::capture::{ArmedTrack, TakeInfo};
 use crate::error::Error;
 use crate::feed::{Streams, TrackFeeds};
 use crate::processor::Processor;
@@ -55,9 +57,20 @@ pub(crate) struct Shared {
     playhead: AtomicU64,
     state: AtomicU8,
     mono: AtomicBool,
+    /// Whether the last recording's capture has begun; `take_start` and `take_latency` are set
+    /// before it.
+    take_started: AtomicBool,
+    take_start: AtomicU64,
+    take_latency: AtomicU64,
 }
 
 impl Shared {
+    pub(crate) fn start_take(&self, start_frame: u64, latency: u64) {
+        self.take_start.store(start_frame, Ordering::Relaxed);
+        self.take_latency.store(latency, Ordering::Relaxed);
+        self.take_started.store(true, Ordering::Release);
+    }
+
     pub(crate) fn publish(&self, state: TransportState, playhead: u64) {
         self.playhead.store(playhead, Ordering::Release);
         self.state.store(state.to_u8(), Ordering::Release);
@@ -68,12 +81,21 @@ impl Shared {
     }
 }
 
+/// Something the real-time side replaced, sent back to be dropped.
+pub(crate) enum Retired {
+    Tracks(#[allow(dead_code)] Vec<TrackFeeds>), // Held only to be dropped.
+    Armed(#[allow(dead_code)] Vec<ArmedTrack>),  // Held only to be dropped.
+}
+
 /// A request from the control side to the real-time side.
 pub(crate) enum Command {
     /// Replace the track feeds.
     Tracks(Vec<TrackFeeds>),
-    /// Play from `from` once every feed is primed; the feeds have been moved there.
-    Play { from: u64 },
+    /// Replace the armed tracks, ending the old ones' takes.
+    Arm(Vec<ArmedTrack>),
+    /// Play from `from` once every feed is primed, recording the armed tracks if `record`; the
+    /// feeds have been moved there.
+    Play { from: u64, record: bool },
     /// Hold the playhead.
     Pause,
     /// Stop and move the playhead to `to`.
@@ -85,7 +107,7 @@ pub(crate) enum Command {
 /// The control side of the engine.
 pub struct Engine {
     commands: Producer<Command>,
-    retired: Consumer<Vec<TrackFeeds>>,
+    retired: Consumer<Retired>,
     shared: Arc<Shared>,
     /// The transport as the control side last set it.
     state: TransportState,
@@ -93,6 +115,10 @@ pub struct Engine {
     position: u64,
     /// Where playback last started, for stop to return to.
     started_from: u64,
+    /// Whether the transport was started by record and not since stopped or paused.
+    recording: bool,
+    /// Whether takes have been armed since the last recording.
+    takes_armed: bool,
 }
 
 impl Engine {
@@ -126,6 +152,8 @@ impl Engine {
             state: TransportState::Stopped,
             position: 0,
             started_from: 0,
+            recording: false,
+            takes_armed: false,
         };
         Ok((engine, processor))
     }
@@ -144,6 +172,62 @@ impl Engine {
         self.send(Command::Tracks(tracks))
     }
 
+    /// Replaces the armed tracks (`docs/architecture/recording.md` "Capture"), ending any takes
+    /// the old ones held. Only while stopped or paused. Monitoring takes effect at once.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Playing`]; [`Error::Busy`].
+    pub fn arm(&mut self, armed: Vec<ArmedTrack>) -> Result<(), Error> {
+        if self.is_playing() {
+            return Err(Error::Playing);
+        }
+        self.collect();
+        let takes = armed.iter().any(|a| !a.sinks.is_empty());
+        self.send(Command::Arm(armed))?;
+        self.takes_armed = takes;
+        Ok(())
+    }
+
+    /// Starts recording from the playhead: plays as [`Engine::play`] does, and captures the
+    /// armed tracks' input into their takes from the first block played. Stop or pause ends the
+    /// takes; arm new ones before recording again. [`Engine::take`] then tells where the take
+    /// began.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotArmed`] if no takes are armed; [`Error::Playing`] if already playing;
+    /// otherwise as [`Engine::play`].
+    pub fn record(&mut self, streams: &mut dyn Streams) -> Result<(), Error> {
+        if self.is_playing() {
+            return Err(Error::Playing);
+        }
+        if !self.takes_armed {
+            return Err(Error::NotArmed);
+        }
+        let from = self.resume_point()?;
+        self.shared.take_started.store(false, Ordering::Release);
+        self.begin(from, true, streams)?;
+        self.takes_armed = false;
+        Ok(())
+    }
+
+    /// Where the last recording's capture began, once it has.
+    pub fn take(&self) -> Option<TakeInfo> {
+        self.shared
+            .take_started
+            .load(Ordering::Acquire)
+            .then(|| TakeInfo {
+                start_frame: self.shared.take_start.load(Ordering::Relaxed),
+                latency: self.shared.take_latency.load(Ordering::Relaxed),
+            })
+    }
+
+    /// Whether the transport is recording, as last set here.
+    pub fn is_recording(&self) -> bool {
+        self.recording
+    }
+
     /// Starts playing from the playhead: moves every feed there, then plays once they are
     /// primed. Does nothing if already playing.
     ///
@@ -151,8 +235,17 @@ impl Engine {
     ///
     /// [`Error::Streams`]; [`Error::Busy`], also while a pause has not yet taken effect.
     pub fn play(&mut self, streams: &mut dyn Streams) -> Result<(), Error> {
-        let from = match self.state {
-            TransportState::Starting | TransportState::Playing => return Ok(()),
+        if self.is_playing() {
+            return Ok(());
+        }
+        let from = self.resume_point()?;
+        self.start(from, streams)
+    }
+
+    /// Where play or record starts: the playhead, or where a pause held it.
+    fn resume_point(&self) -> Result<u64, Error> {
+        Ok(match self.state {
+            TransportState::Starting | TransportState::Playing => self.playhead(),
             TransportState::Stopped => self.position,
             TransportState::Paused => {
                 if self.real_time_state() != TransportState::Paused {
@@ -160,8 +253,7 @@ impl Engine {
                 }
                 self.shared.playhead.load(Ordering::Acquire)
             }
-        };
-        self.start(from, streams)
+        })
     }
 
     /// Moves the playhead to `frame`. While playing, playback jumps there (after priming) and
@@ -169,8 +261,11 @@ impl Engine {
     ///
     /// # Errors
     ///
-    /// [`Error::Streams`]; [`Error::Busy`].
+    /// [`Error::Recording`]; [`Error::Streams`]; [`Error::Busy`].
     pub fn locate(&mut self, frame: u64, streams: &mut dyn Streams) -> Result<(), Error> {
+        if self.recording {
+            return Err(Error::Recording);
+        }
         if self.is_playing() {
             return self.start(frame, streams);
         }
@@ -191,6 +286,7 @@ impl Engine {
         }
         self.send(Command::Pause)?;
         self.state = TransportState::Paused;
+        self.recording = false;
         Ok(())
     }
 
@@ -208,6 +304,7 @@ impl Engine {
         })?;
         self.position = self.started_from;
         self.state = TransportState::Stopped;
+        self.recording = false;
         Ok(())
     }
 
@@ -244,19 +341,25 @@ impl Engine {
         )
     }
 
-    /// Drops track feeds the real-time side has replaced.
+    /// Drops track feeds and armed tracks the real-time side has replaced.
     pub fn collect(&mut self) {
-        while let Some(tracks) = self.retired.try_pop() {
-            drop(tracks);
+        while let Some(retired) = self.retired.try_pop() {
+            drop(retired);
         }
     }
 
     /// Moves the feeds to `from` and asks the real-time side to play from there.
     fn start(&mut self, from: u64, streams: &mut dyn Streams) -> Result<(), Error> {
+        self.begin(from, false, streams)
+    }
+
+    /// Moves the feeds to `from` and asks the real-time side to play, or record, from there.
+    fn begin(&mut self, from: u64, record: bool, streams: &mut dyn Streams) -> Result<(), Error> {
         streams.seek(from).map_err(Error::Streams)?;
-        self.send(Command::Play { from })?;
+        self.send(Command::Play { from, record })?;
         self.started_from = from;
         self.state = TransportState::Starting;
+        self.recording = record;
         Ok(())
     }
 

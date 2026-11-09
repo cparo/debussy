@@ -1,16 +1,28 @@
 //! The bridge to `audio_engine` (`docs/architecture/engine.md` "Clip playback", ADR-0046): each
 //! track channel streams as a [`TimelineSource`], whose reads render the channel's clips from the
 //! stored files through [`WavClipAudio`] on the reader thread; [`Playback`] feeds the engine and
-//! [`Streamer`] moves every stream when the transport starts or jumps.
+//! [`Streamer`] moves every stream when the transport starts or jumps. A [`Take`] is the
+//! engine's sink for one recorded channel (`docs/architecture/recording.md` "Capture").
 
 use std::path::PathBuf;
 
-use audio_engine::{ClipAudio, Streams, TrackFeed, TrackRenderer};
+use audio_engine::{ClipAudio, Streams, TakeSink, TrackFeed, TrackRenderer};
 
 use crate::error::Error;
 use crate::playback::Playback;
 use crate::source::{FrameSource, open_wav};
 use crate::streamer::{Plan, Streamer};
+use crate::take::Take;
+
+impl TakeSink for Take {
+    fn write(&mut self, samples: &[f32]) -> usize {
+        Take::write(self, samples)
+    }
+
+    fn end(&mut self) {
+        Take::end(self);
+    }
+}
 
 impl TrackFeed for Playback {
     fn read(&mut self, out: &mut [f32]) -> usize {

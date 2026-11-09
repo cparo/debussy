@@ -17,7 +17,7 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
 | `project_model` | core | Tracks, clips, routing, edits as undoable commands, named versions |
 | `wav_files` | core | WAV and RF64 reading and writing over `Read`, `Write` and `Seek` |
 | `platform_interfaces` | core | The traits a platform implements: audio devices, compressed-audio codecs |
-| `disk_streaming` | I/O | Read-ahead of project audio from disk into buffers for `audio_engine` |
+| `disk_streaming` | I/O | Read-ahead of project audio from disk into buffers for `audio_engine`, and writing recorded takes to disk |
 | `project_storage` | I/O | The project bundle: `project.json`, versions, migrations, crash-safe saving, cleanup |
 | `import_export` | I/O | Import (decode, resample, split into mono files) and export (render, dither, encode) |
 | `macos_platform` | platform | `platform_interfaces` for macOS: `cpal` devices and AudioToolbox codecs |

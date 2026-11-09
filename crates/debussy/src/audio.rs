@@ -56,12 +56,19 @@ impl AudioCallback for EngineCallback {
             return;
         };
         let channels = buffers.output_channels.max(1);
+        let inputs = buffers.input_channels;
         let mut done = 0;
         while done < buffers.frames {
             let n = (buffers.frames - done).min(self.left.len());
             let (left, right) = (&mut self.left[..n], &mut self.right[..n]);
+            // Input the device did not fill is passed as empty, which the engine takes as
+            // silence.
+            let input = buffers
+                .input
+                .get(done * inputs..(done + n) * inputs)
+                .unwrap_or(&[]);
             // A failed block is silence, which `process` has already written.
-            let _ = processor.process(left, right);
+            let _ = processor.process(input, inputs, left, right);
             let out = &mut buffers.output[done * channels..(done + n) * channels];
             for (frame, (l, r)) in out
                 .chunks_exact_mut(channels)

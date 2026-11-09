@@ -36,6 +36,11 @@ impl Runner {
         }
     }
 
+    /// The largest block the graph runs, in frames.
+    pub fn max_frames(&self) -> usize {
+        self.max_frames
+    }
+
     /// Starts a block of `frames`: takes up any newly committed plans, carrying their nodes'
     /// state over, and sends the replaced ones back to be dropped.
     ///
