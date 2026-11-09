@@ -9,10 +9,13 @@ use audio_buffers::Layout;
 use audio_effects::{Control, Mode, parameter_name};
 use audio_engine::Engine;
 use engine_bridge::Bridge;
-use project_model::{Edit, Endpoint, NodeId, NodeKind, Position, Session, Track, TrackId};
+use project_model::{
+    Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
+};
 
 use crate::menu::Menu;
 use crate::patch_board::{Pin, Selection, can_connect};
+use crate::range_selection::RangeSelection;
 use crate::services::Services;
 use crate::theme::Tone;
 use crate::transport::{
@@ -26,6 +29,8 @@ const DEFAULT_SPLIT: f32 = 0.6;
 const MIN_SPLIT: f32 = 0.2;
 /// The widest the divider leaves the track pane.
 const MAX_SPLIT: f32 = 0.85;
+/// How far a drag must go, in lane columns, before it selects a range rather than clicks.
+const DRAG_COLUMNS: u64 = 4;
 
 /// A kind of node the board's "+" adds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +80,36 @@ pub enum Message {
     /// Move the playhead to this timeline frame, playing on from there if playing; it becomes
     /// the return point.
     Seek(u64),
+    /// A press in a lane of `track` at timeline frame `frame`: seeks and starts a drag, or with
+    /// `extend` (Shift held) moves the range selection's nearer edge there.
+    LanePress {
+        /// The track whose lane was pressed.
+        track: TrackId,
+        /// The timeline frame pressed.
+        frame: u64,
+        /// Whether Shift was held.
+        extend: bool,
+    },
+    /// The pointer, dragging from a lane press, is over a lane of `track` at `frame`.
+    LaneDrag {
+        /// The track under the pointer.
+        track: TrackId,
+        /// The timeline frame under the pointer.
+        frame: u64,
+    },
+    /// The mouse button was released, ending a drag from a lane.
+    LaneRelease,
+    /// Clear the range selection.
+    ClearRange,
+    /// Cut the selected range to the clipboard, as one step.
+    Cut,
+    /// Copy the selected range to the clipboard.
+    Copy,
+    /// Paste the clipboard at the playhead, onto the top selected track or the current track,
+    /// as one step.
+    Paste,
+    /// Delete the selected range, as one step.
+    DeleteRange,
     /// Turn mono listening on (`true`) or off.
     SetMono(bool),
     /// A display frame while playing: refresh the playhead and finish pending work.
@@ -220,6 +255,14 @@ pub struct App {
     pub(crate) split: f32,
     /// The selected node or wire.
     pub(crate) selection: Option<Selection>,
+    /// The range selected in the lanes.
+    range: Option<RangeSelection>,
+    /// Where a drag from a lane began, while the button is held.
+    drag: Option<(TrackId, u64)>,
+    /// The track last pressed: where a paste goes without a range selection.
+    current_track: Option<TrackId>,
+    /// The excerpt last cut or copied.
+    clipboard: Option<Excerpt>,
     /// The output a wire is being dragged from.
     pub(crate) wiring: Option<Pin>,
     /// A node or the outputs being dragged.
@@ -277,6 +320,10 @@ impl App {
             scrolled: 0.0,
             split: DEFAULT_SPLIT,
             selection: None,
+            range: None,
+            drag: None,
+            current_track: None,
+            clipboard: None,
             wiring: None,
             moving: None,
             delay_text: None,
@@ -430,6 +477,29 @@ impl App {
         self.selection
     }
 
+    /// The selected range: its tracks, top first, and frames.
+    pub fn selected_range(&self) -> Option<(Vec<TrackId>, Range)> {
+        self.range?.resolve(self.session.state())
+    }
+
+    /// Whether a drag from a lane is under way.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// The excerpt last cut or copied.
+    pub fn clipboard(&self) -> Option<&Excerpt> {
+        self.clipboard.as_ref()
+    }
+
+    /// The track a paste goes onto: the top selected track, or the current track.
+    pub fn paste_target(&self) -> Option<TrackId> {
+        let selected = self.selected_range().and_then(|(t, _)| t.first().copied());
+        selected.or(self
+            .current_track
+            .filter(|&id| self.session.state().track(id).is_some()))
+    }
+
     /// The number of channels `node` would keep after removing its last one, if it is a mixer
     /// of more than one channel with nothing connected to its last.
     pub fn removable_channel(&self, node: NodeId) -> Option<usize> {
@@ -490,6 +560,8 @@ impl App {
                 | Message::DragNode(..)
                 | Message::DragOutput(_)
                 | Message::DelayText(..)
+                | Message::LaneDrag { .. }
+                | Message::LaneRelease
         ) {
             self.status = None;
             self.menu = None;
@@ -520,6 +592,26 @@ impl App {
                 self.report(result.map_err(|e| e.to_string()));
             }
             Message::Seek(frame) => self.seek(frame),
+            Message::LanePress {
+                track,
+                frame,
+                extend,
+            } => self.lane_press(track, frame, extend),
+            Message::LaneDrag { track, frame } => self.lane_drag(track, frame),
+            Message::LaneRelease => self.drag = None,
+            Message::ClearRange => self.range = None,
+            Message::Cut => self.cut(),
+            Message::Copy => {
+                if let Some((tracks, range)) = self.selected_range() {
+                    let copied = self.session.copy_range(&tracks, range);
+                    match copied {
+                        Ok(excerpt) => self.clipboard = Some(excerpt),
+                        Err(error) => self.status = Some(error.to_string()),
+                    }
+                }
+            }
+            Message::Paste => self.paste(),
+            Message::DeleteRange => self.delete_range(),
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::Tick => {
                 self.engine.collect();
@@ -852,6 +944,94 @@ impl App {
                 self.status = Some(format!("{}: {error}", track.name));
             }
         }
+        self.refresh_lanes();
+    }
+
+    /// A press in a lane: with `extend`, moves the selection's nearer edge (or selects from the
+    /// playhead on the current track); otherwise seeks, clears the selection and starts a drag.
+    fn lane_press(&mut self, track: TrackId, frame: u64, extend: bool) {
+        if extend {
+            let state = self.session.state();
+            let selection = match self.range.and_then(|r| r.extended(state, (track, frame))) {
+                Some(selection) => selection,
+                None => RangeSelection {
+                    anchor: (self.paste_target().unwrap_or(track), self.engine.playhead()),
+                    head: (track, frame),
+                },
+            };
+            self.range = Some(selection);
+            self.drag = Some(selection.anchor);
+            return;
+        }
+        self.seek(frame);
+        self.current_track = Some(track);
+        self.range = None;
+        self.drag = Some((track, frame));
+    }
+
+    /// The pointer, dragging, is over `track` at `frame`: the selection runs from the drag's
+    /// start to there, once it has gone further than a click's wobble.
+    fn lane_drag(&mut self, track: TrackId, frame: u64) {
+        let Some(anchor) = self.drag else {
+            return;
+        };
+        let wobble = self.samples_per_column().saturating_mul(DRAG_COLUMNS);
+        if self.range.is_none() && track == anchor.0 && frame.abs_diff(anchor.1) < wobble {
+            return;
+        }
+        self.range = Some(RangeSelection {
+            anchor,
+            head: (track, frame),
+        });
+    }
+
+    fn cut(&mut self) {
+        let Some((tracks, range)) = self.selected_range() else {
+            return;
+        };
+        if self.refuse_while_playing("cut") {
+            return;
+        }
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.cut_range(&tracks, range));
+        match result {
+            Ok(excerpt) => self.clipboard = Some(excerpt),
+            Err(error) => self.status = Some(error.to_string()),
+        }
+        self.refresh_lanes();
+    }
+
+    fn delete_range(&mut self) {
+        // Delete and Backspace edit the text being typed instead.
+        if self.renaming.is_some() || self.delay_text.is_some() {
+            return;
+        }
+        let Some((tracks, range)) = self.selected_range() else {
+            return;
+        };
+        if self.refuse_while_playing("delete") {
+            return;
+        }
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.delete_range(&tracks, range));
+        self.report(result.map_err(|e| e.to_string()));
+        self.refresh_lanes();
+    }
+
+    fn paste(&mut self) {
+        let (Some(excerpt), Some(track)) = (self.clipboard.clone(), self.paste_target()) else {
+            return;
+        };
+        if self.refuse_while_playing("paste") {
+            return;
+        }
+        let position = self.engine.playhead();
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.paste(&excerpt, track, position));
+        self.report(result.map(|_| ()).map_err(|e| e.to_string()));
         self.refresh_lanes();
     }
 

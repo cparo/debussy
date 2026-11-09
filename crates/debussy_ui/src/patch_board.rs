@@ -536,7 +536,8 @@ impl Program<Message> for BoardView {
                 key: keyboard::Key::Named(Named::Delete | Named::Backspace),
                 ..
             }) if self.selection.is_some() => {
-                Some(canvas::Action::publish(Message::DeleteSelection))
+                // Captured, so the shortcut for deleting a range does not also see it.
+                Some(canvas::Action::publish(Message::DeleteSelection).and_capture())
             }
             _ => None,
         }

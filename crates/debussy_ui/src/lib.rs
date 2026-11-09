@@ -10,6 +10,8 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `range_selection`: the range selected in the lanes.
+//! - `shortcuts`: keyboard shortcuts.
 //! - `waveform`: track lanes from the stored files, and their canvas.
 //! - `raster`: lanes painted into memory at the display scale and blurred.
 //! - `transport`: zoom steps and the position bar.
@@ -24,8 +26,10 @@ mod app;
 mod icon;
 mod menu;
 mod patch_board;
+mod range_selection;
 mod raster;
 mod services;
+mod shortcuts;
 mod theme;
 mod transport;
 mod view;
@@ -116,13 +120,22 @@ impl Shell {
             iced::window::Event::Rescaled(scale) => Some(Message::Rescaled(scale)),
             _ => None,
         });
-        match &self.0 {
-            Some(app) if app.wants_ticks() => iced::Subscription::batch([
-                appearance,
-                rescaled,
-                iced::window::frames().map(|_| Message::Tick),
-            ]),
-            _ => iced::Subscription::batch([appearance, rescaled]),
+        let keys = iced::keyboard::listen().filter_map(shortcuts::shortcut);
+        let mut subscriptions = vec![appearance, rescaled, keys];
+        if let Some(app) = &self.0 {
+            if app.wants_ticks() {
+                subscriptions.push(iced::window::frames().map(|_| Message::Tick));
+            }
+            // A drag from a lane ends wherever the button is released.
+            if app.is_dragging() {
+                subscriptions.push(iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::LaneRelease),
+                    _ => None,
+                }));
+            }
         }
+        iced::Subscription::batch(subscriptions)
     }
 }

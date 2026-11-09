@@ -166,6 +166,7 @@ impl App {
 
     fn top_bar(&self) -> Element<'_, Message> {
         let playing = self.engine().is_playing();
+        let selected = self.selected_range().is_some();
         let display = self.display();
         let logo = svg(LOGO.clone())
             .width(Length::Shrink)
@@ -201,9 +202,22 @@ impl App {
             ]),
             gap(16.0),
             group(vec![
-                (Face::Icon(Icon::Cut), None, false),
-                (Face::Icon(Icon::Copy), None, false),
-                (Face::Icon(Icon::Paste), None, false),
+                (
+                    Face::Icon(Icon::Cut),
+                    (!playing && selected).then_some(Message::Cut),
+                    false
+                ),
+                (
+                    Face::Icon(Icon::Copy),
+                    selected.then_some(Message::Copy),
+                    false
+                ),
+                (
+                    Face::Icon(Icon::Paste),
+                    (!playing && self.clipboard().is_some() && self.paste_target().is_some())
+                        .then_some(Message::Paste),
+                    false
+                ),
             ]),
             gap(16.0),
             group(vec![
@@ -442,15 +456,23 @@ impl App {
     fn track_pane(&self) -> Element<'_, Message> {
         let cursor = self.playhead_fraction();
         let (start, span) = (self.view_start(), self.view_span());
+        let selected = self.selected_range();
+        let dragging = self.is_dragging();
         let mut tracks = column![];
         for (id, lanes) in &self.lanes {
             let Some(track) = self.session().state().track(*id) else {
                 continue;
             };
             tracks = tracks.push(self.track_header(*id, &track.name));
+            let band = selected
+                .as_ref()
+                .filter(|(ids, _)| ids.contains(id))
+                .and_then(|(_, range)| band(range.start(), range.end(), start, span));
             for lane in lanes {
                 let view = LaneView {
                     lane,
+                    track: *id,
+                    dragging,
                     generation: self.generation,
                     start,
                     span,
@@ -461,7 +483,9 @@ impl App {
                 tracks = tracks.push(
                     stack![
                         canvas(view).width(Fill).height(Fill),
-                        canvas(CursorView { at: cursor }).width(Fill).height(Fill),
+                        canvas(CursorView { at: cursor, band })
+                            .width(Fill)
+                            .height(Fill),
                     ]
                     .width(Fill)
                     .height(Length::Fixed(LANE_HEIGHT)),
@@ -670,5 +694,29 @@ impl App {
         .spacing(6)
         .width(Length::Fixed(90.0))
         .into()
+    }
+}
+
+/// The part of frames `from..to` in the view of `span` frames from `start`, as fractions of the
+/// lane's width; `None` if none of it is visible.
+fn band(from: u64, to: u64, start: u64, span: u64) -> Option<(f32, f32)> {
+    let end = start.saturating_add(span);
+    if to <= start || from >= end || span == 0 {
+        return None;
+    }
+    let fraction = |frame: u64| (frame.clamp(start, end) - start) as f32 / span as f32;
+    Some((fraction(from), fraction(to)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_band_clips_to_the_view() {
+        assert_eq!(band(100, 300, 0, 1_000), Some((0.1, 0.3)));
+        assert_eq!(band(0, 2_000, 500, 1_000), Some((0.0, 1.0)));
+        assert_eq!(band(0, 500, 500, 1_000), None);
+        assert_eq!(band(1_500, 1_600, 500, 1_000), None);
     }
 }

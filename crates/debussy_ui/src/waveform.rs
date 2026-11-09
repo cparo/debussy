@@ -2,16 +2,16 @@
 //! per column from the waveform summaries or, at zooms finer than those, the audio itself drawn
 //! as a time-in-level trace (`docs/architecture/analysis.md` "Waveform summaries"), or a
 //! spectrum per coarser column computed from the audio ("Spectrograms") — and the canvas that
-//! draws a lane — into a [`Raster`] at the display's scale, blurred — seeks on a click and pans
-//! on a sideways scroll.
+//! draws a lane — into a [`Raster`] at the display's scale, blurred — seeks or selects a range
+//! on a press or drag, and pans on a sideways scroll.
 
 use std::cell::Cell;
 
 use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
 use iced::widget::image;
-use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
-use project_model::{Clip, Source, Track};
+use iced::{Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse};
+use project_model::{Clip, Source, Track, TrackId};
 
 use crate::app::Message;
 use crate::raster::Raster;
@@ -230,13 +230,19 @@ pub struct LaneState {
     cache: Cache,
     generation: Cell<Option<u64>>,
     scale: Cell<Option<f32>>,
+    /// Whether Shift is held, for a press that extends the range selection.
+    shift: bool,
 }
 
-/// Draws a lane; a click seeks there and a sideways scroll pans. The cursor is a
-/// [`CursorView`] stacked over it.
+/// Draws a lane; a press seeks there or extends the range selection, a drag selects a range,
+/// and a sideways scroll pans. The cursor and selection are a [`CursorView`] stacked over it.
 pub struct LaneView<'a> {
     /// The lane.
     pub lane: &'a Lane,
+    /// The track it belongs to.
+    pub track: TrackId,
+    /// Whether a drag from a lane is under way, so the pointer over this one reports where it is.
+    pub dragging: bool,
     /// Changes whenever any lane's contents or the tone change, to redraw.
     pub generation: u64,
     /// The first timeline frame shown.
@@ -252,17 +258,31 @@ impl Program<Message> for LaneView<'_> {
 
     fn update(
         &self,
-        _state: &mut LaneState,
+        state: &mut LaneState,
         event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
+        if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
+            state.shift = modifiers.shift();
+            return None;
+        }
         let at = cursor.position_in(bounds)?;
+        let fraction = f64::from(at.x / bounds.width.max(1.0));
+        let frame = self.start + (fraction * self.span as f64) as u64;
+        let track = self.track;
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let fraction = f64::from(at.x / bounds.width.max(1.0));
-                let frame = self.start + (fraction * self.span as f64) as u64;
-                Some(canvas::Action::publish(Message::Seek(frame)).and_capture())
+                let extend = state.shift;
+                let press = Message::LanePress {
+                    track,
+                    frame,
+                    extend,
+                };
+                Some(canvas::Action::publish(press).and_capture())
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if self.dragging => {
+                Some(canvas::Action::publish(Message::LaneDrag { track, frame }))
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
                 let (x, y) = match delta {
@@ -333,13 +353,15 @@ impl Program<Message> for LaneView<'_> {
     }
 }
 
-/// The playhead cursor over a lane. It is a canvas of its own, stacked above the lane's: the
-/// renderer draws a layer's vector shapes before its images, so a cursor in the lane's own
-/// canvas would be hidden under the lane image. It takes no events and sets no mouse pointer,
-/// so they reach the lane beneath.
+/// The playhead cursor and the range selection over a lane. It is a canvas of its own, stacked
+/// above the lane's: the renderer draws a layer's vector shapes before its images, so a cursor
+/// in the lane's own canvas would be hidden under the lane image. It takes no events and sets
+/// no mouse pointer, so they reach the lane beneath.
 pub struct CursorView {
     /// Where the cursor is, as a fraction of the lane's width, if visible.
     pub at: Option<f32>,
+    /// The selected stretch of this lane, as fractions of its width, if any of it is visible.
+    pub band: Option<(f32, f32)>,
 }
 
 impl Program<Message> for CursorView {
@@ -349,14 +371,26 @@ impl Program<Message> for CursorView {
         &self,
         _state: &(),
         renderer: &Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let Some(at) = self.at else {
+        if self.at.is_none() && self.band.is_none() {
             return Vec::new();
-        };
+        }
         let mut frame = Frame::new(renderer, bounds.size());
+        if let Some((from, to)) = self.band {
+            // A light band in the text colour, which contrasts with the lane in either tone.
+            let ink = tokens(tone_of(theme)).text;
+            frame.fill_rectangle(
+                Point::new(from * bounds.width, 0.0),
+                Size::new(((to - from) * bounds.width).max(1.0), bounds.height),
+                Color { a: 0.22, ..ink },
+            );
+        }
+        let Some(at) = self.at else {
+            return vec![frame.into_geometry()];
+        };
         frame.fill_rectangle(
             Point::new(at * bounds.width - 0.75, 0.0),
             Size::new(1.5, bounds.height),

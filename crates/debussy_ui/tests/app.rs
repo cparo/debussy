@@ -1044,3 +1044,182 @@ fn test_update_reports_a_failed_autosave_once() -> Result<(), Box<dyn Error>> {
     assert_eq!(calls.borrow().saves, 2);
     Ok(())
 }
+
+/// The fixture with a second mono track holding a clip like the first's.
+fn two_tracks() -> Result<(Fixture, TrackId, TrackId), Box<dyn Error>> {
+    let (mut app, processor, calls, mixer) = app()?;
+    app.update(Message::AddTrack(Layout::Mono));
+    let (vocal, second) = {
+        let tracks = &app.session().state().tracks;
+        (tracks[0].id, tracks[1].id)
+    };
+    let clip = app.session().state().tracks[0].clips[0].1.clone();
+    app.update(Message::LanePress {
+        track: second,
+        frame: 0,
+        extend: false,
+    });
+    app.update(Message::LaneRelease);
+    // Put a clip on the second track by pasting a copy of the first's.
+    app.update(Message::LanePress {
+        track: vocal,
+        frame: clip.position,
+        extend: false,
+    });
+    app.update(Message::LaneDrag {
+        track: vocal,
+        frame: clip.end(),
+    });
+    app.update(Message::LaneRelease);
+    app.update(Message::Copy);
+    app.update(Message::ClearRange);
+    app.update(Message::LanePress {
+        track: second,
+        frame: clip.position,
+        extend: false,
+    });
+    app.update(Message::LaneRelease);
+    app.update(Message::Paste);
+    Ok(((app, processor, calls, mixer), vocal, second))
+}
+
+#[test]
+fn test_drag_selects_a_range_across_tracks() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), vocal, second) = two_tracks()?;
+    app.update(Message::LanePress {
+        track: second,
+        frame: 30_000,
+        extend: false,
+    });
+    assert!(app.is_dragging());
+    // A wobble smaller than a few columns is still a click.
+    app.update(Message::LaneDrag {
+        track: second,
+        frame: 30_001,
+    });
+    assert_eq!(app.selected_range(), None);
+    app.update(Message::LaneDrag {
+        track: vocal,
+        frame: 10_000,
+    });
+    app.update(Message::LaneRelease);
+    assert!(!app.is_dragging());
+    let (tracks, range) = app.selected_range().ok_or("no selection")?;
+    assert_eq!(tracks, [vocal, second]);
+    assert_eq!((range.start(), range.end()), (10_000, 30_000));
+    // The press seeked to where the drag began.
+    assert_eq!(app.return_point(), 30_000);
+    // Moving without the button held changes nothing.
+    app.update(Message::LaneDrag {
+        track: second,
+        frame: 50_000,
+    });
+    assert_eq!(app.selected_range().map(|(t, _)| t.len()), Some(2));
+    app.update(Message::ClearRange);
+    assert_eq!(app.selected_range(), None);
+    Ok(())
+}
+
+#[test]
+fn test_shift_press_extends_the_selection() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), vocal, second) = two_tracks()?;
+    app.update(Message::Seek(5_000));
+    app.update(Message::LanePress {
+        track: vocal,
+        frame: 5_000,
+        extend: false,
+    });
+    app.update(Message::LaneRelease);
+    // With no selection, from the playhead on the current track.
+    app.update(Message::LanePress {
+        track: second,
+        frame: 20_000,
+        extend: true,
+    });
+    app.update(Message::LaneRelease);
+    let (tracks, range) = app.selected_range().ok_or("no selection")?;
+    assert_eq!(tracks, [vocal, second]);
+    assert_eq!((range.start(), range.end()), (5_000, 20_000));
+    // A shift-press does not seek; it moves the nearer edge.
+    app.update(Message::LanePress {
+        track: second,
+        frame: 8_000,
+        extend: true,
+    });
+    let (_, range) = app.selected_range().ok_or("no selection")?;
+    assert_eq!((range.start(), range.end()), (8_000, 20_000));
+    assert_eq!(app.return_point(), 5_000);
+    Ok(())
+}
+
+#[test]
+fn test_cut_and_paste_are_steps_onto_the_selection() -> Result<(), Box<dyn Error>> {
+    let ((mut app, mut processor, _, _), vocal, second) = two_tracks()?;
+    // The setup's paste put the copy on the second track.
+    let pasted = app.session().state().tracks[1].clips.clone();
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(pasted[0].1.position, 4096);
+
+    app.update(Message::LanePress {
+        track: vocal,
+        frame: 10_000,
+        extend: false,
+    });
+    app.update(Message::LaneDrag {
+        track: second,
+        frame: 20_000,
+    });
+    app.update(Message::LaneRelease);
+    let before = app.session().state().clone();
+    app.update(Message::Cut);
+    assert_eq!(app.clipboard().map(|e| e.lanes().len()), Some(2));
+    for track in &app.session().state().tracks {
+        assert_eq!(track.clips.len(), 2, "split at both edges");
+    }
+    app.update(Message::Undo);
+    assert_eq!(app.session().state(), &before);
+    app.update(Message::Redo);
+
+    // Paste at the playhead onto the top selected track.
+    app.update(Message::Seek(100_000));
+    block(&mut processor)?;
+    app.update(Message::Paste);
+    let tracks = &app.session().state().tracks;
+    assert_eq!(tracks[0].clips.len(), 3);
+    assert_eq!(tracks[0].clips[2].1.position, 100_000);
+    assert_eq!(tracks[1].clips[2].1.position, 100_000);
+
+    // Delete leaves the gap; with nothing there it is not a step.
+    app.update(Message::DeleteRange);
+    let after = app.session().revision();
+    app.update(Message::DeleteRange);
+    assert_eq!(app.session().revision(), after);
+    Ok(())
+}
+
+#[test]
+fn test_range_edits_wait_for_the_transport_but_copy_does_not() -> Result<(), Box<dyn Error>> {
+    let ((mut app, mut processor, _, _), vocal, _) = two_tracks()?;
+    app.update(Message::LanePress {
+        track: vocal,
+        frame: 10_000,
+        extend: false,
+    });
+    app.update(Message::LaneDrag {
+        track: vocal,
+        frame: 20_000,
+    });
+    app.update(Message::LaneRelease);
+    app.update(Message::Play);
+    block(&mut processor)?;
+    let state = app.session().state().clone();
+    for message in [Message::Cut, Message::DeleteRange, Message::Paste] {
+        app.update(message);
+        assert_eq!(app.session().state(), &state);
+        assert!(app.status().is_some());
+    }
+    app.update(Message::Copy);
+    let lane = app.clipboard().map(|e| e.lanes()[0].clips().len());
+    assert_eq!(lane, Some(1));
+    Ok(())
+}

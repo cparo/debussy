@@ -133,6 +133,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Patch board](user-interface.md#patch-board)
   - [Transport and seeking](user-interface.md#transport-and-seeking)
   - [Gestures](user-interface.md#gestures)
+  - [Range selection and shortcuts](user-interface.md#range-selection-and-shortcuts)
   - [Application startup](user-interface.md#application-startup)
   - [Files and devices](user-interface.md#files-and-devices)
 
