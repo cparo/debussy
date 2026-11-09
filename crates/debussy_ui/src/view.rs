@@ -283,7 +283,9 @@ impl App {
             ))
             .width(Fill),
         ];
-        let scrolling = scrollable(content)
+        // The pane colour behind the row hides the seam where the gutter and board meet at a
+        // fractional x.
+        let scrolling = scrollable(container(content).style(theme::pane))
             .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
             .width(Fill)
             .height(Fill);

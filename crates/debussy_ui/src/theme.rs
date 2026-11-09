@@ -34,7 +34,7 @@ impl Tone {
 /// The chrome colours of one tone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
-    /// The top and bottom bars, track headers and the port gutter.
+    /// The top and bottom bars and track headers.
     pub chrome: Color,
     /// Empty pane space and the patch board.
     pub pane: Color,
@@ -121,7 +121,7 @@ fn fill(theme: &Theme, color: fn(&Tokens) -> Color) -> container::Style {
     }
 }
 
-/// The top and bottom bars, headers and gutter.
+/// The top and bottom bars and headers.
 pub fn chrome(theme: &Theme) -> container::Style {
     fill(theme, |t| t.chrome)
 }
