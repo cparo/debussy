@@ -16,7 +16,7 @@ use project_model::{Clip, Source, Track};
 use crate::app::Message;
 use crate::raster::Raster;
 use crate::services::Services;
-use crate::theme::{AUDIO, CURSOR, mix, tokens, tone_of};
+use crate::theme::{CURSOR, mix, tokens, tone_of};
 
 /// Waveform columns per lane; the canvas scales them to its width.
 pub const LANE_COLUMNS: usize = 1024;
@@ -295,17 +295,18 @@ impl Program<Message> for LaneView<'_> {
             state.generation.set(Some(self.generation));
             state.scale.set(Some(self.scale));
         }
-        let background = tokens(tone_of(theme)).lane;
+        let t = tokens(tone_of(theme));
+        let (background, audio) = (t.lane, t.audio);
         let size = bounds.size();
         let lane = state.cache.draw(renderer, size, |frame| {
             let mut raster = Raster::new(size.width, size.height, self.scale);
             raster.fill_rect(0.0, 0.0, size.width, size.height, background);
             if !self.lane.spectrum.is_empty() {
-                draw_spectrum(&mut raster, self.lane, size, background);
+                draw_spectrum(&mut raster, self.lane, size, background, audio);
             } else if !self.lane.trace.is_empty() {
-                draw_trace(&mut raster, self.lane, size);
+                draw_trace(&mut raster, self.lane, size, audio);
             } else {
-                draw_waveform(&mut raster, self.lane, size);
+                draw_waveform(&mut raster, self.lane, size, audio);
             }
             raster.blur(BLUR_SIGMA);
             let (width, height) = (raster.width() as u32, raster.height() as u32);
@@ -370,14 +371,14 @@ impl Program<Message> for CursorView {
 /// Each column spans whole physical pixels, at least one: neighbours tile without antialiased
 /// seams and, when the lane is narrower than [`LANE_COLUMNS`] pixels, overlap. Every peak is
 /// drawn before any body, so no column's peak covers its neighbour's body.
-fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size) {
+fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size, audio: iced::Color) {
     let mid = size.height / 2.0;
     let scale = raster.scale();
     // Physical pixels per column.
     let width = size.width * scale / LANE_COLUMNS as f32;
-    let body = mix(AUDIO, iced::Color::BLACK, 0.35);
+    let body = mix(audio, iced::Color::BLACK, 0.35);
     // The centre line, where there is no audio.
-    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, AUDIO);
+    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, audio);
     // Each column's left edge and width in logical pixels, snapped to the physical grid.
     let buckets = || {
         lane.columns.iter().enumerate().filter_map(move |(i, b)| {
@@ -389,7 +390,7 @@ fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size) {
     for (x, w, b) in buckets() {
         let top = mid - b.max.clamp(-1.0, 1.0) * mid;
         let bottom = mid - b.min.clamp(-1.0, 1.0) * mid;
-        raster.fill_rect(x, top, w, (bottom - top).max(1.0), AUDIO);
+        raster.fill_rect(x, top, w, (bottom - top).max(1.0), audio);
     }
     for (x, w, b) in buckets() {
         let rms = b.rms.clamp(0.0, 1.0) * mid;
@@ -401,10 +402,10 @@ fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size) {
 /// the column's most-visited pixel and through a square root, over the centre line
 /// (`docs/architecture/analysis.md` "Waveform summaries"). Stretches where no clip plays are
 /// left blank.
-fn draw_trace(raster: &mut Raster, lane: &Lane, size: Size) {
+fn draw_trace(raster: &mut Raster, lane: &Lane, size: Size, audio: iced::Color) {
     let mid = size.height / 2.0;
     let width = size.width / LANE_COLUMNS as f32;
-    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, AUDIO);
+    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, audio);
     let rows = (size.height.round() as usize).max(1);
     let row_height = size.height / rows as f32;
     let spc = lane.samples_per_column.max(1) as usize;
@@ -461,8 +462,8 @@ fn draw_trace(raster: &mut Raster, lane: &Lane, size: Size) {
                     width.max(1.0),
                     (end - row) as f32 * row_height,
                     iced::Color {
-                        a: AUDIO.a * level / TRACE_LEVELS,
-                        ..AUDIO
+                        a: audio.a * level / TRACE_LEVELS,
+                        ..audio
                     },
                 );
             }
@@ -473,14 +474,20 @@ fn draw_trace(raster: &mut Raster, lane: &Lane, size: Size) {
 
 /// Bands from the bottom (lowest) up, from the background at the floor through the audio
 /// colour to the far end from the background (near white on dark, near black on light) at 0 dB.
-fn draw_spectrum(raster: &mut Raster, lane: &Lane, size: Size, background: iced::Color) {
+fn draw_spectrum(
+    raster: &mut Raster,
+    lane: &Lane,
+    size: Size,
+    background: iced::Color,
+    audio: iced::Color,
+) {
     let width = size.width / lane.spectrum.len().max(1) as f32;
     let height = size.height / SPECTRUM_BANDS as f32;
     let light = background.r + background.g + background.b > 1.5;
     let hot = if light {
-        mix(AUDIO, iced::Color::BLACK, 0.6)
+        mix(audio, iced::Color::BLACK, 0.6)
     } else {
-        mix(AUDIO, iced::Color::WHITE, 0.75)
+        mix(audio, iced::Color::WHITE, 0.75)
     };
     for (i, column) in lane.spectrum.iter().enumerate() {
         let Some(bands) = column else {
@@ -492,9 +499,9 @@ fn draw_spectrum(raster: &mut Raster, lane: &Lane, size: Size, background: iced:
                 continue;
             }
             let color = if t < 0.7 {
-                mix(background, AUDIO, t / 0.7)
+                mix(background, audio, t / 0.7)
             } else {
-                mix(AUDIO, hot, (t - 0.7) / 0.3)
+                mix(audio, hot, (t - 0.7) / 0.3)
             };
             raster.fill_rect(
                 i as f32 * width,
@@ -510,6 +517,7 @@ fn draw_spectrum(raster: &mut Raster, lane: &Lane, size: Size, background: iced:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Tone;
 
     #[test]
     fn test_draw_waveform_rms_body_unbroken_at_any_width() {
@@ -523,13 +531,14 @@ mod tests {
             samples_per_column: 512,
             ..Lane::default()
         };
-        let body = mix(AUDIO, iced::Color::BLACK, 0.35).into_rgba8();
+        let audio = tokens(Tone::Dark).audio;
+        let body = mix(audio, iced::Color::BLACK, 0.35).into_rgba8();
         // Narrower than the columns (overlapping), and wider at a fractional width (tiling).
         for width in [600.0, 1500.0] {
             for scale in [1.0, 2.0] {
                 let size = Size::new(width, 100.0);
                 let mut raster = Raster::new(size.width, size.height, scale);
-                draw_waveform(&mut raster, &lane, size);
+                draw_waveform(&mut raster, &lane, size, audio);
                 let pixels = raster.width();
                 let bytes = raster.into_rgba8();
                 // A row inside the RMS body, away from the centre line.
