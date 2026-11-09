@@ -91,8 +91,8 @@ impl Icon {
             Icon::Pause => "Pause",
             Icon::Stop => "Stop",
             Icon::Record => "Record",
-            Icon::Light => "Light tone",
-            Icon::Dark => "Dark tone",
+            Icon::Light => "Light Mode",
+            Icon::Dark => "Dark Mode",
         }
     }
 }
