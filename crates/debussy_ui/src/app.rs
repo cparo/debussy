@@ -230,6 +230,8 @@ pub struct App {
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
     /// The last error or notice, for the status line.
     pub(crate) status: Option<String>,
+    /// The session revision last saved, or last tried; autosave writes when it moves on.
+    saved_revision: u64,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -278,7 +280,9 @@ impl App {
             live: None,
             devices: (Vec::new(), None),
             status: None,
+            saved_revision: 0,
         };
+        app.saved_revision = app.session.revision();
         app.refresh_devices();
         app.refresh_lanes();
         app
@@ -442,8 +446,28 @@ impl App {
         self.engine.is_playing()
     }
 
-    /// Handles `message`.
+    /// Handles `message`, then saves the project if it changed
+    /// (`docs/architecture/project.md` "Saving").
     pub fn update(&mut self, message: Message) {
+        self.handle(message);
+        self.autosave();
+    }
+
+    /// Saves the project if the session changed since the last save or attempt. A failure goes
+    /// to the status line and is not retried until the next change.
+    fn autosave(&mut self) {
+        let revision = self.session.revision();
+        if revision == self.saved_revision {
+            return;
+        }
+        self.saved_revision = revision;
+        if let Err(message) = self.services.save(&self.session) {
+            self.status = Some(format!("Autosave failed: {message}"));
+        }
+    }
+
+    /// Handles `message`, without saving.
+    fn handle(&mut self, message: Message) {
         // A frame tick, a scroll or typing leaves the status line and the open menu alone;
         // anything else replaces the status and closes the menu.
         if !matches!(
@@ -545,6 +569,7 @@ impl App {
             Message::Split(share) => self.split = share.clamp(MIN_SPLIT, MAX_SPLIT),
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
             Message::Save => {
+                self.saved_revision = self.session.revision();
                 let result = self.services.save(&self.session);
                 self.report(result);
             }

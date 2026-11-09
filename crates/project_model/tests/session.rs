@@ -477,3 +477,55 @@ fn test_disconnect_is_a_step() -> TestResult {
     assert_eq!(session.state().connections.len(), 2);
     Ok(())
 }
+
+#[test]
+fn test_revision_counts_edits_undo_and_redo() -> TestResult {
+    let mut session = Session::new();
+    assert_eq!(session.revision(), 0);
+    session.add_track("Vocals", Layout::Mono)?;
+    assert_eq!(session.revision(), 1);
+    assert!(session.undo());
+    assert_eq!(session.revision(), 2);
+    assert!(session.redo());
+    assert_eq!(session.revision(), 3);
+    assert!(session.revert_last());
+    assert_eq!(session.revision(), 4);
+    Ok(())
+}
+
+#[test]
+fn test_revision_unchanged_by_failed_changes() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_track("Vocals", Layout::Mono)?;
+    let before = session.revision();
+    assert!(
+        session
+            .add_clip(track, Clip::new(mono("a.wav", 10), 0, 0, 0))
+            .is_err()
+    );
+    assert!(session.remove_version("missing").is_err());
+    session.save_version("take 1")?;
+    let saved = session.revision();
+    assert_eq!(saved, before + 1);
+    assert!(session.save_version("take 1").is_err());
+    assert!(session.restore_version("missing").is_err());
+    assert!(!session.redo());
+    assert_eq!(session.revision(), saved);
+    let mut empty = Session::new();
+    assert!(!empty.undo());
+    assert!(!empty.revert_last());
+    assert_eq!(empty.revision(), 0);
+    Ok(())
+}
+
+#[test]
+fn test_revision_counts_versions() -> TestResult {
+    let mut session = Session::new();
+    session.save_version("take 1")?;
+    assert_eq!(session.revision(), 1);
+    session.restore_version("take 1")?;
+    assert_eq!(session.revision(), 2);
+    session.remove_version("take 1")?;
+    assert_eq!(session.revision(), 3);
+    Ok(())
+}

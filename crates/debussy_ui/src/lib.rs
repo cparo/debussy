@@ -80,7 +80,8 @@ struct Shell(Option<App>);
 impl Shell {
     fn update(&mut self, message: Message) -> iced::Task<Message> {
         let task = match &message {
-            Message::Quit => return iced::exit(),
+            // The app sees Quit first: it finishes a rename and saves it.
+            Message::Quit => iced::exit(),
             Message::StartRename(_) => iced::widget::operation::focus(view::RENAME_INPUT),
             _ => iced::Task::none(),
         };
