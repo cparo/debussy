@@ -66,6 +66,30 @@ pub enum TakeStatus {
     },
 }
 
+/// The click's per-machine preferences (`docs/architecture/recording.md` "Click track").
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClickPreferences {
+    /// The sound.
+    pub sound: engine_bridge::ClickSound,
+    /// The level, in decibels: [`MIN_CLICK_LEVEL_DB`] to [`MAX_CLICK_LEVEL_DB`].
+    pub level_db: f32,
+}
+
+impl Default for ClickPreferences {
+    /// The Click sound at 0 dB.
+    fn default() -> Self {
+        ClickPreferences {
+            sound: engine_bridge::ClickSound::default(),
+            level_db: 0.0,
+        }
+    }
+}
+
+/// The quietest click level, in decibels.
+pub const MIN_CLICK_LEVEL_DB: f32 = -24.0;
+/// The loudest click level, in decibels.
+pub const MAX_CLICK_LEVEL_DB: f32 = 6.0;
+
 /// I/O and platform services, implemented by the application with `disk_streaming`,
 /// `project_storage` and the waveform cache, and by fakes in tests. Called on the UI thread.
 pub trait Services {
@@ -201,4 +225,14 @@ pub trait Services {
 
     /// Ends the pass, deleting `files`.
     fn discard_takes(&mut self, files: &[String]);
+
+    /// The click preferences remembered on this machine.
+    fn click_preferences(&mut self) -> ClickPreferences;
+
+    /// Remembers the click preferences on this machine.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn set_click_preferences(&mut self, preferences: ClickPreferences) -> Result<(), String>;
 }

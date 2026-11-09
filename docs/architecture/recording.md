@@ -10,6 +10,26 @@ monitor plays silence while recording and its clips otherwise ([ADR-0078](../adr
 
 Monitored input is not delayed for delay compensation; its latency is the device round trip alone ([ADR-0032](../adrs/0032-monitored-input-is-not-delayed-for-delay.md)).
 
+## Click track
+
+The click is mixed into both output channels in the engine's output stage, after the plan and
+after the mono fold. It is never part of the plan, the patch board, export or offline render. It
+sounds while the transport is playing (and so recording) with the click on. Its timeline position
+is the playhead minus the plan latency, so it lines up with the playback heard and with recorded
+takes as `Take placement` places them. Each output frame sums the sound started at every beat
+whose start lies within the sound's length before that frame, so the click depends only on the
+timeline position, never on block sizes or seeks. Beats fall on the project grid (see
+`docs/architecture/project.md` "Musical time"); the downbeat plays at the click level and other
+beats 6 dB below it. The control side sends a new `audio_engine::ClickTrack` when the engine is
+built and when the tempo or sound changes; the replaced one is dropped off the real-time thread.
+
+The sounds are three bundled CC0 samples, Block, Click and Stick, in
+`crates/engine_bridge/assets/clicks/`. `engine_bridge` decodes the chosen one, folds it to mono,
+converts it to the project rate at import quality, peak-normalises it to −1 dBFS and trims its
+tail below −60 dBFS. The click on/off switch is session state, like mono listening; the sound and
+level (−24 to +6 dB, default 0) are per-machine settings (see `docs/architecture/project.md`
+"Application settings") ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
+
 ## Recording alignment
 
 Recorded audio is placed on the timeline shifted by the input and output devices' reported

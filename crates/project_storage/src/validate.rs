@@ -6,12 +6,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use audio_buffers::Layout;
 use project_model::{
     AudioFile, Clip, ClipId, Connection, ConnectionId, Edit, Endpoint, MAX_BOARD_COORDINATE, Node,
-    NodeId, NodeKind, Position, Side, Source, State, Track, TrackId,
+    NodeId, NodeKind, Position, Side, Source, State, Tempo, Track, TrackId,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedEndpoint, SavedFile, SavedLayout, SavedNode,
-    SavedNodeKind, SavedPosition, SavedProject, SavedSide, SavedSource, SavedTrack,
+    SavedNodeKind, SavedPosition, SavedProject, SavedSide, SavedSource, SavedTempo, SavedTrack,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -80,6 +80,11 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
             })
             .collect(),
         output_y: state.output_y,
+        tempo: SavedTempo {
+            bpm: state.tempo.bpm,
+            beats_per_bar: state.tempo.beats_per_bar,
+            beat_unit: state.tempo.beat_unit,
+        },
     }
 }
 
@@ -349,11 +354,23 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
     if let Some(y) = saved.output_y {
         check_coordinate(y)?;
     }
+    let tempo = Tempo {
+        bpm: saved.tempo.bpm,
+        beats_per_bar: saved.tempo.beats_per_bar,
+        beat_unit: saved.tempo.beat_unit,
+    };
+    tempo.check().map_err(|_| {
+        format!(
+            "the tempo {} BPM in {}/{} is out of range",
+            tempo.bpm, tempo.beats_per_bar, tempo.beat_unit
+        )
+    })?;
     let mut state = State {
         tracks,
         nodes,
         connections: Vec::new(),
         output_y: saved.output_y,
+        tempo,
     };
     let mut connection_ids = BTreeSet::new();
     let mut ports = BTreeSet::new();

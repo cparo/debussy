@@ -30,6 +30,8 @@ pub enum Icon {
     Stop,
     /// Record.
     Record,
+    /// Turn the click on or off.
+    Click,
     /// Switch to the light tone.
     Light,
     /// Switch to the dark tone.
@@ -74,6 +76,7 @@ artwork! {
     Pause: PAUSE = "pause.svg";
     Stop: STOP = "stop.svg";
     Record: RECORD = "record.svg";
+    Click: CLICK = "click.svg";
     Light: LIGHT = "light.svg";
     Dark: DARK = "dark.svg";
     Menu: MENU = "menu.svg";
@@ -94,6 +97,7 @@ impl Icon {
             Icon::Pause => "Pause",
             Icon::Stop => "Stop",
             Icon::Record => "Record",
+            Icon::Click => "Click",
             Icon::Light => "Light Mode",
             Icon::Dark => "Dark Mode",
             Icon::Menu => "Menu",
@@ -105,7 +109,7 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 14] = [
+    const ALL: [Icon; 15] = [
         Icon::Waveform,
         Icon::Spectrogram,
         Icon::Undo,
@@ -117,6 +121,7 @@ mod tests {
         Icon::Pause,
         Icon::Stop,
         Icon::Record,
+        Icon::Click,
         Icon::Light,
         Icon::Dark,
         Icon::Menu,

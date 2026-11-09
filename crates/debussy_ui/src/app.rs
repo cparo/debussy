@@ -15,6 +15,7 @@ use project_model::{
     Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
 };
 
+use crate::click::Click;
 use crate::menu::Menu;
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
@@ -123,6 +124,23 @@ pub enum Message {
     DeleteRange,
     /// Turn mono listening on (`true`) or off.
     SetMono(bool),
+    /// Turn the click on (`true`) or off.
+    SetClick(bool),
+    /// The tempo being typed, in beats per minute.
+    TempoText(String),
+    /// Record the typed tempo as one step.
+    CommitTempo,
+    /// Set the meter's beats per bar, as one step.
+    SetBeatsPerBar(u8),
+    /// Set the meter's beat unit, as one step.
+    SetBeatUnit(u8),
+    /// Use this click sound, remembered on this machine.
+    SetClickSound(engine_bridge::ClickSound),
+    /// The click level slider moved, in decibels: applied live, remembered on
+    /// [`Message::ReleaseClickLevel`].
+    ClickLevel(f32),
+    /// The click level slider was released: remember the level.
+    ReleaseClickLevel,
     /// A display frame while playing: refresh the playhead and finish pending work.
     Tick,
     /// Show less time: one √2 step.
@@ -301,6 +319,8 @@ pub struct App {
     pub(crate) pass: Option<Pass>,
     /// Each armed track's input meter, one level per channel in dBFS.
     pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
+    /// The click, and the tempo being typed.
+    pub(crate) click: Click,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -320,8 +340,10 @@ impl App {
         sample_rate: u32,
         bridge: Bridge,
         engine: Engine,
-        services: Box<dyn Services>,
+        mut services: Box<dyn Services>,
     ) -> App {
+        let preferences = services.click_preferences();
+        engine.set_click_level(preferences.level_db);
         let mut app = App {
             session,
             bridge,
@@ -360,10 +382,12 @@ impl App {
             inputs: 0,
             pass: None,
             meters: BTreeMap::new(),
+            click: Click::new(preferences),
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
         app.refresh_lanes();
+        app.sync_click();
         app
     }
 
@@ -558,6 +582,8 @@ impl App {
     /// (`docs/architecture/project.md` "Saving").
     pub fn update(&mut self, message: Message) {
         self.handle(message);
+        // Any change of tempo, by an edit, undo or a restored version, reaches the click.
+        self.sync_click();
         self.autosave();
     }
 
@@ -592,9 +618,23 @@ impl App {
                 | Message::DelayText(..)
                 | Message::LaneDrag { .. }
                 | Message::LaneRelease
+                | Message::TempoText(_)
+                | Message::ClickLevel(_)
+                | Message::ReleaseClickLevel
         ) {
             self.status = None;
             self.menu = None;
+        }
+        // Doing anything else while typing a tempo records it.
+        if !matches!(
+            message,
+            Message::Tick
+                | Message::Scrolled(_)
+                | Message::SystemTone(_)
+                | Message::Rescaled(_)
+                | Message::TempoText(_)
+        ) {
+            self.finish_tempo();
         }
         // Doing anything else while renaming a track finishes the rename.
         if !matches!(
@@ -647,6 +687,15 @@ impl App {
             Message::Paste => self.paste(),
             Message::DeleteRange => self.delete_range(),
             Message::SetMono(mono) => self.engine.set_mono(mono),
+            Message::SetClick(on) => self.engine.set_click_on(on),
+            Message::TempoText(text) => self.click.tempo_text = Some(text),
+            // Recorded by `finish_tempo` above.
+            Message::CommitTempo => {}
+            Message::SetBeatsPerBar(beats) => self.set_meter(Some(beats), None),
+            Message::SetBeatUnit(unit) => self.set_meter(None, Some(unit)),
+            Message::SetClickSound(sound) => self.set_click_sound(sound),
+            Message::ClickLevel(db) => self.set_click_level(db),
+            Message::ReleaseClickLevel => self.save_click_preferences(),
             Message::Tick => {
                 self.engine.collect();
                 self.poll_recording();

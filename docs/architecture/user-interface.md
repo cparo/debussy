@@ -27,7 +27,11 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   switch projects), import, export, export mono, and quit.
 - **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the position bar, the playhead's time, and the status line
-  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)).
+  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). After record
+  come the click toggle with a ▾ menu (the sound, ticked, and a level slider), the tempo field in
+  BPM, and the meter as two pickers, beats per bar over beat unit. A typed tempo is recorded on
+  Enter or the next other action; changing the tempo or meter is refused while playing
+  ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
@@ -67,8 +71,8 @@ transparent background; the interface tints it with a theme colour, so a file's 
 never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
 toolbar button, with no box or background of its own.
 
-The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
-light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
+The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
+click toggle (an in-house metronome) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
 outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the
 button's face, and black on a red face while recording

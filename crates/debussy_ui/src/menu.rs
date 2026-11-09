@@ -2,7 +2,7 @@
 //! while it is open, with the rest of the window catching a click that closes it
 //! (`docs/architecture/user-interface.md` "Layout").
 
-use iced::widget::{Space, button, column, container, rule, svg, text};
+use iced::widget::{Space, button, column, container, rule, slider, svg, text};
 use iced::{Element, Length};
 use project_model::TrackId;
 
@@ -24,6 +24,8 @@ pub enum Menu {
     AddTrack,
     /// The "+" at the board's top right.
     AddNode,
+    /// The ▾ beside the click: its sound and level.
+    Click,
 }
 
 /// A line in a menu.
@@ -32,6 +34,20 @@ pub(crate) enum Entry {
     Item(String, Option<Message>),
     /// A dividing line.
     Separator,
+    /// A labelled slider over `range`, sending `on_change` as it moves and `on_release` when
+    /// let go.
+    Slider {
+        /// What it sets, with its value.
+        label: String,
+        /// Its range.
+        range: std::ops::RangeInclusive<f32>,
+        /// Its value.
+        value: f32,
+        /// The message for a new value.
+        on_change: fn(f32) -> Message,
+        /// The message when released.
+        on_release: Message,
+    },
 }
 
 impl Entry {
@@ -51,6 +67,21 @@ pub(crate) fn dropdown<'a>(entries: Vec<Entry>) -> Element<'a, Message> {
             .style(theme::flat)
             .into(),
         Entry::Separator => container(rule::horizontal(1)).padding([4, 6]).into(),
+        Entry::Slider {
+            label,
+            range,
+            value,
+            on_change,
+            on_release,
+        } => column![
+            text(label).size(14),
+            slider(range, value, on_change)
+                .step(0.5_f32)
+                .on_release(on_release),
+        ]
+        .spacing(4)
+        .padding([4, 10])
+        .into(),
     });
     container(column(lines).spacing(1))
         .padding(4)

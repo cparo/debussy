@@ -4,6 +4,7 @@ use audio_buffers::Layout;
 
 use crate::error::Error;
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
+use crate::tempo::Tempo;
 use crate::types::{ClipId, Source, TrackId};
 
 /// A stretch of a source placed on the timeline. All times are frames at the project rate.
@@ -118,7 +119,8 @@ impl Track {
     }
 }
 
-/// The whole editable state of a project: its tracks, in display order, and its routing.
+/// The whole editable state of a project: its tracks, in display order, its routing, and its
+/// tempo and meter.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
     /// The tracks, top of the arrangement first.
@@ -130,6 +132,8 @@ pub struct State {
     /// Where the user put the project output's L and R on the patch board, as L's height in
     /// logical pixels; `None` leaves it to the automatic layout.
     pub output_y: Option<f32>,
+    /// The tempo and meter of the whole project.
+    pub tempo: Tempo,
 }
 
 impl State {
