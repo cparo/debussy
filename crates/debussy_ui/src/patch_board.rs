@@ -27,6 +27,8 @@ const COLUMN_GAP: f32 = 96.0;
 const MARGIN: f32 = 64.0;
 /// A port circle's radius.
 const PIN_RADIUS: f32 = 10.0;
+/// How far a gutter pin's outer edge, its stroke included, sits from the divider.
+const GUTTER_PIN_INSET: f32 = 4.0;
 /// The L and R output circles' radius.
 const OUTPUT_RADIUS: f32 = 18.0;
 /// How far the output circles sit inside the board's right edge, to their centres.
@@ -638,9 +640,15 @@ impl Program<Message> for BoardView {
     }
 }
 
-/// Draws the port gutter: a pin centred on each lane, with a stub to the board. Pressing a pin
-/// starts a wire from it.
+/// Draws the port gutter on the board's colour: a pin on each lane near the divider, with a stub
+/// to the board. Pressing a pin starts a wire from it.
 pub struct GutterView(pub Vec<(Pin, f32)>);
+
+/// The x of a gutter pin's centre: its outer edge, stroke included, sits [`GUTTER_PIN_INSET`] from
+/// the divider.
+fn gutter_pin_x() -> f32 {
+    GUTTER_PIN_INSET + WIRE_WIDTH / 2.0 + PIN_RADIUS
+}
 
 impl Program<Message> for GutterView {
     type State = ();
@@ -656,10 +664,9 @@ impl Program<Message> for GutterView {
             return None;
         };
         let at = cursor.position_in(bounds)?;
-        let centre = Point::new(bounds.width / 2.0, 0.0);
         self.0
             .iter()
-            .find(|(_, y)| Point::new(centre.x, *y).distance(at) <= PIN_RADIUS + 3.0)
+            .find(|(_, y)| Point::new(gutter_pin_x(), *y).distance(at) <= PIN_RADIUS + 3.0)
             .map(|(pin, _)| canvas::Action::publish(Message::StartWire(*pin)).and_capture())
     }
 
@@ -673,8 +680,8 @@ impl Program<Message> for GutterView {
     ) -> Vec<Geometry> {
         let t = tokens(tone_of(theme));
         let mut frame = Frame::new(renderer, bounds.size());
-        frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.chrome);
-        let x = bounds.width / 2.0;
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
+        let x = gutter_pin_x();
         for &(_, y) in &self.0 {
             frame.fill_rectangle(
                 Point::new(x, y - WIRE_WIDTH / 2.0),
@@ -695,7 +702,7 @@ impl Program<Message> for GutterView {
         let over = cursor.position_in(bounds).is_some_and(|at| {
             self.0
                 .iter()
-                .any(|(_, y)| Point::new(bounds.width / 2.0, *y).distance(at) <= PIN_RADIUS + 3.0)
+                .any(|(_, y)| Point::new(gutter_pin_x(), *y).distance(at) <= PIN_RADIUS + 3.0)
         });
         if over {
             mouse::Interaction::Crosshair

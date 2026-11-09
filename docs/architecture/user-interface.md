@@ -52,7 +52,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 The patch board draws the routing; it pans horizontally with its own scrollbar when wider than
 its pane, is never narrower than its pane, and does not zoom.
 
-- The gutter holds one port per lane, centred on the lane.
+- The gutter is drawn in the board's colour and holds one port per lane, centred vertically on
+  the lane with its left edge 4 pixels from the divider.
 - Every wire is mono and orange. A stereo port is drawn as two circles, left above right; a
   connection that names a side joins that circle, and a whole-port connection is drawn as a wire
   per side.
