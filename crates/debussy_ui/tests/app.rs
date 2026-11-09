@@ -593,8 +593,9 @@ fn test_spectrogram_display_reads_spectra_per_channel() -> Result<(), Box<dyn Er
     assert_eq!(app.display(), debussy_ui::Display::Spectrogram);
     let reads = calls.borrow().spectrogram.clone();
     assert_eq!(reads.len(), 1);
-    // Spectrogram columns are four waveform columns wide.
-    assert_eq!(reads[0].2, 4 * app.samples_per_column());
+    // Each spectrogram column spans LANE_COLUMNS / SPECTRUM_COLUMNS waveform columns.
+    let ratio = (debussy_ui::LANE_COLUMNS / debussy_ui::SPECTRUM_COLUMNS) as u64;
+    assert_eq!(reads[0].2, ratio * app.samples_per_column());
     let _ = app.view();
     Ok(())
 }
@@ -606,6 +607,19 @@ fn test_tone_toggles_and_follows_the_system() -> Result<(), Box<dyn Error>> {
     assert_eq!(app.tone(), debussy_ui::Tone::Light);
     app.update(Message::ToggleTone);
     assert_eq!(app.tone(), debussy_ui::Tone::Dark);
+    let _ = app.view();
+    Ok(())
+}
+
+#[test]
+fn test_rescaled_sets_scale_factor_and_ignores_nonsense() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    assert_eq!(app.scale_factor(), 1.0);
+    app.update(Message::Rescaled(2.0));
+    assert_eq!(app.scale_factor(), 2.0);
+    app.update(Message::Rescaled(0.0));
+    app.update(Message::Rescaled(f32::NAN));
+    assert_eq!(app.scale_factor(), 2.0);
     let _ = app.view();
     Ok(())
 }

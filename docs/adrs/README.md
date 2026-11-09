@@ -91,4 +91,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0065](0065-zooms-finer-than-the-waveform-summaries-are-drawn.md) | Zooms finer than the waveform summaries are drawn as a time-in-level trace, normalised per column through a square root | Accepted | [Waveform summaries](../architecture/analysis.md#waveform-summaries) |
 | [ADR-0066](0066-zoom-out-stops-at-an-exact-fit-of-the-project.md) | Zoom out stops at an exact fit of the project | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0067](0067-the-project-is-saved-after-every-edit.md) | The project is saved after every edit | Accepted | [Saving](../architecture/project.md#saving) |
+| [ADR-0068](0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md) | Lanes are rasterised in memory and blurred with a Gaussian, drawn through iced's image support | Accepted | [Layout](../architecture/user-interface.md#layout) |
 

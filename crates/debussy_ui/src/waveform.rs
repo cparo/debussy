@@ -2,16 +2,19 @@
 //! per column from the waveform summaries or, at zooms finer than those, the audio itself drawn
 //! as a time-in-level trace (`docs/architecture/analysis.md` "Waveform summaries"), or a
 //! spectrum per coarser column computed from the audio ("Spectrograms") — and the canvas that
-//! draws a lane, seeks on a click and pans on a sideways scroll.
+//! draws a lane — into a [`Raster`] at the display's scale, blurred — seeks on a click and pans
+//! on a sideways scroll.
 
 use std::cell::Cell;
 
 use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
+use iced::widget::image;
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{Clip, Source, Track};
 
 use crate::app::Message;
+use crate::raster::Raster;
 use crate::services::Services;
 use crate::theme::{AUDIO, CURSOR, mix, tokens, tone_of};
 
@@ -19,10 +22,10 @@ use crate::theme::{AUDIO, CURSOR, mix, tokens, tone_of};
 pub const LANE_COLUMNS: usize = 1024;
 
 /// Spectrogram columns per lane: each spans `LANE_COLUMNS / SPECTRUM_COLUMNS` waveform columns.
-pub const SPECTRUM_COLUMNS: usize = 256;
+pub const SPECTRUM_COLUMNS: usize = 512;
 
 /// Frequency bands per spectrogram column, log-spaced from the lowest bin to the highest.
-pub const SPECTRUM_BANDS: usize = 64;
+pub const SPECTRUM_BANDS: usize = 192;
 
 /// The finest zoom: frames per waveform column. Below the summaries' smallest bucket, columns
 /// are summarised from the audio itself.
@@ -34,6 +37,9 @@ const TRACE_LEVELS: f32 = 32.0;
 
 /// The level drawn as the lane's background colour, in dB.
 const SPECTRUM_FLOOR_DB: f32 = -96.0;
+
+/// The blur over each lane, in physical pixels: the Gaussian's standard deviation.
+const BLUR_SIGMA: f32 = 0.5;
 
 /// One band's level in dB per spectrogram column.
 pub type Spectrum = [f32; SPECTRUM_BANDS];
@@ -218,11 +224,12 @@ pub fn lanes(
         .collect()
 }
 
-/// The canvas state of a lane: its drawing, kept until the lanes change.
+/// The canvas state of a lane: its drawing, kept until the lanes or the display scale change.
 #[derive(Default)]
 pub struct LaneState {
     cache: Cache,
     generation: Cell<Option<u64>>,
+    scale: Cell<Option<f32>>,
 }
 
 /// Draws a lane with the cursor over it; a click seeks there and a sideways scroll pans.
@@ -237,6 +244,8 @@ pub struct LaneView<'a> {
     pub start: u64,
     /// The frames shown across the lane's width.
     pub span: u64,
+    /// The display's physical pixels per logical pixel.
+    pub scale: f32,
 }
 
 impl Program<Message> for LaneView<'_> {
@@ -281,20 +290,31 @@ impl Program<Message> for LaneView<'_> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        if state.generation.get() != Some(self.generation) {
+        if state.generation.get() != Some(self.generation) || state.scale.get() != Some(self.scale)
+        {
             state.cache.clear();
             state.generation.set(Some(self.generation));
+            state.scale.set(Some(self.scale));
         }
         let background = tokens(tone_of(theme)).lane;
-        let lane = state.cache.draw(renderer, bounds.size(), |frame| {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), background);
+        let size = bounds.size();
+        let lane = state.cache.draw(renderer, size, |frame| {
+            let mut raster = Raster::new(size.width, size.height, self.scale);
+            raster.fill_rect(0.0, 0.0, size.width, size.height, background);
             if !self.lane.spectrum.is_empty() {
-                draw_spectrum(frame, self.lane, bounds.size(), background);
+                draw_spectrum(&mut raster, self.lane, size, background);
             } else if !self.lane.trace.is_empty() {
-                draw_trace(frame, self.lane, bounds.size());
+                draw_trace(&mut raster, self.lane, size);
             } else {
-                draw_waveform(frame, self.lane, bounds.size());
+                draw_waveform(&mut raster, self.lane, size);
             }
+            raster.blur(BLUR_SIGMA);
+            let (width, height) = (raster.width() as u32, raster.height() as u32);
+            let handle = image::Handle::from_rgba(width, height, raster.into_rgba8());
+            frame.draw_image(
+                Rectangle::new(Point::ORIGIN, size),
+                canvas::Image::new(handle).filter_method(image::FilterMethod::Nearest),
+            );
         });
         let mut geometry = vec![lane];
         if let Some(at) = self.cursor {
@@ -324,16 +344,12 @@ impl Program<Message> for LaneView<'_> {
 }
 
 /// The peak outline in the audio colour, the RMS body darker, centred.
-fn draw_waveform(frame: &mut Frame, lane: &Lane, size: Size) {
+fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size) {
     let mid = size.height / 2.0;
     let width = size.width / LANE_COLUMNS as f32;
     let body = mix(AUDIO, iced::Color::BLACK, 0.35);
     // The centre line, where there is no audio.
-    frame.fill_rectangle(
-        Point::new(0.0, mid - 0.5),
-        Size::new(size.width, 1.0),
-        AUDIO,
-    );
+    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, AUDIO);
     for (i, bucket) in lane.columns.iter().enumerate() {
         let Some(b) = bucket else {
             continue;
@@ -341,17 +357,9 @@ fn draw_waveform(frame: &mut Frame, lane: &Lane, size: Size) {
         let x = i as f32 * width;
         let top = mid - b.max.clamp(-1.0, 1.0) * mid;
         let bottom = mid - b.min.clamp(-1.0, 1.0) * mid;
-        frame.fill_rectangle(
-            Point::new(x, top),
-            Size::new(width.max(1.0), (bottom - top).max(1.0)),
-            AUDIO,
-        );
+        raster.fill_rect(x, top, width.max(1.0), (bottom - top).max(1.0), AUDIO);
         let rms = b.rms.clamp(0.0, 1.0) * mid;
-        frame.fill_rectangle(
-            Point::new(x, mid - rms),
-            Size::new(width.max(1.0), (2.0 * rms).max(1.0)),
-            body,
-        );
+        raster.fill_rect(x, mid - rms, width.max(1.0), (2.0 * rms).max(1.0), body);
     }
 }
 
@@ -359,14 +367,10 @@ fn draw_waveform(frame: &mut Frame, lane: &Lane, size: Size) {
 /// the column's most-visited pixel and through a square root, over the centre line
 /// (`docs/architecture/analysis.md` "Waveform summaries"). Stretches where no clip plays are
 /// left blank.
-fn draw_trace(frame: &mut Frame, lane: &Lane, size: Size) {
+fn draw_trace(raster: &mut Raster, lane: &Lane, size: Size) {
     let mid = size.height / 2.0;
     let width = size.width / LANE_COLUMNS as f32;
-    frame.fill_rectangle(
-        Point::new(0.0, mid - 0.5),
-        Size::new(size.width, 1.0),
-        AUDIO,
-    );
+    raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, AUDIO);
     let rows = (size.height.round() as usize).max(1);
     let row_height = size.height / rows as f32;
     let spc = lane.samples_per_column.max(1) as usize;
@@ -417,9 +421,11 @@ fn draw_trace(frame: &mut Frame, lane: &Lane, size: Size) {
                 end += 1;
             }
             if level > 0.0 {
-                frame.fill_rectangle(
-                    Point::new(x, row as f32 * row_height),
-                    Size::new(width.max(1.0), (end - row) as f32 * row_height),
+                raster.fill_rect(
+                    x,
+                    row as f32 * row_height,
+                    width.max(1.0),
+                    (end - row) as f32 * row_height,
                     iced::Color {
                         a: AUDIO.a * level / TRACE_LEVELS,
                         ..AUDIO
@@ -433,7 +439,7 @@ fn draw_trace(frame: &mut Frame, lane: &Lane, size: Size) {
 
 /// Bands from the bottom (lowest) up, from the background at the floor through the audio
 /// colour to the far end from the background (near white on dark, near black on light) at 0 dB.
-fn draw_spectrum(frame: &mut Frame, lane: &Lane, size: Size, background: iced::Color) {
+fn draw_spectrum(raster: &mut Raster, lane: &Lane, size: Size, background: iced::Color) {
     let width = size.width / lane.spectrum.len().max(1) as f32;
     let height = size.height / SPECTRUM_BANDS as f32;
     let light = background.r + background.g + background.b > 1.5;
@@ -456,9 +462,11 @@ fn draw_spectrum(frame: &mut Frame, lane: &Lane, size: Size, background: iced::C
             } else {
                 mix(AUDIO, hot, (t - 0.7) / 0.3)
             };
-            frame.fill_rectangle(
-                Point::new(i as f32 * width, size.height - (band + 1) as f32 * height),
-                Size::new(width + 0.5, height + 0.5),
+            raster.fill_rect(
+                i as f32 * width,
+                size.height - (band + 1) as f32 * height,
+                width + 0.5,
+                height + 0.5,
                 color,
             );
         }
