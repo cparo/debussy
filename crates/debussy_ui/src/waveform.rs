@@ -366,22 +366,34 @@ impl Program<Message> for CursorView {
 }
 
 /// The peak outline in the audio colour, the RMS body darker, centred.
+///
+/// Each column spans whole physical pixels, at least one: neighbours tile without antialiased
+/// seams and, when the lane is narrower than [`LANE_COLUMNS`] pixels, overlap. Every peak is
+/// drawn before any body, so no column's peak covers its neighbour's body.
 fn draw_waveform(raster: &mut Raster, lane: &Lane, size: Size) {
     let mid = size.height / 2.0;
-    let width = size.width / LANE_COLUMNS as f32;
+    let scale = raster.scale();
+    // Physical pixels per column.
+    let width = size.width * scale / LANE_COLUMNS as f32;
     let body = mix(AUDIO, iced::Color::BLACK, 0.35);
     // The centre line, where there is no audio.
     raster.fill_rect(0.0, mid - 0.5, size.width, 1.0, AUDIO);
-    for (i, bucket) in lane.columns.iter().enumerate() {
-        let Some(b) = bucket else {
-            continue;
-        };
-        let x = i as f32 * width;
+    // Each column's left edge and width in logical pixels, snapped to the physical grid.
+    let buckets = || {
+        lane.columns.iter().enumerate().filter_map(move |(i, b)| {
+            let left = (i as f32 * width).floor();
+            let right = ((i + 1) as f32 * width).floor().max(left + 1.0);
+            b.map(|b| (left / scale, (right - left) / scale, b))
+        })
+    };
+    for (x, w, b) in buckets() {
         let top = mid - b.max.clamp(-1.0, 1.0) * mid;
         let bottom = mid - b.min.clamp(-1.0, 1.0) * mid;
-        raster.fill_rect(x, top, width.max(1.0), (bottom - top).max(1.0), AUDIO);
+        raster.fill_rect(x, top, w, (bottom - top).max(1.0), AUDIO);
+    }
+    for (x, w, b) in buckets() {
         let rms = b.rms.clamp(0.0, 1.0) * mid;
-        raster.fill_rect(x, mid - rms, width.max(1.0), (2.0 * rms).max(1.0), body);
+        raster.fill_rect(x, mid - rms, w, (2.0 * rms).max(1.0), body);
     }
 }
 
@@ -498,6 +510,37 @@ fn draw_spectrum(raster: &mut Raster, lane: &Lane, size: Size, background: iced:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_draw_waveform_rms_body_unbroken_at_any_width() {
+        let bucket = Bucket {
+            min: -0.8,
+            max: 0.8,
+            rms: 0.4,
+        };
+        let lane = Lane {
+            columns: vec![Some(bucket); LANE_COLUMNS],
+            samples_per_column: 512,
+            ..Lane::default()
+        };
+        let body = mix(AUDIO, iced::Color::BLACK, 0.35).into_rgba8();
+        // Narrower than the columns (overlapping), and wider at a fractional width (tiling).
+        for width in [600.0, 1500.0] {
+            for scale in [1.0, 2.0] {
+                let size = Size::new(width, 100.0);
+                let mut raster = Raster::new(size.width, size.height, scale);
+                draw_waveform(&mut raster, &lane, size);
+                let pixels = raster.width();
+                let bytes = raster.into_rgba8();
+                // A row inside the RMS body, away from the centre line.
+                let row = (40.0 * scale) as usize;
+                for x in 0..pixels {
+                    let at = (row * pixels + x) * 4;
+                    assert_eq!(&bytes[at..at + 4], &body, "{width} at {scale}x, pixel {x}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_spectrum_bands_takes_the_loudest_bin_of_each_band() {

@@ -46,6 +46,11 @@ impl Raster {
         self.height
     }
 
+    /// Physical pixels per logical pixel.
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
     /// Paints `color` over the rectangle at (`x`, `y`) of `w` by `h` logical pixels. A pixel the
     /// rectangle only partly covers is painted at that fraction of the colour's alpha.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
