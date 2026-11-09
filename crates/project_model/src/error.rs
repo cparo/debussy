@@ -29,6 +29,17 @@ pub enum Error {
     /// A clip's source is mono on a stereo track, or the reverse.
     #[error("the clip's channel layout does not match the track's")]
     LayoutMismatch,
+    /// A range of no frames: its start is not below its end.
+    #[error("a range must be at least one frame long")]
+    EmptyRange,
+    /// A paste whose lanes run past the last track.
+    #[error("the paste needs {needed} tracks from there but {available} remain")]
+    NotEnoughTracks {
+        /// The lanes in the excerpt.
+        needed: usize,
+        /// The tracks from the target track down, inclusive.
+        available: usize,
+    },
     /// A clip of no frames.
     #[error("a clip must be at least one frame long")]
     EmptyClip,

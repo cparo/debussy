@@ -99,6 +99,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Audio device I/O](platform.md#audio-device-io)
 - [Project Model](project.md)
   - [Editing model](project.md#editing-model)
+  - [Range edits](project.md#range-edits)
   - [Undo history](project.md#undo-history)
   - [Named versions](project.md#named-versions)
   - [Routing](project.md#routing)

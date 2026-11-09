@@ -7,6 +7,7 @@ use audio_buffers::Layout;
 
 use crate::edit::Edit;
 use crate::error::Error;
+use crate::range::{self, Excerpt, Range};
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side};
 use crate::state::{Clip, State, Track};
 use crate::types::{ClipId, TrackId};
@@ -489,6 +490,77 @@ impl Session {
                 clip,
             },
         ]))
+    }
+
+    /// The parts of the clips on `tracks` inside `range`, for pasting later. Not an edit.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`].
+    pub fn copy_range(&self, tracks: &[TrackId], range: Range) -> Result<Excerpt, Error> {
+        range::excerpt(&self.state, tracks, range)
+    }
+
+    /// Removes everything inside `range` on `tracks`, splitting clips at its edges and leaving a
+    /// gap, as one step; no step if nothing lies there.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`].
+    pub fn delete_range(&mut self, tracks: &[TrackId], range: Range) -> Result<(), Error> {
+        let mut next = self.next_id;
+        let edits = range::delete_edits(&self.state, tracks, range, || {
+            let id = ClipId(next);
+            next += 1;
+            id
+        })?;
+        self.apply_new_ids(edits, next)
+    }
+
+    /// Copies `range` on `tracks`, then deletes it as [`Session::delete_range`] does.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`].
+    pub fn cut_range(&mut self, tracks: &[TrackId], range: Range) -> Result<Excerpt, Error> {
+        let excerpt = self.copy_range(tracks, range)?;
+        self.delete_range(tracks, range)?;
+        Ok(excerpt)
+    }
+
+    /// Pastes `excerpt` with its start at `position`: its lanes go in order onto `track` and the
+    /// tracks below it, each clip on top with a new id, as one step; no step if it holds no
+    /// clips. Returns the new clips' ids.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], [`Error::NotEnoughTracks`], [`Error::LayoutMismatch`], or
+    /// [`Error::ClipOutsideTimeline`]; nothing is pasted then.
+    pub fn paste(
+        &mut self,
+        excerpt: &Excerpt,
+        track: TrackId,
+        position: u64,
+    ) -> Result<Vec<ClipId>, Error> {
+        let mut next = self.next_id;
+        let (edits, ids) = range::paste_edits(&self.state, excerpt, track, position, || {
+            let id = ClipId(next);
+            next += 1;
+            id
+        })?;
+        self.apply_new_ids(edits, next)?;
+        Ok(ids)
+    }
+
+    /// Applies `edits` as one step, if there are any, and on success takes the ids below
+    /// `next_id` they used.
+    fn apply_new_ids(&mut self, edits: Vec<Edit>, next_id: u64) -> Result<(), Error> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        self.apply(Edit::Batch(edits))?;
+        self.next_id = next_id;
+        Ok(())
     }
 
     /// Saves the current state as a named version. Not an edit: it changes no state.
