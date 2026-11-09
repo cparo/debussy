@@ -16,12 +16,17 @@
 //! [`Session`] keeps the undo and redo histories, one step per gesture, and the named versions;
 //! restoring a version is itself an undoable step.
 //!
+//! Range edits (`docs/architecture/project.md` "Range edits") cut, copy or delete a [`Range`] of
+//! frames across tracks, splitting clips at its edges, and paste the [`Excerpt`] a cut or copy
+//! returns.
+//!
 //! # Modules
 //!
 //! - `types`: [`TrackId`], [`ClipId`], [`AudioFile`], [`Source`].
 //! - `state`: [`State`], [`Track`], [`Clip`].
 //! - `routing`: [`Node`], [`NodeKind`], [`Connection`], [`Endpoint`] and their ids.
 //! - `edit`: [`Edit`].
+//! - `range`: [`Range`], [`Excerpt`], [`Lane`].
 //! - `session`: [`Session`].
 //! - `error`: [`Error`].
 
@@ -29,6 +34,7 @@
 
 mod edit;
 mod error;
+mod range;
 mod routing;
 mod session;
 mod state;
@@ -36,6 +42,7 @@ mod types;
 
 pub use edit::Edit;
 pub use error::Error;
+pub use range::{Excerpt, Lane, Range};
 pub use routing::{
     Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, Node, NodeId, NodeKind, Position,
     Side,
