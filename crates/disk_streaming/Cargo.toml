@@ -1,6 +1,6 @@
 [package]
 name = "disk_streaming"
-description = "Read-ahead of project audio from disk into buffers for the real-time engine."
+description = "Read-ahead of project audio from disk for the real-time engine, and writing recorded takes to disk."
 version = "0.0.0"
 publish = false
 edition.workspace = true

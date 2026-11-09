@@ -11,6 +11,10 @@
 //! - the `signal_graph` [`Runner`](signal_graph::Runner) and the ids of the track sources and the
 //!   output sink.
 //!
+//! For recording, the layer above arms tracks with an [`ArmedTrack`] each, whose
+//! [`TakeSink`]s take the captured input (normally a disk recorder), and places each finished
+//! take where [`TakeInfo::placement`] says.
+//!
 //! [`Engine::new`] returns the control side, [`Engine`], and the real-time side, [`Processor`].
 //! Offline render ([`render`]) runs the same per-block step over [`RenderFeed`]s, which call the
 //! clip renderer directly, so it produces the same samples as playback.
@@ -19,6 +23,7 @@
 //!
 //! - `timeline`: [`ChannelClip`], [`ClipAudio`] and [`TrackRenderer`], a track channel's clips
 //!   mixed into one signal.
+//! - `capture`: [`ArmedTrack`], [`TakeSink`], [`TakeInfo`] and the device input.
 //! - `feed`: [`TrackFeed`], [`TrackFeeds`], [`Streams`] and [`RenderFeed`].
 //! - `block`: the per-block step shared by playback and render.
 //! - `processor`: [`Processor`], the real-time side.
@@ -29,6 +34,7 @@
 #![forbid(unsafe_code)]
 
 mod block;
+mod capture;
 mod engine;
 mod error;
 mod feed;
@@ -36,6 +42,7 @@ mod processor;
 mod render;
 mod timeline;
 
+pub use capture::{ArmedTrack, MAX_INPUTS, TakeInfo, TakeSink};
 pub use engine::{Engine, TransportState};
 pub use error::Error;
 pub use feed::{RenderFeed, Streams, TrackFeed, TrackFeeds};

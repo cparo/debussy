@@ -5,10 +5,10 @@
 
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use audio_buffers::Layout;
-use audio_engine::{ChannelClip, ClipAudio, Streams, TrackFeed, TrackRenderer};
+use audio_engine::{ChannelClip, ClipAudio, Streams, TakeSink, TrackFeed, TrackRenderer};
 use signal_graph::{Config, Graph, Inputs, Node, NodeId, Outputs, Port, Runner};
 
 pub const RATE: u32 = 48_000;
@@ -209,4 +209,59 @@ pub fn graph(latency: usize) -> Result<TestGraph, Box<dyn Error>> {
         mono,
         output,
     })
+}
+
+/// What a [`MemorySink`] has captured, read by the test.
+pub struct SinkStore {
+    samples: Box<[AtomicU32]>,
+    len: AtomicUsize,
+    ended: AtomicBool,
+}
+
+impl SinkStore {
+    /// The samples captured so far.
+    pub fn samples(&self) -> Vec<f32> {
+        self.samples[..self.len.load(Ordering::SeqCst)]
+            .iter()
+            .map(|s| f32::from_bits(s.load(Ordering::SeqCst)))
+            .collect()
+    }
+
+    /// Whether the take has ended.
+    pub fn ended(&self) -> bool {
+        self.ended.load(Ordering::SeqCst)
+    }
+}
+
+/// A take sink holding up to a fixed number of samples in memory. Writing allocates nothing;
+/// samples past its room are dropped.
+pub struct MemorySink(pub Arc<SinkStore>);
+
+/// A [`MemorySink`] with room for `capacity` samples, and the test's handle on what it captures.
+pub fn memory_sink(capacity: usize) -> (Box<dyn TakeSink>, Arc<SinkStore>) {
+    let store = Arc::new(SinkStore {
+        samples: (0..capacity).map(|_| AtomicU32::new(0)).collect(),
+        len: AtomicUsize::new(0),
+        ended: AtomicBool::new(false),
+    });
+    (Box::new(MemorySink(Arc::clone(&store))), store)
+}
+
+impl TakeSink for MemorySink {
+    fn write(&mut self, samples: &[f32]) -> usize {
+        if self.0.ended() {
+            return 0;
+        }
+        let len = self.0.len.load(Ordering::SeqCst);
+        let n = samples.len().min(self.0.samples.len() - len);
+        for (slot, sample) in self.0.samples[len..len + n].iter().zip(samples) {
+            slot.store(sample.to_bits(), Ordering::SeqCst);
+        }
+        self.0.len.store(len + n, Ordering::SeqCst);
+        n
+    }
+
+    fn end(&mut self) {
+        self.0.ended.store(true, Ordering::SeqCst);
+    }
 }
