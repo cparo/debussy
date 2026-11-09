@@ -76,7 +76,7 @@ const LIGHT: Tokens = Tokens {
     face_text: Color::BLACK,
     line: Color::from_rgb(0.55, 0.55, 0.55),
     channel: Color::from_rgb(0.62, 0.62, 0.62),
-    audio: Color::from_rgb8(0x76, 0xA1, 0xCC),
+    audio: Color::from_rgb8(0x99, 0xBB, 0xFF),
     audio_text: Color::BLACK,
 };
 
