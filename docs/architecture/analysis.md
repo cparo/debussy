@@ -5,7 +5,9 @@
 Each stored mono audio file has a waveform summary: a pyramid of levels of buckets, each bucket
 holding the minimum, maximum and RMS of its samples. Level 0 has 64 samples per bucket and each
 level above has four times as many, up to the first level with a single bucket; the last bucket
-of a level may be partial. Views zoomed in past 64 samples per pixel read the audio itself.
+of a level may be partial. Views zoomed in past 64 samples per pixel read the audio itself;
+there, each column also takes in the first sample of the next column, so the outline is continuous
+([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
 
 A summary is built in one streaming pass in memory independent of the file's length, and read
 back a range at a time ([ADR-0045](../adrs/0045-waveform-summaries-and-spectrogram-overviews-are.md)).

@@ -273,10 +273,10 @@ fn test_transport_loads_feeds_once_and_follows_the_engine() -> Result<(), Box<dy
 #[test]
 fn test_zoom_and_lanes_follow_the_clips() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, calls, _) = app()?;
-    for _ in 0..40 {
+    // Eight steps in from 1024 frames per column: the summaries' finest bucket.
+    for _ in 0..8 {
         app.update(Message::ZoomIn);
     }
-    // Clamped at the summaries' finest bucket.
     let last = calls
         .borrow()
         .waveform
@@ -404,6 +404,27 @@ fn test_stop_shows_the_return_point_before_the_real_time_side_runs() -> Result<(
     app.update(Message::Stop);
     // The redraw that follows the click reads the playhead before the audio thread runs again.
     assert_eq!(app.engine().playhead(), 9600);
+    Ok(())
+}
+
+#[test]
+fn test_zoom_in_stops_at_two_frames_per_column() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    for _ in 0..40 {
+        app.update(Message::ZoomIn);
+    }
+    assert_eq!(app.samples_per_column(), 2);
+    // The clip starts at frame 4096, past the lane's 2048 frames; seeking into it brings it
+    // into view.
+    app.update(Message::Seek(5000));
+    let last = calls
+        .borrow()
+        .waveform
+        .last()
+        .cloned()
+        .ok_or("no waveform reads")?;
+    assert_eq!(last.0, "vox.wav");
+    assert_eq!(last.2, 2);
     Ok(())
 }
 
