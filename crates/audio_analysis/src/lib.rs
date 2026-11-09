@@ -30,4 +30,6 @@ pub use spectrogram::{
     BINS, FLOOR_DB, FRAME_SIZE, HOP, OVERVIEW_COLUMN, OverviewReader, OverviewWriter, Spectrogram,
     overview_db,
 };
-pub use waveform::{BASE_BUCKET, Bucket, LEVEL_FACTOR, WaveformReader, WaveformWriter};
+pub use waveform::{
+    BASE_BUCKET, Bucket, LEVEL_FACTOR, WaveformReader, WaveformWriter, sample_columns,
+};

@@ -85,4 +85,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0059](0059-the-window-imports-exports-and-picks-one-audio.md) | The window imports, exports and picks one audio device, remembered in app settings | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 | [ADR-0060](0060-the-window-is-laid-out-as-top-bar-track-pane.md) | The window is laid out as top bar, track pane beside the patch board, and bottom bar, with seeking that sets the return point | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0061](0061-node-positions-and-the-outputs-height-are-saved-as.md) | Node positions and the outputs' height are saved as optional fields, and the patch board edits the routing | Accepted | [Saved format](../architecture/project.md#saved-format) |
+| [ADR-0062](0062-zooms-finer-than-the-waveform-summaries-are-drawn.md) | Zooms finer than the waveform summaries are drawn from the audio on every refresh, with no tile cache | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 

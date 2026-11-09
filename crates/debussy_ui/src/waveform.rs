@@ -6,7 +6,7 @@
 
 use std::cell::Cell;
 
-use audio_analysis::{BASE_BUCKET, Bucket};
+use audio_analysis::Bucket;
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{Clip, Source, Track};
@@ -24,8 +24,9 @@ pub const SPECTRUM_COLUMNS: usize = 256;
 /// Frequency bands per spectrogram column, log-spaced from the lowest bin to the highest.
 pub const SPECTRUM_BANDS: usize = 64;
 
-/// The coarsest zoom: no finer than the summaries' smallest bucket.
-pub const MIN_SAMPLES_PER_COLUMN: u64 = BASE_BUCKET;
+/// The finest zoom: frames per waveform column. Below the summaries' smallest bucket, columns
+/// are summarised from the audio itself.
+pub const MIN_SAMPLES_PER_COLUMN: u64 = 2;
 
 /// The level drawn as the lane's background colour, in dB.
 const SPECTRUM_FLOOR_DB: f32 = -96.0;
