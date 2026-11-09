@@ -136,10 +136,10 @@ disabled while the view covers the project
 ([ADR-0066](../adrs/0066-zoom-out-stops-at-an-exact-fit-of-the-project.md)). A mostly sideways
 two-finger scroll over a lane pans the view; there is no gesture zoom
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md),
-[ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)). Panning forward
-and zooming out stop with the later of the project's end and the playhead at the lane's right
-edge; a view already past that is not moved back by panning forward, and seeking and playback
-paging are not bounded ([ADR-0069](../adrs/0069-panning-stops-at-the-later-of-the-project-s-end.md)).
+[ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)). Panning forward,
+zooming out, playback paging and a seek's recentring all stop with the scroll bound, the later of
+the project's end and the playhead, as the lane's last frame; a view already past that is not
+moved back by any of them ([ADR-0077](../adrs/0077-every-view-move-stops-at-the-scroll-bound.md)).
 
 ## Gestures
 
