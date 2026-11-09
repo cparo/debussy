@@ -87,7 +87,11 @@ fn button_at<'a>(
     let face_button = button(content)
         .on_press_maybe(message)
         .padding([vertical, 12.0])
-        .style(theme::tool(selected, place));
+        .style(theme::tool_style(
+            selected,
+            place,
+            matches!(face, Face::Label(_)),
+        ));
     match face {
         Face::Label(_) => face_button.into(),
         Face::Icon(icon) => tooltip(
