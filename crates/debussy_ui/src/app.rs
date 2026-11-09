@@ -105,8 +105,6 @@ pub enum Message {
     Undo,
     /// Redo the latest undone step.
     Redo,
-    /// Save the project.
-    Save,
     /// Import files as new tracks, through a file dialog.
     Import,
     /// Import files into this track, through a file dialog: each a clip from the playhead on.
@@ -568,11 +566,6 @@ impl App {
             Message::Scrolled(offset) => self.scrolled = offset,
             Message::Split(share) => self.split = share.clamp(MIN_SPLIT, MAX_SPLIT),
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
-            Message::Save => {
-                self.saved_revision = self.session.revision();
-                let result = self.services.save(&self.session);
-                self.report(result);
-            }
             Message::Import => self.import(None),
             Message::ImportInto(track) => self.import(Some(track)),
             Message::AddTrack(layout) => {
