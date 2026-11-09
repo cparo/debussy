@@ -199,7 +199,7 @@ fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
 
 fn block(processor: &mut Processor) -> Result<(), Box<dyn Error>> {
     let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
-    processor.process(&mut l, &mut r)?;
+    processor.process(&[], 0, &mut l, &mut r)?;
     Ok(())
 }
 

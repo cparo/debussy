@@ -3,20 +3,35 @@
 use dsp::FOLD_DOWN_GAIN;
 use signal_graph::{NodeId, Runner};
 
+use crate::capture::{ArmedTrack, Input, replaces_clips};
 use crate::error::Error;
 use crate::feed::TrackFeeds;
 
+/// The live side of a block: armed tracks and the device input. Offline render has none.
+pub(crate) struct Live<'a> {
+    pub(crate) armed: &'a mut [ArmedTrack],
+    pub(crate) input: &'a Input,
+    /// Whether recording: armed tracks without monitor are silent.
+    pub(crate) recording: bool,
+    /// Whether this block's input goes to the armed tracks' takes.
+    pub(crate) capturing: bool,
+}
+
 /// Runs one block of `left.len()` frames: fills each track's source from its feeds (or with
-/// silence unless `playing`), runs the plan, and writes the output sink to `left` and `right`,
-/// folded to mono on both if `mono`. Real-time safe if the feeds are.
+/// silence unless `playing`), puts armed tracks' input in their sources and takes (see
+/// [`Live`]), runs the plan, and writes the output sink to `left` and `right`, folded to mono
+/// on both if `mono`. Real-time safe if the feeds and sinks are.
 ///
 /// # Errors
 ///
-/// [`Error::BufferLength`] or [`Error::Graph`]; the output is then silence.
+/// [`Error::BufferLength`] or [`Error::Graph`]; the output is then silence and nothing is
+/// captured.
+#[allow(clippy::too_many_arguments)] // Each is a separate input of the step; a struct would only rename them.
 pub(crate) fn run(
     runner: &mut Runner,
     output: NodeId,
     tracks: &mut [TrackFeeds],
+    live: Option<&mut Live<'_>>,
     playing: bool,
     mono: bool,
     left: &mut [f32],
@@ -36,7 +51,14 @@ pub(crate) fn run(
         right.fill(0.0);
         return Err(error.into());
     }
+    let (armed, recording): (&[ArmedTrack], bool) = match &live {
+        Some(live) => (live.armed, live.recording),
+        None => (&[], false),
+    };
     for track in tracks.iter_mut() {
+        if replaces_clips(armed, track.source, recording) {
+            continue;
+        }
         let Some(block) = runner.source_mut(track.source) else {
             continue;
         };
@@ -51,6 +73,9 @@ pub(crate) fn run(
                 _ => samples.fill(0.0),
             }
         }
+    }
+    if let Some(live) = live {
+        feed_armed(runner, live, frames);
     }
     runner.process();
     match runner.sink(output) {
@@ -73,6 +98,35 @@ pub(crate) fn run(
         }
     }
     Ok(())
+}
+
+/// Fills armed tracks' sources with their input if monitored, or silence if recording, and
+/// hands the input to their takes if capturing.
+fn feed_armed(runner: &mut Runner, live: &mut Live<'_>, frames: usize) {
+    for track in live.armed.iter_mut() {
+        if live.capturing {
+            for (sink, &channel) in track.sinks.iter_mut().zip(&track.inputs) {
+                sink.write(live.input.channel(channel, frames));
+            }
+        }
+        if !(track.monitor || live.recording) {
+            continue;
+        }
+        let Some(block) = runner.source_mut(track.source) else {
+            continue;
+        };
+        for channel in 0..block.channels() {
+            let Some(samples) = block.channel_mut(channel) else {
+                continue;
+            };
+            match track.inputs.get(channel) {
+                Some(&input) if track.monitor => {
+                    copy_or_silence(samples, live.input.channel(input, frames));
+                }
+                _ => samples.fill(0.0),
+            }
+        }
+    }
 }
 
 /// Copies `from` into `to`, padding with silence.

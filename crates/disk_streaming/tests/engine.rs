@@ -147,7 +147,7 @@ fn test_streamed_playback_matches_offline_render() -> Result<(), Box<dyn Error>>
     let mut right = vec![0.0; BLOCK];
     let mut played = Vec::new();
     for _ in 0..500 {
-        processor.process(&mut left, &mut right)?;
+        processor.process(&[], 0, &mut left, &mut right)?;
         if engine.real_time_state() == TransportState::Playing {
             played.extend(left.iter().zip(&right).map(|(&a, &b)| (a, b)));
             break;
@@ -158,7 +158,7 @@ fn test_streamed_playback_matches_offline_render() -> Result<(), Box<dyn Error>>
     // Let the reader get the whole range ahead (2 s of read-ahead covers it), then play on.
     sleep(Duration::from_millis(500));
     while played.len() < FRAMES {
-        processor.process(&mut left, &mut right)?;
+        processor.process(&[], 0, &mut left, &mut right)?;
         played.extend(left.iter().zip(&right).map(|(&a, &b)| (a, b)));
     }
     assert_eq!(streamer.underruns(0), Some(0));
@@ -205,13 +205,13 @@ fn test_play_after_a_jump_starts_once_the_old_read_ahead_is_full() -> Result<(),
     let mut left = vec![0.0; BLOCK];
     let mut right = vec![0.0; BLOCK];
     // While stopped the reader fills the read-ahead from frame 0.
-    processor.process(&mut left, &mut right)?;
+    processor.process(&[], 0, &mut left, &mut right)?;
     sleep(Duration::from_millis(200));
     engine.locate(20_000, &mut streamer)?;
     engine.play(&mut streamer)?;
     let mut started = false;
     for _ in 0..200 {
-        processor.process(&mut left, &mut right)?;
+        processor.process(&[], 0, &mut left, &mut right)?;
         if engine.real_time_state() == TransportState::Playing {
             started = true;
             break;
