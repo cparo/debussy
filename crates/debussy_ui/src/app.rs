@@ -344,6 +344,11 @@ impl App {
         self.split
     }
 
+    /// Each track's lanes for the visible stretch, top to bottom.
+    pub fn lanes(&self) -> &[(TrackId, Vec<Lane>)] {
+        &self.lanes
+    }
+
     /// Each track's lane centres, top to bottom, from the top of the track pane's contents.
     pub fn lane_centres(&self) -> Vec<(TrackId, Vec<f32>)> {
         let mut top = 0.0;
