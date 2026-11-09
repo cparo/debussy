@@ -53,16 +53,18 @@ const ICON_SIZE: f32 = 16.0;
 const TOOL_TEXT: f32 = 13.0;
 /// The width of the playhead time beside the position bar: room for "00:00:00.000".
 const TIME_WIDTH: f32 = 100.0;
-/// The audio device selector's width in the bottom bar.
-const DEVICE_WIDTH: f32 = 200.0;
 /// The tempo field's width in the bottom bar.
 const TEMPO_WIDTH: f32 = 64.0;
 /// The meter pickers' width each.
 const METER_WIDTH: f32 = 56.0;
-/// Where the click menu opens from the window's left edge: about under the click's ▾.
-const CLICK_MENU_X: f32 = 560.0;
-/// The click menu's height, to open it above the bottom bar.
-const CLICK_MENU_HEIGHT: f32 = 290.0;
+/// Where the click dialog opens from the window's left edge: about over the click button.
+const CLICK_DIALOG_X: f32 = 370.0;
+/// The click dialog's width.
+const CLICK_DIALOG_WIDTH: f32 = 290.0;
+/// The click dialog's height, to open it above the bottom bar.
+const CLICK_DIALOG_HEIGHT: f32 = 390.0;
+/// The height of one item in a dropdown menu, to open the device menu above the bottom bar.
+const MENU_ITEM_HEIGHT: f32 = 27.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
@@ -350,18 +352,13 @@ impl App {
         })
         .width(Fill)
         .height(Length::Fixed(24.0));
-        let (choices, current) = &self.devices;
-        let device = choices
-            .iter()
-            .find(|c| Some(&c.id) == current.as_ref())
-            .cloned();
         let mut bar = row![
             // Changing device is refused while playing, with a notice.
-            pick_list(choices.clone(), device, Message::Device)
-                .on_open(Message::RefreshDevices)
-                .placeholder("No audio device")
-                .text_size(TOOL_TEXT)
-                .width(Length::Fixed(DEVICE_WIDTH)),
+            tool(
+                Face::Icon(Icon::Device),
+                Some(Message::OpenMenu(Menu::Device)),
+                self.menu == Some(Menu::Device)
+            ),
             gap(16.0),
             group(vec![
                 (Face::Label("Mono"), Some(Message::SetMono(true)), mono),
@@ -382,7 +379,11 @@ impl App {
                 ),
             ]),
             gap(16.0),
-            self.click_controls(),
+            tool(
+                Face::Icon(Icon::Click),
+                Some(Message::OpenMenu(Menu::Click)),
+                self.engine().click_on()
+            ),
             gap(16.0),
             position,
             gap(12.0),
@@ -409,43 +410,66 @@ impl App {
             .into()
     }
 
-    /// The click toggle and its ▾ menu, the tempo field and the meter pickers.
-    fn click_controls(&self) -> Element<'_, Message> {
+    /// The click dialog: the click on or off, the tempo and meter, the sound and level, and the
+    /// count-in before recording. Its controls leave it open; a click elsewhere closes it.
+    fn click_dialog(&self) -> Element<'_, Message> {
         let playing = self.engine().is_playing();
         let click_on = self.engine().click_on();
         let tempo = self.session().state().tempo;
+        let preferences = self.click.preferences;
         let tempo_text = self
             .click
             .tempo_text
             .clone()
             .unwrap_or_else(|| format_bpm(tempo.bpm));
         let beats: Vec<u8> = (1..=project_model::tempo::MAX_BEATS_PER_BAR).collect();
+        let label = |s: String| text(s).size(TOOL_TEXT);
+        let line = |name: &'static str, control: Element<'static, Message>| {
+            row![label(name.to_owned()), Space::new().width(Fill), control]
+                .spacing(6)
+                .align_y(Alignment::Center)
+        };
+        let sounds = engine_bridge::ClickSound::ALL
+            .into_iter()
+            .map(|sound| {
+                (
+                    Face::Label(sound.name()),
+                    Some(Message::SetClickSound(sound)),
+                    sound == preferences.sound,
+                )
+            })
+            .collect();
+        let count_ins = COUNT_IN_BARS
+            .into_iter()
+            .map(|bars| {
+                let name = match bars {
+                    0 => "Off",
+                    1 => "1 bar",
+                    _ => "2 bars",
+                };
+                (
+                    Face::Label(name),
+                    Some(Message::SetCountIn(bars)),
+                    bars == self.click.count_in_bars,
+                )
+            })
+            .collect();
         // Changing the tempo or meter is refused while playing, with a notice.
-        row![
-            group(vec![
-                (
-                    Face::Icon(Icon::Click),
-                    Some(Message::SetClick(!click_on)),
-                    click_on
-                ),
-                (
-                    Face::Label("▾"),
-                    Some(Message::OpenMenu(Menu::Click)),
-                    false
-                ),
-            ]),
-            gap(8.0),
+        let tempo_row = row![
             text_input("BPM", &tempo_text)
                 .on_input_maybe((!playing).then_some(Message::TempoText))
                 .on_submit(Message::CommitTempo)
                 .size(TOOL_TEXT)
                 .width(Length::Fixed(TEMPO_WIDTH)),
-            text("BPM").size(TOOL_TEXT),
-            gap(8.0),
+            label("BPM".to_owned()),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+        let meter_row = row![
             pick_list(beats, Some(tempo.beats_per_bar), Message::SetBeatsPerBar)
                 .text_size(TOOL_TEXT)
                 .width(Length::Fixed(METER_WIDTH)),
-            text("/").size(TOOL_TEXT),
+            label("/".to_owned()),
             pick_list(
                 project_model::tempo::BEAT_UNITS.to_vec(),
                 Some(tempo.beat_unit),
@@ -454,9 +478,70 @@ impl App {
             .text_size(TOOL_TEXT)
             .width(Length::Fixed(METER_WIDTH)),
         ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
+        .spacing(6)
+        .align_y(Alignment::Center);
+        let body = column![
+            line(
+                "Click",
+                group(vec![
+                    (
+                        Face::Label("Off"),
+                        Some(Message::SetClick(false)),
+                        !click_on
+                    ),
+                    (Face::Label("On"), Some(Message::SetClick(true)), click_on),
+                ])
+            ),
+            line("Tempo", tempo_row.into()),
+            line("Meter", meter_row.into()),
+            column![label("Sound".to_owned()), group(sounds)].spacing(6),
+            column![
+                label(format!("Level {:+.1} dB", preferences.level_db)),
+                slider(
+                    MIN_CLICK_LEVEL_DB..=MAX_CLICK_LEVEL_DB,
+                    preferences.level_db,
+                    Message::ClickLevel
+                )
+                .step(0.5_f32)
+                .on_release(Message::ReleaseClickLevel),
+            ]
+            .spacing(6),
+            column![
+                label("Count-in before recording".to_owned()),
+                group(count_ins)
+            ]
+            .spacing(6),
+        ]
+        .spacing(14);
+        // Opaque, so a press on the dialog's background does not close it.
+        opaque(
+            container(body)
+                .padding(12)
+                .width(Length::Fixed(CLICK_DIALOG_WIDTH))
+                .style(theme::popup),
+        )
+    }
+
+    /// The device menu: the devices present, the one in use ticked.
+    fn device_menu(&self) -> Vec<Entry> {
+        let (choices, current) = &self.devices;
+        if choices.is_empty() {
+            return vec![Entry::item("No audio device", None)];
+        }
+        choices
+            .iter()
+            .map(|choice| {
+                let tick = if Some(&choice.id) == current.as_ref() {
+                    "✓ "
+                } else {
+                    "    "
+                };
+                Entry::item(
+                    format!("{tick}{}", choice.name),
+                    Some(Message::Device(choice.clone())),
+                )
+            })
+            .collect()
     }
 
     /// The track pane, divider, gutter and board, scrolling together under one scrollbar.
@@ -736,7 +821,17 @@ impl App {
                 size.width - MENU_WIDTH - 24.0,
                 BAR_HEIGHT + SPACING + 12.0 + ADD_BUTTON + 4.0,
             ),
-            Menu::Click => (CLICK_MENU_X, size.height - BAR_HEIGHT - CLICK_MENU_HEIGHT),
+            Menu::Click => (
+                CLICK_DIALOG_X,
+                size.height - BAR_HEIGHT - CLICK_DIALOG_HEIGHT,
+            ),
+            Menu::Device => {
+                let items = self.devices.0.len().max(1) as f32;
+                (
+                    12.0,
+                    size.height - BAR_HEIGHT - items * MENU_ITEM_HEIGHT - 12.0,
+                )
+            }
         };
         (
             x.clamp(0.0, (size.width - MENU_WIDTH).max(0.0)),
@@ -781,7 +876,8 @@ impl App {
                 ),
                 Entry::item("Automation curve", None),
             ],
-            Menu::Click => self.click_menu(),
+            Menu::Click => return self.click_dialog(),
+            Menu::Device => self.device_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),
                 Entry::item("Bus", Some(Message::AddNode(NewNode::Bus))),
@@ -792,43 +888,6 @@ impl App {
             ],
         };
         dropdown(entries)
-    }
-
-    /// The click menu: the sound, ticked, the level, and the count-in before recording.
-    fn click_menu(&self) -> Vec<Entry> {
-        let preferences = self.click.preferences;
-        let ticked = |on: bool, label: &str| format!("{}{label}", if on { "✓ " } else { "    " });
-        let mut entries: Vec<Entry> = engine_bridge::ClickSound::ALL
-            .into_iter()
-            .map(|sound| {
-                Entry::item(
-                    ticked(sound == preferences.sound, sound.name()),
-                    Some(Message::SetClickSound(sound)),
-                )
-            })
-            .collect();
-        entries.push(Entry::Separator);
-        entries.push(Entry::Slider {
-            label: format!("Level {:+.1} dB", preferences.level_db),
-            range: MIN_CLICK_LEVEL_DB..=MAX_CLICK_LEVEL_DB,
-            value: preferences.level_db,
-            on_change: Message::ClickLevel,
-            on_release: Message::ReleaseClickLevel,
-        });
-        entries.push(Entry::Separator);
-        entries.push(Entry::item("Count-in before recording", None));
-        for bars in COUNT_IN_BARS {
-            let label = match bars {
-                0 => "Off".to_owned(),
-                1 => "1 bar".to_owned(),
-                n => format!("{n} bars"),
-            };
-            entries.push(Entry::item(
-                ticked(bars == self.click.count_in_bars, &label),
-                Some(Message::SetCountIn(bars)),
-            ));
-        }
-        entries
     }
 
     /// A mixer channel's name: the track connected to it, if any, else its number.

@@ -25,14 +25,17 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
   switch projects), import, export, export mono, and quit.
-- **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
-  [Recording](#recording)), the position bar, the playhead's time, and the status line
-  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). After record
-  come the click toggle with a ▾ menu (the sound, ticked, a level slider, and the count-in before
-  recording: off, 1 bar or 2 bars), the tempo field in
-  BPM, and the meter as two pickers, beats per bar over beat unit. A typed tempo is recorded on
-  Enter or the next other action; changing the tempo or meter is refused while playing
-  ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
+- **Bottom bar:** the audio device button, mono/stereo listening, play/pause, stop, record (see
+  [Recording](#recording)), the click button, the position bar, the playhead's time, and the
+  status line ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). The
+  audio device button opens a menu of the devices present, re-read on opening, the one in use
+  ticked. The click button is lit while the click is on and opens the click dialog above it: the
+  click on or off, the tempo field in BPM, the meter as two pickers (beats per bar over beat
+  unit), the sound, the level slider, and the count-in before recording (off, 1 bar or 2 bars).
+  The dialog's controls leave it open; a click outside it, or on the click button, closes it. A
+  typed tempo is recorded on Enter or the next other action; changing the tempo or meter is
+  refused while playing ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md),
+  [ADR-0086](../adrs/0086-the-bottom-bar-opens-the-audio-device-list-and-the.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
@@ -78,7 +81,8 @@ never shows. The logo (`debussy.svg`) sits at the left of the top bar in the acc
 toolbar button, with no box or background of its own.
 
 The waveform/spectrogram toggle, the grid toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
-click toggle (an in-house metronome) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
+click button (an in-house metronome), the audio device button (a microphone wearing over-ear
+headphones) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
 outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the
 button's face, and black on a red face while recording
