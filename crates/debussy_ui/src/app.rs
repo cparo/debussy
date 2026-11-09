@@ -558,12 +558,15 @@ impl App {
             Message::Pan(fraction) => {
                 // The next tick follows again if the playhead is still in view.
                 self.following = false;
+                let before = self.start;
                 let by = (f64::from(fraction.abs()) * self.view_span() as f64) as u64;
                 self.start = if fraction < 0.0 {
                     self.start.saturating_sub(by)
                 } else {
                     self.start.saturating_add(by)
                 };
+                // Forward panning stops at the end, but never pulls back a view already past it.
+                self.start = self.start.min(self.max_start().max(before));
                 self.refresh_lanes();
             }
             Message::SetDisplay(display) => {
@@ -923,8 +926,12 @@ impl App {
             Some(_) => self.engine.playhead(),
             None => self.start.saturating_add(self.view_span() / 2),
         };
+        let within = self.start.saturating_add(self.view_span()) <= self.scroll_bound();
         self.zoom = zoom;
         self.start = zoomed_start(self.start, old, self.samples_per_column(), anchor);
+        if within {
+            self.start = self.start.min(self.max_start());
+        }
         self.refresh_lanes();
     }
 
@@ -976,6 +983,18 @@ impl App {
             .max(self.start.saturating_add(self.view_span()))
             .max(self.engine.playhead())
             .max(1)
+    }
+
+    /// How far panning and zooming out may scroll (`docs/architecture/user-interface.md`
+    /// "Transport and seeking"): the later of the project's end and the playhead.
+    fn scroll_bound(&self) -> u64 {
+        self.project_end().max(self.engine.playhead())
+    }
+
+    /// The furthest view start that panning and zooming out reach: the scroll bound at the
+    /// lane's right edge, or 0 when it fits in the view.
+    fn max_start(&self) -> u64 {
+        self.scroll_bound().saturating_sub(self.view_span())
     }
 
     /// The project's end: the end of its last clip, or 0 if it has none.

@@ -92,4 +92,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0066](0066-zoom-out-stops-at-an-exact-fit-of-the-project.md) | Zoom out stops at an exact fit of the project | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0067](0067-the-project-is-saved-after-every-edit.md) | The project is saved after every edit | Accepted | [Saving](../architecture/project.md#saving) |
 | [ADR-0068](0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md) | Lanes are rasterised in memory and blurred with a Gaussian, drawn through iced's image support | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0069](0069-panning-stops-at-the-later-of-the-project-s-end.md) | Panning stops at the later of the project's end and the playhead | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 
