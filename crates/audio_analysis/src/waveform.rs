@@ -43,8 +43,7 @@ pub struct Bucket {
 }
 
 impl Bucket {
-    /// The bucket of `samples`, or `None` if there are none. For drawing views zoomed in past
-    /// [`BASE_BUCKET`] samples per column, from the audio itself.
+    /// The bucket of `samples`, or `None` if there are none.
     pub fn of(samples: &[f32]) -> Option<Bucket> {
         let mut acc = Accumulator::EMPTY;
         for &s in samples {
@@ -73,25 +72,57 @@ impl Bucket {
     }
 }
 
-/// Summarises `samples` into consecutive columns of `samples_per_column` samples each, the first
-/// starting at the first sample, writing into `out`; returns how many columns hold samples (fewer
-/// than `out.len()` when the samples run out). Each column also takes in the first sample of the
-/// next column when there is one, so adjacent columns overlap and the outline stays continuous
-/// when single samples are visible. For views zoomed in past [`BASE_BUCKET`] samples per column
-/// (`docs/architecture/analysis.md` "Waveform summaries").
-pub fn sample_columns(samples: &[f32], samples_per_column: usize, out: &mut [Bucket]) -> usize {
-    let spc = samples_per_column.max(1);
+/// The time-in-level density of `samples` per column, for views zoomed in past [`BASE_BUCKET`]
+/// samples per column (`docs/architecture/analysis.md` "Waveform summaries").
+///
+/// The signal is taken as straight lines between consecutive samples, each clamped to ±1. Column
+/// `c` holds the `spc` segments from sample `c·spc` to `(c+1)·spc`, so the next column's first
+/// sample closes its last segment. Each segment's share of the column's time is spread over the
+/// `rows` amplitude bands its value range crosses (row 0 at +1, the last at −1), in proportion to
+/// its overlap with each; a flat segment puts all of it in one row. `out` is column after column
+/// of `rows` values, each column summing to 1: a column short of its closing sample shares the
+/// time among the segments it has, and a column with one sample and no segment puts it all in
+/// that sample's row. Columns past the samples are left untouched. Returns how many columns were
+/// filled.
+pub fn trace_density(samples: &[f32], spc: usize, rows: usize, out: &mut [f32]) -> usize {
+    let spc = spc.max(1);
+    if rows == 0 {
+        return 0;
+    }
+    // Where a value falls, in rows from the top.
+    let y = |v: f32| (1.0 - v.clamp(-1.0, 1.0)) * 0.5 * rows as f32;
+    let last_row = rows - 1;
     let mut filled = 0;
-    for (index, column) in out.iter_mut().enumerate() {
+    for (index, column) in out.chunks_exact_mut(rows).enumerate() {
         let low = index.saturating_mul(spc);
         if low >= samples.len() {
             break;
         }
-        let high = low.saturating_add(spc).saturating_add(1).min(samples.len());
-        if let Some(bucket) = Bucket::of(&samples[low..high]) {
-            *column = bucket;
-            filled += 1;
+        column.fill(0.0);
+        let high = low.saturating_add(spc).min(samples.len() - 1);
+        if high == low {
+            column[(y(samples[low]) as usize).min(last_row)] = 1.0;
+        } else {
+            let share = 1.0 / (high - low) as f32;
+            for pair in samples[low..=high].windows(2) {
+                let (a, b) = (y(pair[0]), y(pair[1]));
+                let (top, bottom) = (a.min(b), a.max(b));
+                let first = (top as usize).min(last_row);
+                let length = bottom - top;
+                if length <= f32::EPSILON {
+                    column[first] += share;
+                    continue;
+                }
+                let last = (bottom.ceil() as usize).clamp(first + 1, rows);
+                for (row, cell) in column.iter_mut().enumerate().take(last).skip(first) {
+                    let overlap = bottom.min((row + 1) as f32) - top.max(row as f32);
+                    if overlap > 0.0 {
+                        *cell += share * overlap / length;
+                    }
+                }
+            }
         }
+        filled += 1;
     }
     filled
 }
@@ -517,44 +548,78 @@ mod tests {
         assert_eq!(Bucket::from_bytes(&bucket.to_bytes()), bucket);
     }
 
-    #[test]
-    fn test_sample_columns_includes_the_next_columns_first_sample() {
-        let samples = [0.0, 1.0, -1.0, 0.5];
-        let blank = Bucket {
-            min: 0.0,
-            max: 0.0,
-            rms: 0.0,
-        };
-        let mut out = [blank; 2];
-        assert_eq!(sample_columns(&samples, 2, &mut out), 2);
-        // Column 0 is samples 0 and 1 plus sample 2; column 1 is samples 2 and 3.
-        assert_eq!((out[0].min, out[0].max), (-1.0, 1.0));
-        assert_eq!((out[1].min, out[1].max), (-1.0, 0.5));
+    /// The sum of each column of `out`.
+    fn sums(out: &[f32], rows: usize) -> Vec<f32> {
+        out.chunks(rows).map(|c| c.iter().sum()).collect()
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-5
     }
 
     #[test]
-    fn test_sample_columns_partial_last_column() {
-        let samples = [0.25, 0.5, 0.75];
-        let blank = Bucket {
-            min: 9.0,
-            max: 9.0,
-            rms: 9.0,
-        };
-        let mut out = [blank; 4];
-        assert_eq!(sample_columns(&samples, 2, &mut out), 2);
-        assert_eq!((out[1].min, out[1].max), (0.75, 0.75));
-        assert_eq!(out[2], blank);
+    fn test_trace_density_flat_segment_fills_one_row() {
+        let mut out = [9.0; 4];
+        assert_eq!(trace_density(&[0.6, 0.6, 0.6], 2, 4, &mut out), 1);
+        // +0.6 is 0.2 of the way down: row 0 of 4.
+        assert_eq!(out, [1.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]
-    fn test_sample_columns_empty_input() {
-        let blank = Bucket {
-            min: 0.0,
-            max: 0.0,
-            rms: 0.0,
-        };
-        let mut out = [blank; 3];
-        assert_eq!(sample_columns(&[], 2, &mut out), 0);
-        assert_eq!(out, [blank; 3]);
+    fn test_trace_density_ramp_spreads_evenly() {
+        let mut out = [0.0; 4];
+        assert_eq!(trace_density(&[1.0, -1.0], 1, 4, &mut out), 1);
+        assert!(out.iter().all(|&v| close(v, 0.25)), "{out:?}");
+    }
+
+    #[test]
+    fn test_trace_density_columns_sum_to_one() {
+        let samples: Vec<f32> = (0..65).map(|i| (i as f32 * 0.37).sin() * 1.3).collect();
+        let rows = 7;
+        let mut out = vec![0.0; 8 * rows];
+        assert_eq!(trace_density(&samples, 8, rows, &mut out), 8);
+        assert!(sums(&out, rows).iter().all(|&s| close(s, 1.0)));
+    }
+
+    #[test]
+    fn test_trace_density_last_column_short_of_its_closing_sample() {
+        // Column 0 is samples 0..=2; column 1 has sample 2 to 3, one segment of its two.
+        let samples = [0.0, 0.0, 1.0, 1.0];
+        let rows = 2;
+        let mut out = [9.0; 6];
+        assert_eq!(trace_density(&samples, 2, rows, &mut out), 2);
+        assert!(sums(&out[..4], rows).iter().all(|&s| close(s, 1.0)));
+        assert_eq!(&out[2..4], &[1.0, 0.0]);
+        // The third column has no samples and is left alone.
+        assert_eq!(&out[4..], &[9.0, 9.0]);
+    }
+
+    #[test]
+    fn test_trace_density_lone_sample_fills_its_row() {
+        let mut out = [0.0; 4];
+        assert_eq!(trace_density(&[0.0, 0.0, -1.0], 2, 2, &mut out), 2);
+        assert_eq!(&out[2..], &[0.0, 1.0]);
+    }
+
+    #[test]
+    fn test_trace_density_one_row() {
+        let mut out = [0.0; 1];
+        assert_eq!(trace_density(&[-1.0, 1.0, 0.0], 2, 1, &mut out), 1);
+        assert!(close(out[0], 1.0));
+    }
+
+    #[test]
+    fn test_trace_density_clamps_out_of_range() {
+        let mut out = [0.0; 2];
+        assert_eq!(trace_density(&[4.0, 4.0], 1, 2, &mut out), 1);
+        assert_eq!(out, [1.0, 0.0]);
+    }
+
+    #[test]
+    fn test_trace_density_empty_input() {
+        let mut out = [9.0; 4];
+        assert_eq!(trace_density(&[], 2, 2, &mut out), 0);
+        assert_eq!(trace_density(&[0.5], 2, 0, &mut out), 0);
+        assert_eq!(out, [9.0; 4]);
     }
 }

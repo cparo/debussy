@@ -36,8 +36,9 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Node dialogs** open over the track pane for the selected node: a header with its name and a
   delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
   or a feedback delay's time in seconds; a bus has only the header.
-- **Lanes** show waveforms from the waveform summaries, or from the stored audio at zooms finer
-  than the summaries, or spectrograms: one spectrum per four waveform columns, computed on demand
+- **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
+  the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform
+  summaries"), or spectrograms: one spectrum per four waveform columns, computed on demand
   from the stored audio as 64 log-spaced bands, each from a frame centred on its column
   ([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the

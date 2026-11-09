@@ -1,12 +1,12 @@
-//! Track lanes: one per channel, each the visible stretch summarised from the stored files —
-//! a [`Bucket`] per column from the waveform summaries (`docs/architecture/analysis.md`
-//! "Waveform summaries"), or a spectrum per coarser column computed from the audio
-//! ("Spectrograms") — and the canvas that draws a lane, seeks on a click and pans on a
-//! sideways scroll.
+//! Track lanes: one per channel, each the visible stretch from the stored files — a [`Bucket`]
+//! per column from the waveform summaries or, at zooms finer than those, the audio itself drawn
+//! as a time-in-level trace (`docs/architecture/analysis.md` "Waveform summaries"), or a
+//! spectrum per coarser column computed from the audio ("Spectrograms") — and the canvas that
+//! draws a lane, seeks on a click and pans on a sideways scroll.
 
 use std::cell::Cell;
 
-use audio_analysis::Bucket;
+use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{Clip, Source, Track};
@@ -28,6 +28,10 @@ pub const SPECTRUM_BANDS: usize = 64;
 /// are summarised from the audio itself.
 pub const MIN_SAMPLES_PER_COLUMN: u64 = 2;
 
+/// Opacity steps in the trace; neighbouring pixels of a column at the same step are drawn as one
+/// rectangle.
+const TRACE_LEVELS: f32 = 32.0;
+
 /// The level drawn as the lane's background colour, in dB.
 const SPECTRUM_FLOOR_DB: f32 = -96.0;
 
@@ -37,18 +41,26 @@ pub type Spectrum = [f32; SPECTRUM_BANDS];
 /// What a lane shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Display {
-    /// Peak and RMS outlines.
+    /// Peak and RMS outlines, or the trace at zooms finer than the summaries.
     #[default]
     Waveform,
     /// Level by frequency over time.
     Spectrogram,
 }
 
-/// One channel's visible stretch, a column at a time; `None` where no clip plays.
+/// One channel's visible stretch, a column (or at fine zooms a frame) at a time; `None` where no
+/// clip plays.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Lane {
-    /// The waveform columns, left to right; empty in spectrogram display.
+    /// The waveform columns, left to right; empty in spectrogram display and at zooms finer
+    /// than the summaries.
     pub columns: Vec<Option<Bucket>>,
+    /// At zooms finer than the summaries, in waveform display, every frame of the stretch after
+    /// clip gain: [`LANE_COLUMNS`] times `samples_per_column`, plus the first frame past the end
+    /// to close the last column. Empty otherwise.
+    pub trace: Vec<Option<f32>>,
+    /// Frames per waveform column.
+    pub samples_per_column: u64,
     /// The spectrogram columns, left to right; empty in waveform display.
     pub spectrum: Vec<Option<Spectrum>>,
 }
@@ -135,6 +147,23 @@ pub fn lanes(
     };
     (0..channels)
         .map(|channel| match display {
+            Display::Waveform if spc < BASE_BUCKET => {
+                let mut trace = vec![None; LANE_COLUMNS * spc as usize + 1];
+                paint(
+                    &track.clips,
+                    channel,
+                    (start, 1),
+                    &mut trace,
+                    0.0,
+                    |file, from, out| services.samples(file, from, out),
+                    |v, gain_db| v * 10f32.powf(gain_db / 20.0),
+                );
+                Lane {
+                    trace,
+                    samples_per_column: spc,
+                    ..Lane::default()
+                }
+            }
             Display::Waveform => {
                 let mut columns = vec![None; LANE_COLUMNS];
                 let blank = Bucket {
@@ -160,7 +189,8 @@ pub fn lanes(
                 );
                 Lane {
                     columns,
-                    spectrum: Vec::new(),
+                    samples_per_column: spc,
+                    ..Lane::default()
                 }
             }
             Display::Spectrogram => {
@@ -179,8 +209,9 @@ pub fn lanes(
                     },
                 );
                 Lane {
-                    columns: Vec::new(),
                     spectrum,
+                    samples_per_column: spc,
+                    ..Lane::default()
                 }
             }
         })
@@ -257,10 +288,12 @@ impl Program<Message> for LaneView<'_> {
         let background = tokens(tone_of(theme)).lane;
         let lane = state.cache.draw(renderer, bounds.size(), |frame| {
             frame.fill_rectangle(Point::ORIGIN, bounds.size(), background);
-            if self.lane.spectrum.is_empty() {
-                draw_waveform(frame, self.lane, bounds.size());
-            } else {
+            if !self.lane.spectrum.is_empty() {
                 draw_spectrum(frame, self.lane, bounds.size(), background);
+            } else if !self.lane.trace.is_empty() {
+                draw_trace(frame, self.lane, bounds.size());
+            } else {
+                draw_waveform(frame, self.lane, bounds.size());
             }
         });
         let mut geometry = vec![lane];
@@ -319,6 +352,82 @@ fn draw_waveform(frame: &mut Frame, lane: &Lane, size: Size) {
             Size::new(width.max(1.0), (2.0 * rms).max(1.0)),
             body,
         );
+    }
+}
+
+/// Each column's pixels lit by how much of its time the trace spends at their level, relative to
+/// the column's most-visited pixel and through a square root, over the centre line
+/// (`docs/architecture/analysis.md` "Waveform summaries"). Stretches where no clip plays are
+/// left blank.
+fn draw_trace(frame: &mut Frame, lane: &Lane, size: Size) {
+    let mid = size.height / 2.0;
+    let width = size.width / LANE_COLUMNS as f32;
+    frame.fill_rectangle(
+        Point::new(0.0, mid - 0.5),
+        Size::new(size.width, 1.0),
+        AUDIO,
+    );
+    let rows = (size.height.round() as usize).max(1);
+    let row_height = size.height / rows as f32;
+    let spc = lane.samples_per_column.max(1) as usize;
+    let mut density = vec![0.0; rows];
+    let mut run_density = vec![0.0; rows];
+    let mut run = Vec::with_capacity(spc + 1);
+    for (i, column) in lane.trace.chunks(spc).take(LANE_COLUMNS).enumerate() {
+        // The column's frames and the next column's first, which closes its last segment.
+        let closing = lane.trace.get((i + 1) * spc).copied().flatten();
+        density.fill(0.0);
+        let mut any = false;
+        // Each unbroken run of audio counts by its number of segments (a lone frame as one).
+        let frames = column.iter().copied().chain(std::iter::once(closing));
+        let mut flush = |run: &mut Vec<f32>, density: &mut [f32]| {
+            if run.is_empty() {
+                return;
+            }
+            let weight = run.len().saturating_sub(1).max(1) as f32;
+            if trace_density(run, run.len(), rows, &mut run_density) > 0 {
+                for (d, r) in density.iter_mut().zip(&run_density) {
+                    *d += r * weight;
+                }
+                any = true;
+            }
+            run.clear();
+        };
+        for value in frames {
+            match value {
+                Some(v) => run.push(v),
+                None => flush(&mut run, &mut density),
+            }
+        }
+        flush(&mut run, &mut density);
+        if !any {
+            continue;
+        }
+        let peak = density.iter().copied().fold(0.0, f32::max);
+        if peak <= 0.0 {
+            continue;
+        }
+        let x = i as f32 * width;
+        // Vertical runs of pixels at the same opacity step, as one rectangle each.
+        let mut row = 0;
+        while row < rows {
+            let level = ((density[row] / peak).sqrt() * TRACE_LEVELS).round();
+            let mut end = row + 1;
+            while end < rows && ((density[end] / peak).sqrt() * TRACE_LEVELS).round() == level {
+                end += 1;
+            }
+            if level > 0.0 {
+                frame.fill_rectangle(
+                    Point::new(x, row as f32 * row_height),
+                    Size::new(width.max(1.0), (end - row) as f32 * row_height),
+                    iced::Color {
+                        a: AUDIO.a * level / TRACE_LEVELS,
+                        ..AUDIO
+                    },
+                );
+            }
+            row = end;
+        }
     }
 }
 

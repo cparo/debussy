@@ -23,6 +23,7 @@ struct Calls {
     saves: usize,
     waveform: Vec<(String, u64, u64)>,
     spectrogram: Vec<(String, u64, u64)>,
+    samples: Vec<(String, u64, usize)>,
     exports: Vec<bool>,
     device: Option<String>,
 }
@@ -64,6 +65,15 @@ impl Services for Fake {
             max: 0.5,
             rms: 0.25,
         });
+        out.len()
+    }
+
+    fn samples(&mut self, file: &str, start: u64, out: &mut [f32]) -> usize {
+        self.calls
+            .borrow_mut()
+            .samples
+            .push((file.to_owned(), start, out.len()));
+        out.fill(0.5);
         out.len()
     }
 
@@ -149,13 +159,20 @@ impl Services for Fake {
 type Fixture = (App, Processor, Rc<RefCell<Calls>>, NodeId);
 
 fn app() -> Result<Fixture, Box<dyn Error>> {
+    app_with_gain(0.0)
+}
+
+/// The fixture with the clip at `gain_db`.
+fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
     let mut session = Session::new_project();
     let track = session.add_track("Vocal", Layout::Mono)?;
     let file = AudioFile {
         name: "vox.wav".into(),
         frames: 100_000,
     };
-    session.add_clip(track, Clip::new(Source::Mono(file), 0, 65_536, 4096))?;
+    let mut clip = Clip::new(Source::Mono(file), 0, 65_536, 4096);
+    clip.gain_db = gain_db;
+    session.add_clip(track, clip)?;
     let mixer = session.state().project_mixer().ok_or("no project mixer")?;
     let session = Session::open(session.state().clone(), BTreeMap::new());
     let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512))?;
@@ -419,12 +436,44 @@ fn test_zoom_in_stops_at_two_frames_per_column() -> Result<(), Box<dyn Error>> {
     app.update(Message::Seek(5000));
     let last = calls
         .borrow()
-        .waveform
+        .samples
         .last()
         .cloned()
-        .ok_or("no waveform reads")?;
+        .ok_or("no sample reads")?;
     assert_eq!(last.0, "vox.wav");
-    assert_eq!(last.2, 2);
+    Ok(())
+}
+
+#[test]
+fn test_fine_zooms_carry_the_trace_with_clip_gain() -> Result<(), Box<dyn Error>> {
+    // +6.02 dB doubles the fake's 0.5 samples.
+    let (mut app, _processor, calls, _) = app_with_gain(20.0 * 2f32.log10())?;
+    // At 64 frames per column, the summaries: columns, no trace.
+    for _ in 0..8 {
+        app.update(Message::ZoomIn);
+    }
+    let lane = &app.lanes()[0].1[0];
+    assert!(lane.trace.is_empty());
+    assert!(lane.columns.iter().any(Option::is_some));
+    assert!(calls.borrow().samples.is_empty());
+    // One step finer, the trace: a frame per column's frame, plus the closing one.
+    app.update(Message::ZoomIn);
+    let spc = app.samples_per_column();
+    assert!(spc < 64);
+    let lane = &app.lanes()[0].1[0];
+    assert!(lane.columns.is_empty());
+    assert_eq!(lane.samples_per_column, spc);
+    assert_eq!(
+        lane.trace.len(),
+        debussy_ui::LANE_COLUMNS * spc as usize + 1
+    );
+    // Blank before the clip's start at frame 4096, the gained audio after.
+    let at =
+        |frame: u64| lane.trace[((frame - app.view_start()) as usize).min(lane.trace.len() - 1)];
+    assert!(app.view_start() < 4096);
+    assert_eq!(at(app.view_start()), None);
+    let value = at(4096).ok_or("no audio at the clip's start")?;
+    assert!((value - 1.0).abs() < 1e-3, "{value}");
     Ok(())
 }
 
