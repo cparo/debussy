@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
-    Space, button, canvas, column, container, mouse_area, opaque, pin, responsive, row, scrollable,
-    slider, stack, svg, text, text_input, tooltip, vertical_slider,
+    Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
+    responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
@@ -17,7 +17,8 @@ use crate::app::{App, Message, NewNode};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
-use crate::theme::{self, Place, Tone};
+use crate::recording::METER_FLOOR_DB;
+use crate::theme::{self, Accent, Place, Tone};
 use crate::transport::PositionBar;
 use crate::waveform::{CursorView, Display, LaneView};
 
@@ -50,6 +51,8 @@ const ICON_SIZE: f32 = 16.0;
 const TOOL_TEXT: f32 = 13.0;
 /// The width of the playhead time beside the position bar: room for "00:00:00.000".
 const TIME_WIDTH: f32 = 100.0;
+/// The audio device selector's width in the bottom bar.
+const DEVICE_WIDTH: f32 = 200.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
@@ -73,8 +76,18 @@ fn button_at<'a>(
     place: Place,
 ) -> Element<'a, Message> {
     let enabled = message.is_some();
+    // Record is lit red, its dot red until it is (`docs/architecture/user-interface.md` "Icons").
+    let accent = match face {
+        Face::Icon(Icon::Record) => Accent::Record,
+        _ => Accent::Audio,
+    };
     let content: Element<'a, Message> = match face {
         Face::Label(label) => text(label).size(TOOL_TEXT).center().into(),
+        Face::Icon(Icon::Record) => svg(Icon::Record.handle())
+            .width(ICON_SIZE)
+            .height(ICON_SIZE)
+            .style(theme::record_icon(selected, enabled))
+            .into(),
         Face::Icon(icon) => svg(icon.handle())
             .width(ICON_SIZE)
             .height(ICON_SIZE)
@@ -89,10 +102,11 @@ fn button_at<'a>(
     let face_button = button(content)
         .on_press_maybe(message)
         .padding([vertical, 12.0])
-        .style(theme::tool_style(
+        .style(theme::accent_style(
             selected,
             place,
             matches!(face, Face::Label(_)),
+            accent,
         ));
     match face {
         Face::Label(_) => face_button.into(),
@@ -105,6 +119,41 @@ fn button_at<'a>(
         )
         .into(),
     }
+}
+
+/// A small toggle for a track header, labelled `label`, lit with `accent` when `selected`.
+fn chip<'a>(
+    label: &'a str,
+    message: Option<Message>,
+    selected: bool,
+    accent: Accent,
+) -> Element<'a, Message> {
+    button(text(label).size(12).center())
+        .on_press_maybe(message)
+        .padding([1, 6])
+        .style(theme::accent_style(selected, Place::Alone, true, accent))
+        .into()
+}
+
+/// An armed track's input meter: one bar per channel, left above right, from
+/// [`METER_FLOOR_DB`] to 0 dBFS, red from −1 dBFS.
+fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
+    let girth = if levels.len() > 1 { 4.0 } else { 8.0 };
+    let bars = levels.iter().map(|&level| {
+        let clipping = level >= -1.0;
+        progress_bar(METER_FLOOR_DB..=0.0, level)
+            .length(Length::Fixed(64.0))
+            .girth(Length::Fixed(girth))
+            .style(move |theme: &iced::Theme| {
+                if clipping {
+                    iced::widget::progress_bar::danger(theme)
+                } else {
+                    iced::widget::progress_bar::success(theme)
+                }
+            })
+            .into()
+    });
+    column(bars).spacing(1).into()
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
@@ -285,7 +334,19 @@ impl App {
         })
         .width(Fill)
         .height(Length::Fixed(24.0));
+        let (choices, current) = &self.devices;
+        let device = choices
+            .iter()
+            .find(|c| Some(&c.id) == current.as_ref())
+            .cloned();
         let mut bar = row![
+            // Changing device is refused while playing, with a notice.
+            pick_list(choices.clone(), device, Message::Device)
+                .on_open(Message::RefreshDevices)
+                .placeholder("No audio device")
+                .text_size(TOOL_TEXT)
+                .width(Length::Fixed(DEVICE_WIDTH)),
+            gap(16.0),
             group(vec![
                 (Face::Label("Mono"), Some(Message::SetMono(true)), mono),
                 (Face::Label("Stereo"), Some(Message::SetMono(false)), !mono),
@@ -298,7 +359,11 @@ impl App {
                     (Face::Icon(Icon::Play), Some(Message::Play), false)
                 },
                 (Face::Icon(Icon::Stop), Some(Message::Stop), false),
-                (Face::Icon(Icon::Record), None, false),
+                (
+                    Face::Icon(Icon::Record),
+                    self.can_record().then_some(Message::Record),
+                    self.is_recording()
+                ),
             ]),
             gap(16.0),
             position,
@@ -519,10 +584,40 @@ impl App {
                 .into(),
             _ => text(name.to_owned()).size(15).into(),
         };
+        let playing = self.engine().is_playing();
+        let unless_playing = |message: Message| (!playing).then_some(message);
+        let arming = self.arming(id);
+        let mut controls = row![chip(
+            "Arm",
+            unless_playing(Message::Arm(id)),
+            arming.is_some(),
+            Accent::Record
+        )]
+        .spacing(4)
+        .align_y(Alignment::Center);
+        if let Some((monitor, input)) = arming {
+            controls = controls.push(chip(
+                "Monitor",
+                unless_playing(Message::Monitor(id)),
+                monitor,
+                Accent::Audio,
+            ));
+            let choices = self.input_choices(id);
+            let selected = choices.contains(&input).then_some(input);
+            controls = controls.push(
+                pick_list(choices, selected, move |choice| Message::Input(id, choice))
+                    .placeholder("No input")
+                    .text_size(12)
+                    .padding([1, 6]),
+            );
+            controls = controls.push(input_meter(self.input_levels(id)));
+        }
         container(
             row![
                 label,
                 Space::new().width(Fill),
+                controls,
+                gap(6.0),
                 burger(Menu::Track(id), 14.0, 4.0)
             ]
             .align_y(Alignment::Center),
@@ -577,8 +672,7 @@ impl App {
         let when_stopped = |message: Message| stopped.then_some(message);
         let entries = match menu {
             Menu::App => {
-                let (choices, current) = &self.devices;
-                let mut entries = vec![
+                vec![
                     Entry::item("New project", None),
                     Entry::item("Open…", None),
                     Entry::Separator,
@@ -586,21 +680,8 @@ impl App {
                     Entry::item("Export…", Some(Message::Export(false))),
                     Entry::item("Export mono…", Some(Message::Export(true))),
                     Entry::Separator,
-                    Entry::Heading("Audio device".to_owned()),
-                ];
-                entries.extend(choices.iter().map(|choice| {
-                    let mark = if Some(&choice.id) == current.as_ref() {
-                        "✓ "
-                    } else {
-                        "    "
-                    };
-                    Entry::item(
-                        format!("{mark}{}", choice.name),
-                        when_stopped(Message::Device(choice.clone())),
-                    )
-                }));
-                entries.extend([Entry::Separator, Entry::item("Quit", Some(Message::Quit))]);
-                entries
+                    Entry::item("Quit", Some(Message::Quit)),
+                ]
             }
             Menu::Track(id) => vec![
                 Entry::item("Rename", Some(Message::StartRename(id))),

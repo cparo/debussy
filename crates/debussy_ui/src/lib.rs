@@ -10,7 +10,9 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `device`: rebuilding the engine when its audio device is lost.
 //! - `range_selection`: the range selected in the lanes.
+//! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
 //! - `shortcuts`: keyboard shortcuts.
 //! - `waveform`: track lanes from the stored files, and their canvas.
 //! - `raster`: lanes painted into memory at the display scale and blurred.
@@ -23,11 +25,13 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod device;
 mod icon;
 mod menu;
 mod patch_board;
 mod range_selection;
 mod raster;
+mod recording;
 mod services;
 mod shortcuts;
 mod theme;
@@ -40,7 +44,8 @@ use std::sync::Mutex;
 pub use app::{App, Message, NewNode};
 pub use menu::Menu;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
-pub use services::{DeviceChoice, ImportedTrack, Services};
+pub use recording::{InputChoice, METER_FLOOR_DB};
+pub use services::{DeviceChoice, ImportedTrack, Services, TakeFiles, TakeStatus};
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;
 pub use waveform::{

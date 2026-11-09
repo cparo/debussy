@@ -6,12 +6,16 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_effects::{Control, Mode};
-use audio_engine::{Engine, Processor, Streams, TrackFeeds, TransportState};
-use debussy_ui::{App, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services, Spectrum};
+use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
+use debussy_ui::{
+    App, DeviceChoice, ImportedTrack, Message, SPECTRUM_BANDS, Services, Spectrum, TakeFiles,
+    TakeStatus,
+};
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
 use signal_graph::{Config, NodeId as GraphNodeId};
@@ -28,6 +32,54 @@ struct Calls {
     samples: Vec<(String, u64, usize)>,
     exports: Vec<bool>,
     device: Option<String>,
+    /// Devices present beyond the two built in, as if plugged in.
+    plugged: Vec<DeviceChoice>,
+    /// An error stopping the device, reported once.
+    audio_error: Option<String>,
+    /// Whether the device has gone with the engine's real-time side.
+    lost: bool,
+    /// The device asked for with each rebuilt engine, and the latest one's real-time side.
+    adopted: Vec<Option<String>>,
+    processor: Option<Processor>,
+    /// Each call to open or close the device's inputs.
+    input: Vec<bool>,
+    /// Input channels the device has.
+    inputs: usize,
+    /// The files of each recording pass started.
+    started: Vec<Vec<String>>,
+    kept: Vec<String>,
+    discarded: Vec<String>,
+}
+
+/// What the fake take sinks report when they end.
+type Ended = Arc<Mutex<Vec<TakeStatus>>>;
+
+/// A take sink that counts what it is given and reports it finished when it ends.
+struct FakeSink {
+    take: usize,
+    frames: u64,
+    ended: Option<Ended>,
+}
+
+impl TakeSink for FakeSink {
+    fn write(&mut self, samples: &[f32]) -> usize {
+        if self.ended.is_some() {
+            self.frames += samples.len() as u64;
+        }
+        samples.len()
+    }
+
+    fn end(&mut self) {
+        if let Some(ended) = self.ended.take() {
+            ended
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(TakeStatus::Finished {
+                    take: self.take,
+                    frames: self.frames,
+                });
+        }
+    }
 }
 
 struct NoStreams;
@@ -41,6 +93,7 @@ impl Streams for NoStreams {
 struct Fake {
     calls: Rc<RefCell<Calls>>,
     streams: NoStreams,
+    ended: Ended,
 }
 
 impl Services for Fake {
@@ -127,7 +180,7 @@ impl Services for Fake {
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
-        let choices = vec![
+        let mut choices = vec![
             DeviceChoice {
                 id: "a".into(),
                 name: "Built-in".into(),
@@ -137,6 +190,7 @@ impl Services for Fake {
                 name: "Interface".into(),
             },
         ];
+        choices.extend(self.calls.borrow().plugged.iter().cloned());
         (
             choices,
             Some(
@@ -150,14 +204,98 @@ impl Services for Fake {
     }
 
     fn audio_error(&mut self) -> Option<String> {
-        None
+        self.calls.borrow_mut().audio_error.take()
+    }
+
+    fn audio_lost(&mut self) -> bool {
+        self.calls.borrow().lost
+    }
+
+    fn adopt_engine(&mut self, processor: Processor, device: Option<&str>) -> Result<(), String> {
+        let mut calls = self.calls.borrow_mut();
+        calls.lost = false;
+        calls.adopted.push(device.map(str::to_owned));
+        calls.processor = Some(processor);
+        Ok(())
     }
 
     fn set_device(&mut self, id: &str) -> Result<(), String> {
         self.calls.borrow_mut().device = Some(id.into());
         Ok(())
     }
+
+    fn set_input(&mut self, input: bool) -> Result<(), String> {
+        self.calls.borrow_mut().input.push(input);
+        Ok(())
+    }
+
+    fn input_channels(&mut self) -> usize {
+        let calls = self.calls.borrow();
+        if calls.input.last() == Some(&true) {
+            calls.inputs
+        } else {
+            0
+        }
+    }
+
+    fn device_latency(&mut self) -> u64 {
+        LATENCY
+    }
+
+    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String> {
+        let mut take = 0;
+        let mut all = Vec::new();
+        let takes = tracks
+            .iter()
+            .map(|(name, channels)| {
+                let files: Vec<String> =
+                    (0..*channels).map(|c| format!("{name} {c}.wav")).collect();
+                all.extend(files.iter().cloned());
+                let sinks = files
+                    .iter()
+                    .map(|_| {
+                        take += 1;
+                        Box::new(FakeSink {
+                            take: take - 1,
+                            frames: 0,
+                            ended: Some(Arc::clone(&self.ended)),
+                        }) as Box<dyn TakeSink>
+                    })
+                    .collect();
+                TakeFiles { files, sinks }
+            })
+            .collect();
+        self.calls.borrow_mut().started.push(all);
+        Ok(takes)
+    }
+
+    fn take_status(&mut self) -> Vec<TakeStatus> {
+        std::mem::take(&mut *self.ended.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn take_overruns(&mut self) -> u64 {
+        0
+    }
+
+    fn keep_takes(&mut self, files: &[String]) -> Result<(), String> {
+        self.calls.borrow_mut().kept.extend_from_slice(files);
+        Ok(())
+    }
+
+    fn discard_takes(&mut self, files: &[String]) {
+        self.calls.borrow_mut().discarded.extend_from_slice(files);
+    }
 }
+
+/// Like the disk recorder's takes, dropping a sink ends it.
+impl Drop for FakeSink {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+/// The fake device's input plus output latency.
+const LATENCY: u64 = 100;
 
 /// A project with one mono track at frame 4096 for 65536 frames, routed through a 1-channel
 /// mixer, and the app over it.
@@ -184,10 +322,14 @@ fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
     let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512))?;
     let output = bridge.output().ok_or("no output")?;
     let (engine, processor) = Engine::new(runner, output, 48_000)?;
-    let calls = Rc::new(RefCell::new(Calls::default()));
+    let calls = Rc::new(RefCell::new(Calls {
+        inputs: 2,
+        ..Calls::default()
+    }));
     let services = Box::new(Fake {
         calls: Rc::clone(&calls),
         streams: NoStreams,
+        ended: Ended::default(),
     });
     Ok((
         App::new(session, 48_000, bridge, engine, services),
@@ -1322,5 +1464,298 @@ fn test_paging_stops_at_the_project_end() -> Result<(), Box<dyn Error>> {
     assert!(views.first() < views.last(), "it paged");
     let view_end = app.view_start() + app.view_span();
     assert_eq!(view_end, CLIP_END + 1);
+    Ok(())
+}
+
+/// The fixture's one track.
+fn vocal(app: &App) -> Result<TrackId, Box<dyn Error>> {
+    Ok(app.session().state().tracks.first().ok_or("no track")?.id)
+}
+
+#[test]
+fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Arm(track));
+    assert_eq!(calls.borrow().input, [true]);
+    assert!(app.can_record());
+    app.update(Message::Seek(10_000));
+    app.update(Message::Record);
+    assert!(app.is_recording());
+    // Arming and the other track edits wait for the transport.
+    app.update(Message::Arm(track));
+    assert!(app.arming(track).is_some());
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    // The pass is saved, so Record is available again.
+    assert!(app.can_record());
+    assert_eq!(calls.borrow().kept, ["Vocal 0.wav"]);
+    let clips = &app.session().state().track(track).ok_or("no track")?.clips;
+    assert_eq!(clips.len(), 2);
+    let (_, take) = clips.last().ok_or("no take")?;
+    assert_eq!(
+        (take.position, take.offset, take.length),
+        (10_000 - LATENCY, 0, 4 * 256)
+    );
+    app.update(Message::Undo);
+    assert_eq!(
+        app.session()
+            .state()
+            .track(track)
+            .ok_or("no track")?
+            .clips
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn test_take_stopped_before_capture_is_discarded() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Arm(track));
+    app.update(Message::Record);
+    app.update(Message::Stop);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    assert_eq!(calls.borrow().discarded, ["Vocal 0.wav"]);
+    assert!(!app.session().can_undo());
+    Ok(())
+}
+
+#[test]
+fn test_record_needs_an_armed_track_and_inputs() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Record);
+    assert_eq!(app.status(), Some("Arm a track to record."));
+    calls.borrow_mut().inputs = 0;
+    app.update(Message::Arm(track));
+    assert_eq!(
+        app.status(),
+        Some("The audio device has no inputs to record from.")
+    );
+    assert!(!app.can_record());
+    app.update(Message::Record);
+    assert!(!app.is_recording());
+    assert!(calls.borrow().started.is_empty());
+    // Disarming the last track closes the inputs.
+    app.update(Message::Arm(track));
+    assert_eq!(calls.borrow().input, [true, false]);
+    Ok(())
+}
+
+#[test]
+fn test_monitor_and_input_follow_the_track_layout() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    assert!(app.arming(track).is_none());
+    app.update(Message::Arm(track));
+    let (monitor, input) = app.arming(track).ok_or("not armed")?;
+    assert!(!monitor);
+    assert_eq!(input.to_string(), "In 1");
+    let choices = app.input_choices(track);
+    assert_eq!(choices.len(), 2);
+    app.update(Message::Monitor(track));
+    app.update(Message::Input(track, choices[1]));
+    let (monitor, input) = app.arming(track).ok_or("not armed")?;
+    assert!(monitor);
+    assert_eq!(input.to_string(), "In 2");
+    app.update(Message::AddTrack(Layout::Stereo));
+    let keys = app.session().state().tracks.last().ok_or("no track")?.id;
+    let pairs: Vec<String> = app
+        .input_choices(keys)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(pairs, ["In 1–2"]);
+    // Deleting an armed track disarms it.
+    app.update(Message::Arm(keys));
+    app.update(Message::DeleteTrack(keys));
+    assert!(app.arming(keys).is_none());
+    Ok(())
+}
+
+#[test]
+fn test_recording_runs_on_past_the_project_end() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Arm(track));
+    app.update(Message::Seek(4096 + 65_536 - 256));
+    app.update(Message::Record);
+    for _ in 0..3 {
+        block(&mut processor)?;
+    }
+    app.update(Message::Tick);
+    assert!(app.is_recording());
+    assert_eq!(app.engine().real_time_state(), TransportState::Playing);
+    Ok(())
+}
+
+#[test]
+fn test_input_meter_follows_the_track_input_and_falls() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    assert!(!app.wants_ticks());
+    app.update(Message::Arm(track));
+    // Armed: ticks drive the meter.
+    assert!(app.wants_ticks());
+    let choices = app.input_choices(track);
+    app.update(Message::Input(track, choices[1]));
+    // Input 2 at half scale (−6 dBFS); input 1 silent.
+    let input: Vec<f32> = (0..256).flat_map(|_| [0.0, 0.5]).collect();
+    let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+    processor.process(&input, 2, &mut l, &mut r)?;
+    app.update(Message::Tick);
+    let level = app.input_levels(track)[0];
+    assert!((level - 20.0 * 0.5_f32.log10()).abs() < 1e-4, "{level}");
+    // No new input: it falls, not drops.
+    app.update(Message::Tick);
+    let fallen = app.input_levels(track)[0];
+    assert!(fallen < level && fallen > debussy_ui::METER_FLOOR_DB);
+    app.update(Message::Arm(track));
+    app.update(Message::Tick);
+    assert!(app.input_levels(track).is_empty());
+    Ok(())
+}
+
+#[test]
+fn test_opening_the_device_dropdown_rereads_the_devices() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    // A notice survives opening the dropdown.
+    app.update(Message::Record);
+    calls.borrow_mut().plugged.push(DeviceChoice {
+        id: "c".into(),
+        name: "M6".into(),
+    });
+    app.update(Message::RefreshDevices);
+    assert_eq!(app.status(), Some("Arm a track to record."));
+    let last = app.device_choices().last().map(|d| d.name.as_str());
+    assert_eq!(last, Some("M6"));
+    Ok(())
+}
+
+#[test]
+fn test_choosing_a_device_after_the_old_one_is_lost_rebuilds_the_engine()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Seek(5000));
+    app.update(Message::SetMono(true));
+    app.update(Message::Arm(track));
+    // The device is unplugged: its stream holds the processor and never runs again.
+    drop(processor);
+    calls.borrow_mut().lost = true;
+    let built_in = app.device_choices()[0].clone();
+    app.update(Message::Device(built_in));
+    assert_eq!(calls.borrow().adopted, [Some("a".to_owned())]);
+    assert_eq!(calls.borrow().device, None, "not switched the usual way");
+    assert_eq!(app.engine().playhead(), 5000);
+    assert!(app.engine().mono());
+    // The new engine runs, still armed: its input reaches the meter.
+    let mut processor = calls.borrow_mut().processor.take().ok_or("not adopted")?;
+    let input: Vec<f32> = (0..256).flat_map(|_| [0.5, 0.0]).collect();
+    let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+    processor.process(&input, 2, &mut l, &mut r)?;
+    app.update(Message::Tick);
+    assert!(app.input_levels(track)[0] > -7.0);
+    Ok(())
+}
+
+#[test]
+fn test_device_lost_while_recording_falls_back_and_keeps_the_take() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Arm(track));
+    app.update(Message::Seek(10_000));
+    app.update(Message::Record);
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    {
+        let mut calls = calls.borrow_mut();
+        calls.audio_error = Some("the device was unplugged".into());
+        calls.lost = true;
+    }
+    app.update(Message::Tick);
+    assert_eq!(calls.borrow().adopted, [None]);
+    assert!(!app.is_recording());
+    assert!(app.status().is_some_and(|s| s.starts_with("Audio stopped")));
+    // Dropping the lost stream drops its processor, ending the takes.
+    drop(processor);
+    app.update(Message::Tick);
+    let clips = &app.session().state().track(track).ok_or("no track")?.clips;
+    let (_, take) = clips.last().ok_or("no take")?;
+    assert_eq!((take.position, take.length), (10_000 - LATENCY, 4 * 256));
+    Ok(())
+}
+
+#[test]
+fn test_arming_after_an_unnoticed_unplug_recovers_first() -> Result<(), Box<dyn Error>> {
+    let (mut app, processor, calls, _) = app()?;
+    let track = vocal(&app)?;
+    drop(processor);
+    calls.borrow_mut().lost = true;
+    app.update(Message::Arm(track));
+    assert_eq!(calls.borrow().adopted, [None]);
+    assert_eq!(calls.borrow().input, [true]);
+    assert!(app.arming(track).is_some());
+    Ok(())
+}
+
+#[test]
+fn test_device_lost_while_playing_pauses_and_any_device_can_then_be_chosen()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    app.update(Message::Seek(5000));
+    app.update(Message::Play);
+    for _ in 0..4 {
+        block(&mut processor)?;
+    }
+    let held = app.engine().playhead();
+    assert!(held > 5000);
+    drop(processor);
+    calls.borrow_mut().plugged.clear();
+    {
+        let mut calls = calls.borrow_mut();
+        calls.audio_error = Some("Interface stopped responding".into());
+        calls.lost = true;
+    }
+    app.update(Message::Tick);
+    assert!(!app.engine().is_playing());
+    assert_eq!(app.engine().playhead(), held);
+    assert_eq!(
+        app.status(),
+        Some("Audio stopped: Interface stopped responding. Paused; now using Built-in.")
+    );
+    // Not refused as if still playing.
+    let interface = app.device_choices()[1].clone();
+    app.update(Message::Device(interface));
+    assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    // Stop still returns to where playback started.
+    app.update(Message::Stop);
+    assert_eq!(app.engine().playhead(), 5000);
+    Ok(())
+}
+
+#[test]
+fn test_device_can_change_while_paused() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, calls, _) = app()?;
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Device(app.device_choices()[1].clone()));
+    assert_eq!(
+        app.status(),
+        Some("Pause or stop playback to change the audio device.")
+    );
+    app.update(Message::Pause);
+    block(&mut processor)?;
+    app.update(Message::Device(app.device_choices()[1].clone()));
+    assert_eq!(calls.borrow().device.as_deref(), Some("b"));
     Ok(())
 }
