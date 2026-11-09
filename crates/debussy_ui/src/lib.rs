@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod icon;
 mod menu;
 mod patch_board;
 mod raster;

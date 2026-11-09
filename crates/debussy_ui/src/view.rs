@@ -8,12 +8,13 @@ use audio_buffers::Layout;
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
 use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pin, responsive, row, scrollable,
-    slider, stack, svg, text, text_input, vertical_slider,
+    slider, stack, svg, text, text_input, tooltip, vertical_slider,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
 
 use crate::app::{App, Message, NewNode};
+use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
 use crate::theme::{self, Place, Tone};
@@ -43,41 +44,79 @@ static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
-/// A button in a bar: `label`, sending `message` if there is one.
-fn tool<'a>(label: &'a str, message: Option<Message>, selected: bool) -> Element<'a, Message> {
-    button_at(label, message, selected, Place::Alone)
+/// The size of a toolbar button's icon, in logical pixels.
+const ICON_SIZE: f32 = 16.0;
+/// A toolbar button's text size.
+const TOOL_TEXT: f32 = 13.0;
+
+/// What a toolbar button shows: a text label or an icon.
+#[derive(Clone, Copy)]
+enum Face<'a> {
+    /// A text label.
+    Label(&'a str),
+    /// An icon, named in a tooltip.
+    Icon(Icon),
+}
+
+/// A button in a bar showing `face`, sending `message` if there is one.
+fn tool<'a>(face: Face<'a>, message: Option<Message>, selected: bool) -> Element<'a, Message> {
+    button_at(face, message, selected, Place::Alone)
 }
 
 /// A toolbar button styled for `place`.
 fn button_at<'a>(
-    label: &'a str,
+    face: Face<'a>,
     message: Option<Message>,
     selected: bool,
     place: Place,
 ) -> Element<'a, Message> {
-    button(text(label).size(13).center())
+    let enabled = message.is_some();
+    let content: Element<'a, Message> = match face {
+        Face::Label(label) => text(label).size(TOOL_TEXT).center().into(),
+        Face::Icon(icon) => svg(icon.handle())
+            .width(ICON_SIZE)
+            .height(ICON_SIZE)
+            .style(theme::tool_icon(selected, enabled))
+            .into(),
+    };
+    // An icon is padded to the height of a text label, so mixed strips line up.
+    let vertical = match face {
+        Face::Label(_) => 8.0,
+        Face::Icon(_) => 8.0 + (TOOL_TEXT * 1.3 - ICON_SIZE) / 2.0,
+    };
+    let face_button = button(content)
         .on_press_maybe(message)
-        .padding([8, 12])
-        .style(theme::tool(selected, place))
-        .into()
+        .padding([vertical, 12.0])
+        .style(theme::tool(selected, place));
+    match face {
+        Face::Label(_) => face_button.into(),
+        Face::Icon(icon) => tooltip(
+            face_button,
+            container(text(icon.name()).size(TOOL_TEXT))
+                .padding([4, 8])
+                .style(theme::popup),
+            tooltip::Position::FollowCursor,
+        )
+        .into(),
+    }
 }
 
-/// Buttons side by side as one strip, each a `(label, message, selected)` as for [`tool`].
-fn group<'a>(buttons: Vec<(&'a str, Option<Message>, bool)>) -> Element<'a, Message> {
-    if let [(label, message, selected)] = buttons.as_slice() {
-        return tool(label, message.clone(), *selected);
+/// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
+fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
+    if let [(face, message, selected)] = buttons.as_slice() {
+        return tool(*face, message.clone(), *selected);
     }
     let last = buttons.len().saturating_sub(1);
     let faces = buttons
         .into_iter()
         .enumerate()
-        .map(|(i, (label, message, selected))| {
+        .map(|(i, (face, message, selected))| {
             let place = match i {
                 0 => Place::First,
                 i if i == last => Place::Last,
                 _ => Place::Middle,
             };
-            button_at(label, message, selected, place)
+            button_at(face, message, selected, place)
         });
     container(row(faces).spacing(1))
         .padding(1)
@@ -133,12 +172,12 @@ impl App {
             gap(16.0),
             group(vec![
                 (
-                    "Waveform",
+                    Face::Label("Waveform"),
                     Some(Message::SetDisplay(Display::Waveform)),
                     display == Display::Waveform
                 ),
                 (
-                    "Spectrogram",
+                    Face::Label("Spectrogram"),
                     Some(Message::SetDisplay(Display::Spectrogram)),
                     display == Display::Spectrogram
                 ),
@@ -146,35 +185,39 @@ impl App {
             gap(16.0),
             group(vec![
                 (
-                    "Undo",
+                    Face::Icon(Icon::Undo),
                     (!playing && self.session().can_undo()).then_some(Message::Undo),
                     false
                 ),
                 (
-                    "Redo",
+                    Face::Icon(Icon::Redo),
                     (!playing && self.session().can_redo()).then_some(Message::Redo),
                     false
                 ),
             ]),
             gap(16.0),
             group(vec![
-                ("Cut", None, false),
-                ("Copy", None, false),
-                ("Paste", None, false),
+                (Face::Icon(Icon::Cut), None, false),
+                (Face::Icon(Icon::Copy), None, false),
+                (Face::Icon(Icon::Paste), None, false),
             ]),
             gap(16.0),
             group(vec![
-                ("−", self.can_zoom_out().then_some(Message::ZoomOut), false),
-                ("+", Some(Message::ZoomIn), false),
+                (
+                    Face::Label("−"),
+                    self.can_zoom_out().then_some(Message::ZoomOut),
+                    false
+                ),
+                (Face::Label("+"), Some(Message::ZoomIn), false),
             ]),
             Space::new().width(Fill),
             text(self.project_name.clone()).size(24),
             gap(16.0),
             tool(
-                match self.tone() {
-                    Tone::Light => "Dark",
-                    Tone::Dark => "Light",
-                },
+                Face::Icon(match self.tone() {
+                    Tone::Light => Icon::Dark,
+                    Tone::Dark => Icon::Light,
+                }),
                 Some(Message::ToggleTone),
                 false
             ),
@@ -206,18 +249,18 @@ impl App {
         .height(Length::Fixed(24.0));
         let mut bar = row![
             group(vec![
-                ("Mono", Some(Message::SetMono(true)), mono),
-                ("Stereo", Some(Message::SetMono(false)), !mono),
+                (Face::Label("Mono"), Some(Message::SetMono(true)), mono),
+                (Face::Label("Stereo"), Some(Message::SetMono(false)), !mono),
             ]),
             gap(16.0),
             group(vec![
                 if playing {
-                    ("Pause", Some(Message::Pause), false)
+                    (Face::Icon(Icon::Pause), Some(Message::Pause), false)
                 } else {
-                    ("Play", Some(Message::Play), false)
+                    (Face::Icon(Icon::Play), Some(Message::Play), false)
                 },
-                ("Stop", Some(Message::Stop), false),
-                ("Record", None, false),
+                (Face::Icon(Icon::Stop), Some(Message::Stop), false),
+                (Face::Icon(Icon::Record), None, false),
             ]),
             gap(16.0),
             text(format!("{seconds:>8.2} s")).size(14),
@@ -311,8 +354,12 @@ impl App {
         let header = row![
             text(crate::patch_board::title(&node.kind)).size(18),
             Space::new().width(Fill),
-            tool("Delete node", Some(Message::DeleteNode(id)), false),
-            tool("×", Some(Message::Select(None)), false),
+            tool(
+                Face::Label("Delete node"),
+                Some(Message::DeleteNode(id)),
+                false
+            ),
+            tool(Face::Label("×"), Some(Message::Select(None)), false),
         ]
         .spacing(6)
         .align_y(Alignment::Center);
@@ -326,9 +373,13 @@ impl App {
                         scrollable::Scrollbar::default(),
                     )),
                     group(vec![
-                        ("Add channel", Some(Message::AddMixerChannel(id)), false),
                         (
-                            "Remove channel",
+                            Face::Label("Add channel"),
+                            Some(Message::AddMixerChannel(id)),
+                            false
+                        ),
+                        (
+                            Face::Label("Remove channel"),
                             self.removable_channel(id)
                                 .map(|_| Message::RemoveMixerChannel(id)),
                             false
@@ -574,7 +625,7 @@ impl App {
             .width(Length::Fixed(80.0)),
             group(vec![
                 (
-                    "M",
+                    Face::Label("M"),
                     Some(Message::SetMode {
                         node: id,
                         channel: ch,
@@ -583,7 +634,7 @@ impl App {
                     mode == Mode::Mute
                 ),
                 (
-                    "S",
+                    Face::Label("S"),
                     Some(Message::SetMode {
                         node: id,
                         channel: ch,

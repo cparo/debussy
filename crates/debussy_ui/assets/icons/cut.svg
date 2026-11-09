@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+<title>Cut</title>
+<path fill="#000" fill-rule="evenodd" d="M6 14.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7ZM6 16.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3ZM18 14.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7ZM18 16.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3Z"/>
+<path d="M8 15.1 17 3.5M16 15.1 7 3.5" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round"/>
+</svg>
