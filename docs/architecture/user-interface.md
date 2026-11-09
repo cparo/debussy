@@ -99,7 +99,10 @@ playback stops following until the playhead is in view again
 
 Zoom steps by √2: two steps halve or double the time shown, from 2 to 2^24 frames per waveform
 column. Zooming keeps the playhead at the same place on screen if it is visible, otherwise the
-view's centre. A mostly sideways two-finger scroll over a lane pans the view; there is no gesture
+view's centre. Zoom out stops at a fit that shows frame 0 to the project's end and follows it as
+clips change; zooming in from the fit goes to the coarsest grid step finer than it, and zoom out is
+disabled while the view covers the project
+([ADR-0066](../adrs/0066-zoom-out-stops-at-an-exact-fit-of-the-project.md)). A mostly sideways two-finger scroll over a lane pans the view; there is no gesture
 zoom ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md),
 [ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
 
