@@ -542,10 +542,11 @@ fn test_pan_stops_at_the_project_end() -> Result<(), Box<dyn Error>> {
     for _ in 0..12 {
         app.update(Message::ZoomIn);
     }
+    // The project's last frame and the end itself, where a playhead stops, are shown.
     app.update(Message::Pan(100.0));
-    assert_eq!(app.view_start() + app.view_span(), PROJECT_END);
+    assert_eq!(app.view_start() + app.view_span(), PROJECT_END + 1);
     app.update(Message::Pan(1.0));
-    assert_eq!(app.view_start() + app.view_span(), PROJECT_END);
+    assert_eq!(app.view_start() + app.view_span(), PROJECT_END + 1);
     app.update(Message::Pan(-100.0));
     assert_eq!(app.view_start(), 0);
     Ok(())
@@ -570,7 +571,7 @@ fn test_zoom_out_near_the_end_stays_within_the_project() -> Result<(), Box<dyn E
     }
     app.update(Message::Pan(100.0));
     app.update(Message::ZoomOut);
-    assert!(app.view_start() + app.view_span() <= PROJECT_END);
+    assert!(app.view_start() + app.view_span() <= PROJECT_END + 1);
     Ok(())
 }
 
@@ -1274,5 +1275,52 @@ fn test_play_from_past_the_end_starts_from_the_top() -> Result<(), Box<dyn Error
     block(&mut processor)?;
     assert!(app.engine().playhead() < CLIP_END);
     assert!(app.engine().is_playing());
+    Ok(())
+}
+
+/// Zooms in until the view is shorter than the fixture's project.
+fn zoom_inside_the_project(app: &mut App) {
+    while app.view_span() >= CLIP_END / 2 {
+        app.update(Message::ZoomIn);
+    }
+}
+
+#[test]
+fn test_seek_near_the_end_keeps_the_view_within_the_project() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    zoom_inside_the_project(&mut app);
+    app.update(Message::Seek(CLIP_END - 100));
+    block(&mut processor)?;
+    // The view ends just past the project's end.
+    let view_end = app.view_start() + app.view_span();
+    assert_eq!(view_end, CLIP_END + 1);
+    // A seek past the end still brings the playhead into view.
+    app.update(Message::Seek(CLIP_END * 3));
+    assert_eq!(app.view_start() + app.view_span(), CLIP_END * 3 + 1);
+    Ok(())
+}
+
+#[test]
+fn test_paging_stops_at_the_project_end() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    zoom_inside_the_project(&mut app);
+    // Start inside the view, at 70 %, so the first pages come within a few blocks.
+    app.update(Message::Seek(CLIP_END - app.view_span() * 2));
+    block(&mut processor)?;
+    let mut views = Vec::new();
+    app.update(Message::Play);
+    for _ in 0..1_000 {
+        block(&mut processor)?;
+        app.update(Message::Tick);
+        views.push(app.view_start());
+        if !app.engine().is_playing() {
+            break;
+        }
+    }
+    assert!(!app.engine().is_playing());
+    assert!(views.windows(2).all(|w| w[0] <= w[1]), "never backwards");
+    assert!(views.first() < views.last(), "it paged");
+    let view_end = app.view_start() + app.view_span();
+    assert_eq!(view_end, CLIP_END + 1);
     Ok(())
 }

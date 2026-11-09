@@ -1,6 +1,6 @@
 # ADR-0069 — Panning stops at the later of the project's end and the playhead
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0077
 - **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-08
 - **Issue:** —

@@ -92,7 +92,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0066](0066-zoom-out-stops-at-an-exact-fit-of-the-project.md) | Zoom out stops at an exact fit of the project | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0067](0067-the-project-is-saved-after-every-edit.md) | The project is saved after every edit | Accepted | [Saving](../architecture/project.md#saving) |
 | [ADR-0068](0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md) | Lanes are rasterised in memory and blurred with a Gaussian, drawn through iced's image support | Accepted | [Layout](../architecture/user-interface.md#layout) |
-| [ADR-0069](0069-panning-stops-at-the-later-of-the-project-s-end.md) | Panning stops at the later of the project's end and the playhead | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
+| [ADR-0069](0069-panning-stops-at-the-later-of-the-project-s-end.md) | Panning stops at the later of the project's end and the playhead | Superseded by ADR-0077 | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0070](0070-icons-are-svg-files-drawn-with-iced-s-svg-feature.md) | Icons are SVG files drawn with iced's svg feature | Accepted | [Icons](../architecture/user-interface.md#icons) |
 | [ADR-0071](0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md) | The audio colour is orange on dark chrome and blue on light | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0072](0072-toolbar-controls-show-icons-named-in-tooltips.md) | Toolbar controls show icons named in tooltips | Accepted | [Icons](../architecture/user-interface.md#icons) |
@@ -100,4 +100,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0074](0074-a-drag-in-the-lanes-selects-a-range-and-edit.md) | A drag in the lanes selects a range, and edit shortcuts act on it | Accepted | [Range selection and shortcuts](../architecture/user-interface.md#range-selection-and-shortcuts) |
 | [ADR-0075](0075-the-playhead-time-reads-hh-mm-ss-000-dropping.md) | The playhead time reads HH:MM:SS.000, dropping leading units a short project does not need | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0076](0076-playback-stops-by-itself-at-the-project-s-end.md) | Playback stops by itself at the project's end | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
+| [ADR-0077](0077-every-view-move-stops-at-the-scroll-bound.md) | Every view move stops at the scroll bound | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 

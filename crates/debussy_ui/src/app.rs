@@ -1055,7 +1055,10 @@ impl App {
         self.return_point = frame;
         let span = self.view_span();
         if frame < self.start || frame >= self.start.saturating_add(span) {
-            self.start = frame.saturating_sub(span / 2);
+            // Centred, within the scroll bound; the engine may not report the new playhead
+            // yet, so the bound takes in `frame` itself.
+            let bound = self.scroll_bound().max(frame);
+            self.start = frame.saturating_sub(span / 2).min(last_start(bound, span));
             self.refresh_lanes();
         }
     }
@@ -1119,7 +1122,8 @@ impl App {
             Some(_) => self.engine.playhead(),
             None => self.start.saturating_add(self.view_span() / 2),
         };
-        let within = self.start.saturating_add(self.view_span()) <= self.scroll_bound();
+        let within =
+            self.start.saturating_add(self.view_span()) <= self.scroll_bound().saturating_add(1);
         self.zoom = zoom;
         self.start = zoomed_start(self.start, old, self.samples_per_column(), anchor);
         if within {
@@ -1144,8 +1148,8 @@ impl App {
 
     /// Pages the view along with a playing playhead (`docs/architecture/user-interface.md`
     /// "Transport and seeking"): once it has been seen in view, reaching 80 % of the lane's
-    /// width moves the view to put it at 20 %. A playhead out of view that was not followed
-    /// there is left alone.
+    /// width moves the view to put it at 20 %, or as far as the scroll bound allows. A playhead
+    /// out of view that was not followed there is left alone.
     fn follow_playhead(&mut self) {
         if !self.engine.is_playing() {
             self.following = false;
@@ -1157,8 +1161,12 @@ impl App {
             self.following = true;
         }
         if self.following && playhead >= self.start.saturating_add(span * 4 / 5) {
-            self.start = playhead.saturating_sub(span / 5);
-            self.refresh_lanes();
+            // Within the scroll bound, which takes in the playhead, and never backwards.
+            let target = playhead.saturating_sub(span / 5).min(self.max_start());
+            if target > self.start {
+                self.start = target;
+                self.refresh_lanes();
+            }
         }
     }
 
@@ -1206,10 +1214,10 @@ impl App {
         self.project_end().max(self.engine.playhead())
     }
 
-    /// The furthest view start that panning and zooming out reach: the scroll bound at the
-    /// lane's right edge, or 0 when it fits in the view.
+    /// The furthest view start that panning, zooming out, paging and seeking reach: the scroll
+    /// bound at the lane's last column, so a playhead there is drawn, or 0 when it fits.
     fn max_start(&self) -> u64 {
-        self.scroll_bound().saturating_sub(self.view_span())
+        last_start(self.scroll_bound(), self.view_span())
     }
 
     /// The project's end: the end of its last clip, or 0 if it has none.
@@ -1228,4 +1236,9 @@ impl App {
             self.status = Some(message);
         }
     }
+}
+
+/// The view start of `span` frames that puts frame `bound` last in the view, or 0.
+fn last_start(bound: u64, span: u64) -> u64 {
+    bound.saturating_add(1).saturating_sub(span)
 }
