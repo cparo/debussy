@@ -6,7 +6,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
+use audio_analysis::{
+    BASE_BUCKET, BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader, sample_columns,
+};
 use audio_buffers::Layout;
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{DeviceChoice, ImportedTrack, Services, Spectrum, spectrum_bands};
@@ -44,8 +46,11 @@ pub struct AppServices {
     no_streams: NoStreams,
     /// Open waveform summaries, by stored file name; `None` where there is none.
     waveforms: BTreeMap<String, Option<WaveformReader<BufReader<File>>>>,
-    /// Open stored audio files for spectrograms, by name; `None` where one cannot be read.
+    /// Open stored audio files for spectrograms and the finest zooms, by name; `None` where one
+    /// cannot be read.
     audio_files: BTreeMap<String, Option<WavReader<BufReader<File>>>>,
+    /// The samples behind waveform columns finer than the summaries' smallest bucket.
+    waveform_samples: Vec<f32>,
     /// The spectrogram calculator and its buffers, made on first use.
     spectrogram: Option<SpectrogramScratch>,
 }
@@ -75,9 +80,27 @@ impl AppServices {
             no_streams: NoStreams,
             waveforms: BTreeMap::new(),
             audio_files: BTreeMap::new(),
+            waveform_samples: Vec::new(),
             spectrogram: None,
         }
     }
+}
+
+/// Stored audio file `file` from `bundle`, opened on first use and kept in `audio_files`; `None`
+/// if it cannot be read.
+fn audio_file<'a>(
+    audio_files: &'a mut BTreeMap<String, Option<WavReader<BufReader<File>>>>,
+    bundle: &Bundle,
+    file: &str,
+) -> Option<&'a mut WavReader<BufReader<File>>> {
+    audio_files
+        .entry(file.to_owned())
+        .or_insert_with(|| {
+            File::open(bundle.audio_dir().join(file))
+                .ok()
+                .and_then(|f| WavReader::new(BufReader::new(f)).ok())
+        })
+        .as_mut()
 }
 
 impl Services for AppServices {
@@ -133,6 +156,23 @@ impl Services for AppServices {
     }
 
     fn waveform(&mut self, file: &str, start: u64, spc: u64, out: &mut [Bucket]) -> usize {
+        if spc < BASE_BUCKET {
+            // Finer than the summaries: summarise the audio itself, one sample past the last
+            // column so it joins the next (`docs/architecture/analysis.md` "Waveform
+            // summaries"). Stored files are mono.
+            let Some(reader) = audio_file(&mut self.audio_files, &self.bundle, file) else {
+                return 0;
+            };
+            if start >= reader.frames() || reader.seek(start).is_err() {
+                return 0;
+            }
+            let wanted = out.len() * spc as usize + 1;
+            self.waveform_samples.resize(wanted, 0.0);
+            let Ok(read) = reader.read(&mut [&mut self.waveform_samples[..]]) else {
+                return 0;
+            };
+            return sample_columns(&self.waveform_samples[..read], spc as usize, out);
+        }
         let bundle = &self.bundle;
         let reader = self.waveforms.entry(file.to_owned()).or_insert_with(|| {
             File::open(waveform_cache(bundle, file))
@@ -146,17 +186,7 @@ impl Services for AppServices {
     }
 
     fn spectrogram(&mut self, file: &str, start: u64, spc: u64, out: &mut [Spectrum]) -> usize {
-        let bundle = &self.bundle;
-        let Some(reader) = self
-            .audio_files
-            .entry(file.to_owned())
-            .or_insert_with(|| {
-                File::open(bundle.audio_dir().join(file))
-                    .ok()
-                    .and_then(|f| WavReader::new(BufReader::new(f)).ok())
-            })
-            .as_mut()
-        else {
+        let Some(reader) = audio_file(&mut self.audio_files, &self.bundle, file) else {
             return 0;
         };
         if self.spectrogram.is_none() {
@@ -171,19 +201,34 @@ impl Services for AppServices {
         let Some(scratch) = &mut self.spectrogram else {
             return 0;
         };
-        // One frame from the start of each column; stored files are mono.
+        // One frame centred on each column, zero outside the file; stored files are mono.
+        let half = FRAME_SIZE as u64 / 2;
         let mut filled = 0;
         for (column, spectrum) in out.iter_mut().enumerate() {
             let at = start.saturating_add(column as u64 * spc);
-            if at >= reader.frames() || reader.seek(at).is_err() {
+            if at >= reader.frames() {
                 break;
             }
-            let Ok(read) = reader.read(&mut [&mut scratch.samples[..]]) else {
-                break;
+            let centre = at.saturating_add(spc / 2);
+            // Samples before frame 0 are silence.
+            let skip = half.saturating_sub(centre) as usize;
+            let from = centre.saturating_sub(half);
+            scratch.samples[..skip].fill(0.0);
+            let read = if from < reader.frames() {
+                if reader.seek(from).is_err() {
+                    break;
+                }
+                let Ok(read) = reader.read(&mut [&mut scratch.samples[skip..]]) else {
+                    break;
+                };
+                read
+            } else {
+                0
             };
+            scratch.samples[skip + read..].fill(0.0);
             if scratch
                 .spectrogram
-                .frame_db(&scratch.samples[..read], &mut scratch.levels)
+                .frame_db(&scratch.samples, &mut scratch.levels)
                 .is_err()
             {
                 break;

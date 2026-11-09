@@ -9,7 +9,7 @@ use crate::app::Message;
 use crate::theme::{CURSOR, tokens, tone_of};
 use crate::waveform::MIN_SAMPLES_PER_COLUMN;
 
-/// The finest zoom out: frames per lane column.
+/// The farthest zoom out: frames per lane column.
 pub const MAX_SAMPLES_PER_COLUMN: u64 = 1 << 24;
 
 /// The coarsest zoom level, at [`MAX_SAMPLES_PER_COLUMN`]; level 0 is
@@ -17,7 +17,7 @@ pub const MAX_SAMPLES_PER_COLUMN: u64 = 1 << 24;
 pub(crate) const MAX_ZOOM: u32 = 2 * (MAX_SAMPLES_PER_COLUMN / MIN_SAMPLES_PER_COLUMN).ilog2();
 
 /// The zoom level a project opens at: 1024 frames per column.
-pub(crate) const DEFAULT_ZOOM: u32 = 8;
+pub(crate) const DEFAULT_ZOOM: u32 = 18;
 
 /// Frames per lane column at zoom `level` (clamped to [`MAX_ZOOM`]): even levels are exact
 /// powers of two, odd ones √2 times the level below, rounded.
@@ -153,14 +153,20 @@ mod tests {
     #[test]
     fn test_samples_per_column_doubles_every_two_levels() {
         assert_eq!(samples_per_column(0), MIN_SAMPLES_PER_COLUMN);
-        assert_eq!(samples_per_column(1), 91);
+        assert_eq!(samples_per_column(1), 3);
         assert_eq!(samples_per_column(DEFAULT_ZOOM), 1024);
         assert_eq!(samples_per_column(MAX_ZOOM), MAX_SAMPLES_PER_COLUMN);
         assert_eq!(samples_per_column(MAX_ZOOM + 5), MAX_SAMPLES_PER_COLUMN);
+        assert_eq!(MAX_ZOOM, 46);
+        for level in 0..MAX_ZOOM {
+            assert!(samples_per_column(level + 1) > samples_per_column(level));
+        }
         for level in (0..MAX_ZOOM - 1).step_by(2) {
             assert_eq!(samples_per_column(level + 2), 2 * samples_per_column(level));
+            // Rounding at the finest levels (3 for 2√2) puts them further from √2.
             let between = samples_per_column(level + 1) as f64 / samples_per_column(level) as f64;
-            assert!((between - std::f64::consts::SQRT_2).abs() < 0.01);
+            let tolerance = if level < 8 { 0.1 } else { 0.01 };
+            assert!((between - std::f64::consts::SQRT_2).abs() < tolerance);
         }
     }
 

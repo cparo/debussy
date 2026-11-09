@@ -36,8 +36,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Node dialogs** open over the track pane for the selected node: a header with its name and a
   delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
   or a feedback delay's time in seconds; a bus has only the header.
-- **Lanes** show waveforms from the waveform summaries, or spectrograms: one spectrum per four
-  waveform columns, computed on demand from the stored audio as 64 log-spaced bands.
+- **Lanes** show waveforms from the waveform summaries, or from the stored audio at zooms finer
+  than the summaries, or spectrograms: one spectrum per four waveform columns, computed on demand
+  from the stored audio as 64 log-spaced bands, each from a frame centred on its column
+  ([ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
 - **Colours:** audio signals are orange and control signals lavender in both tones; only the
   chrome changes between light and dark. The tone follows the system's appearance at launch and
   when it changes; the toggle is not saved.
@@ -88,10 +90,11 @@ The position bar shows the playhead as a red bar along a grey channel over the t
 (the end of the last clip, or more to take in the window and the playhead), with ticks at the
 visible window's edges.
 
-Zoom steps by √2: two steps halve or double the time shown, from 64 to 2^24 frames per waveform
+Zoom steps by √2: two steps halve or double the time shown, from 2 to 2^24 frames per waveform
 column. Zooming keeps the playhead at the same place on screen if it is visible, otherwise the
 view's centre. A mostly sideways two-finger scroll over a lane pans the view; there is no gesture
-zoom ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md)).
+zoom ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md),
+[ADR-0062](../adrs/0062-zooms-finer-than-the-waveform-summaries-are-drawn.md)).
 
 ## Gestures
 
