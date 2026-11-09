@@ -30,8 +30,6 @@ pub enum Menu {
 pub(crate) enum Entry {
     /// A choice: greyed out when it has no message.
     Item(String, Option<Message>),
-    /// A label over the choices after it.
-    Heading(String),
     /// A dividing line.
     Separator,
 }
@@ -51,9 +49,6 @@ pub(crate) fn dropdown<'a>(entries: Vec<Entry>) -> Element<'a, Message> {
             .width(Length::Fill)
             .padding([4, 10])
             .style(theme::flat)
-            .into(),
-        Entry::Heading(label) => container(text(label).size(12))
-            .padding(iced::Padding::from([2, 10]).top(6))
             .into(),
         Entry::Separator => container(rule::horizontal(1)).padding([4, 6]).into(),
     });

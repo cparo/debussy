@@ -103,4 +103,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0077](0077-every-view-move-stops-at-the-scroll-bound.md) | Every view move stops at the scroll bound | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 | [ADR-0078](0078-recording-captures-armed-inputs-on-the-real-time.md) | Recording captures armed inputs on the real-time thread and writes takes on a separate thread | Accepted | [Capture](../architecture/recording.md#capture) |
 | [ADR-0079](0079-arm-state-is-session-only-and-inputs-open-only.md) | Arm state is session-only and inputs open only while a track is armed | Accepted | [Recording](../architecture/user-interface.md#recording) |
+| [ADR-0080](0080-record-and-arm-are-lit-in-a-fixed-recording-red.md) | Record and arm are lit in a fixed recording red and the audio device is picked in the bottom bar | Accepted | [Layout](../architecture/user-interface.md#layout) |
 
