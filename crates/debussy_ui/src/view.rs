@@ -167,7 +167,7 @@ impl App {
             ]),
             gap(16.0),
             group(vec![
-                ("−", Some(Message::ZoomOut), false),
+                ("−", self.can_zoom_out().then_some(Message::ZoomOut), false),
                 ("+", Some(Message::ZoomIn), false),
             ]),
             Space::new().width(Fill),

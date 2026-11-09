@@ -31,6 +31,13 @@ pub(crate) fn samples_per_column(level: u32) -> u64 {
     }
 }
 
+/// The coarsest zoom level with fewer than `spc` frames per column, if any.
+pub(crate) fn level_below(spc: u64) -> Option<u32> {
+    (0..=MAX_ZOOM)
+        .rev()
+        .find(|&level| samples_per_column(level) < spc)
+}
+
 /// The first frame shown after zooming from `old` to `new` frames per column, so that timeline
 /// frame `anchor` stays at the same place on screen.
 pub(crate) fn zoomed_start(start: u64, old: u64, new: u64, anchor: u64) -> u64 {
@@ -168,6 +175,14 @@ mod tests {
             let tolerance = if level < 8 { 0.1 } else { 0.01 };
             assert!((between - std::f64::consts::SQRT_2).abs() < tolerance);
         }
+    }
+
+    #[test]
+    fn test_level_below_finds_the_coarsest_finer_level() {
+        assert_eq!(level_below(1025), Some(DEFAULT_ZOOM));
+        assert_eq!(level_below(1024), Some(DEFAULT_ZOOM - 1));
+        assert_eq!(level_below(MIN_SAMPLES_PER_COLUMN), None);
+        assert_eq!(level_below(u64::MAX), Some(MAX_ZOOM));
     }
 
     #[test]
