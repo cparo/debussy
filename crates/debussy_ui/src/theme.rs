@@ -76,8 +76,8 @@ const LIGHT: Tokens = Tokens {
     face_text: Color::BLACK,
     line: Color::from_rgb(0.55, 0.55, 0.55),
     channel: Color::from_rgb(0.62, 0.62, 0.62),
-    audio: Color::from_rgb(0.0, 0.45, 0.9),
-    audio_text: Color::WHITE,
+    audio: Color::from_rgb8(0x76, 0xA1, 0xCC),
+    audio_text: Color::BLACK,
 };
 
 /// The tokens of `tone`.
@@ -315,10 +315,9 @@ mod tests {
     #[test]
     fn test_tokens_audio_differs_by_tone() {
         assert_ne!(LIGHT.audio, DARK.audio);
-        assert_eq!(LIGHT.audio_text, Color::WHITE);
         let light = tool(true, Place::Alone)(&theme(Tone::Light), button::Status::Active);
         assert_eq!(light.background, Some(Background::Color(LIGHT.audio)));
-        assert_eq!(light.text_color, Color::WHITE);
+        assert_eq!(light.text_color, LIGHT.audio_text);
     }
 
     #[test]
