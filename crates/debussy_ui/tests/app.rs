@@ -21,6 +21,8 @@ use signal_graph::{Config, NodeId as GraphNodeId};
 struct Calls {
     track_feeds: usize,
     saves: usize,
+    /// Whether saving fails.
+    save_fails: bool,
     waveform: Vec<(String, u64, u64)>,
     spectrogram: Vec<(String, u64, u64)>,
     samples: Vec<(String, u64, usize)>,
@@ -87,7 +89,11 @@ impl Services for Fake {
     }
 
     fn save(&mut self, _session: &Session) -> Result<(), String> {
-        self.calls.borrow_mut().saves += 1;
+        let mut calls = self.calls.borrow_mut();
+        calls.saves += 1;
+        if calls.save_fails {
+            return Err("disk full".into());
+        }
         Ok(())
     }
 
@@ -282,8 +288,8 @@ fn test_transport_loads_feeds_once_and_follows_the_engine() -> Result<(), Box<dy
     assert_eq!(app.engine().real_time_state(), TransportState::Stopped);
     // The clips did not change, so the feeds were made once.
     assert_eq!(calls.borrow().track_feeds, 1);
-    app.update(Message::Save);
-    assert_eq!(calls.borrow().saves, 1);
+    // Playback changes nothing to save.
+    assert_eq!(calls.borrow().saves, 0);
     Ok(())
 }
 
@@ -924,5 +930,64 @@ fn test_tick_follows_playhead_that_jumps_past_the_edge() -> Result<(), Box<dyn E
     }
     app.update(Message::Tick);
     assert!((playhead_at(&app) - 0.2).abs() < 0.01);
+    Ok(())
+}
+
+#[test]
+fn test_update_autosaves_after_rename() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    let track = app.session().state().tracks[0].id;
+    app.update(Message::StartRename(track));
+    app.update(Message::RenameText("Lead".into()));
+    assert_eq!(calls.borrow().saves, 0);
+    app.update(Message::FinishRename);
+    assert_eq!(calls.borrow().saves, 1);
+    Ok(())
+}
+
+#[test]
+fn test_update_autosaves_a_rename_finished_by_quit() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    let track = app.session().state().tracks[0].id;
+    app.update(Message::StartRename(track));
+    app.update(Message::RenameText("Lead".into()));
+    app.update(Message::Quit);
+    assert_eq!(app.session().state().tracks[0].name, "Lead");
+    assert_eq!(calls.borrow().saves, 1);
+    Ok(())
+}
+
+#[test]
+fn test_update_does_not_autosave_without_edit() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    app.update(Message::Tick);
+    app.update(Message::Scrolled(10.0));
+    app.update(Message::ZoomIn);
+    app.update(Message::Undo);
+    assert_eq!(calls.borrow().saves, 0);
+    Ok(())
+}
+
+#[test]
+fn test_update_autosaves_after_undo() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    app.update(Message::AddTrack(Layout::Mono));
+    app.update(Message::Undo);
+    app.update(Message::Redo);
+    assert_eq!(calls.borrow().saves, 3);
+    Ok(())
+}
+
+#[test]
+fn test_update_reports_a_failed_autosave_once() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    calls.borrow_mut().save_fails = true;
+    app.update(Message::AddTrack(Layout::Mono));
+    assert_eq!(app.status(), Some("Autosave failed: disk full"));
+    app.update(Message::Tick);
+    assert_eq!(calls.borrow().saves, 1);
+    // The next edit tries again.
+    app.update(Message::AddTrack(Layout::Mono));
+    assert_eq!(calls.borrow().saves, 2);
     Ok(())
 }

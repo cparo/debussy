@@ -23,6 +23,8 @@ pub struct Session {
     versions: BTreeMap<String, State>,
     /// The next unused id, shared by tracks and clips.
     next_id: u64,
+    /// Changes to the state or the named versions so far.
+    revision: u64,
 }
 
 impl Session {
@@ -50,7 +52,23 @@ impl Session {
             redo: Vec::new(),
             versions,
             next_id,
+            revision: 0,
         }
+    }
+
+    /// How many times the state or the named versions have changed since the session began: an
+    /// applied edit, an undo, a redo, a revert, or a version saved or removed. A failed change
+    /// leaves it alone; the interface saves the project when it moves.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Counts one change, and passes `changed` through.
+    fn bump(&mut self, changed: bool) -> bool {
+        if changed {
+            self.revision += 1;
+        }
+        changed
     }
 
     /// The current state.
@@ -67,6 +85,7 @@ impl Session {
         let inverse = edit.apply(&mut self.state)?;
         self.undo.push(inverse);
         self.redo.clear();
+        self.bump(true);
         Ok(())
     }
 
@@ -76,17 +95,20 @@ impl Session {
     /// revert.
     pub fn revert_last(&mut self) -> bool {
         let mut discarded = Vec::new();
-        step(&mut self.state, &mut self.undo, &mut discarded)
+        let changed = step(&mut self.state, &mut self.undo, &mut discarded);
+        self.bump(changed)
     }
 
     /// Undoes the latest step. Returns `false` if there is nothing to undo.
     pub fn undo(&mut self) -> bool {
-        step(&mut self.state, &mut self.undo, &mut self.redo)
+        let changed = step(&mut self.state, &mut self.undo, &mut self.redo);
+        self.bump(changed)
     }
 
     /// Redoes the latest undone step. Returns `false` if there is nothing to redo.
     pub fn redo(&mut self) -> bool {
-        step(&mut self.state, &mut self.redo, &mut self.undo)
+        let changed = step(&mut self.state, &mut self.redo, &mut self.undo);
+        self.bump(changed)
     }
 
     /// Whether there is a step to undo.
@@ -479,6 +501,7 @@ impl Session {
             return Err(Error::VersionExists(name.to_owned()));
         }
         self.versions.insert(name.to_owned(), self.state.clone());
+        self.bump(true);
         Ok(())
     }
 
@@ -490,8 +513,9 @@ impl Session {
     pub fn remove_version(&mut self, name: &str) -> Result<(), Error> {
         self.versions
             .remove(name)
-            .map(|_| ())
-            .ok_or_else(|| Error::UnknownVersion(name.to_owned()))
+            .ok_or_else(|| Error::UnknownVersion(name.to_owned()))?;
+        self.bump(true);
+        Ok(())
     }
 
     /// The named versions, by name.

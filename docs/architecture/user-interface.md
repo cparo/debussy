@@ -22,7 +22,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
-  switch projects), save, import, export, export mono, the audio device, and quit.
+  switch projects), import, export, export mono, the audio device, and quit.
 - **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the playhead's time,
   the status line, and the position bar.
 - **Track pane:** each track is a header (its name and a ≡ menu: rename, import audio into,

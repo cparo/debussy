@@ -90,4 +90,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0064](0064-the-intensity-graded-trace-may-be-built-in-house.md) | The intensity-graded trace may be built in-house: no patent in force was found to read on it | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0065](0065-zooms-finer-than-the-waveform-summaries-are-drawn.md) | Zooms finer than the waveform summaries are drawn as a time-in-level trace, normalised per column through a square root | Accepted | [Waveform summaries](../architecture/analysis.md#waveform-summaries) |
 | [ADR-0066](0066-zoom-out-stops-at-an-exact-fit-of-the-project.md) | Zoom out stops at an exact fit of the project | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
+| [ADR-0067](0067-the-project-is-saved-after-every-edit.md) | The project is saved after every edit | Accepted | [Saving](../architecture/project.md#saving) |
 
