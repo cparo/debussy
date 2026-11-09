@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use audio_buffers::Layout;
-use audio_engine::ArmedTrack;
+use audio_engine::{ArmedTrack, TakeInfo};
 use project_model::{AudioFile, Clip, Source, TrackId};
 
 use crate::app::App;
@@ -34,6 +34,8 @@ pub(crate) struct Pass {
     status: Vec<Option<Result<u64, String>>>,
     /// The device latency when the pass started.
     latency: u64,
+    /// Where capture began, once it has; kept here in case the engine is rebuilt.
+    info: Option<TakeInfo>,
 }
 
 impl Pass {
@@ -184,6 +186,11 @@ impl App {
     /// Brings the device and the engine in step with the arm settings, dropping tracks that no
     /// longer exist. Only while stopped or paused.
     pub(crate) fn sync_arming(&mut self) {
+        if self.services.audio_lost() {
+            // The device went while nothing was watching; recovering arms the new engine.
+            self.recover_audio(None);
+            return;
+        }
         let state = self.session.state();
         self.arming.retain(|id, _| state.track(*id).is_some());
         let want_input = !self.arming.is_empty();
@@ -260,6 +267,7 @@ impl App {
             status: vec![None; pass_tracks.iter().map(|(_, _, f)| f.len()).sum()],
             tracks: pass_tracks,
             latency,
+            info: None,
         };
         if let Err(error) = result {
             self.status = Some(format!("Recording could not start: {error}"));
@@ -271,9 +279,20 @@ impl App {
         self.pass = Some(pass);
     }
 
+    /// Notes where the pending pass's capture began, if the engine says, before the engine is
+    /// replaced.
+    pub(crate) fn keep_take_info(&mut self) {
+        if let Some(pass) = &mut self.pass
+            && pass.info.is_none()
+        {
+            pass.info = self.engine.take();
+        }
+    }
+
     /// Collects what has become of the pass's files and, once recording has stopped and every
     /// file is done, places the takes (`docs/architecture/recording.md` "Take placement").
     pub(crate) fn poll_recording(&mut self) {
+        self.keep_take_info();
         let Some(pass) = &mut self.pass else {
             return;
         };
@@ -312,7 +331,7 @@ impl App {
                 None => frames = 0,
             }
         }
-        let placement = self.engine.take().map(|info| info.placement(pass.latency));
+        let placement = pass.info.map(|info| info.placement(pass.latency));
         let Some((position, offset)) = placement.filter(|&(_, offset)| frames > offset) else {
             self.services.discard_takes(&files);
             self.after_pass();

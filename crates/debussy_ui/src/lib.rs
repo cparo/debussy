@@ -10,6 +10,7 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `device`: rebuilding the engine when its audio device is lost.
 //! - `range_selection`: the range selected in the lanes.
 //! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
 //! - `shortcuts`: keyboard shortcuts.
@@ -24,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod device;
 mod icon;
 mod menu;
 mod patch_board;

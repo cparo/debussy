@@ -211,3 +211,7 @@ device can be changed only while stopped: the engine's real-time side is handed 
 stream and handed to the new one without being rebuilt, and if the new device fails to open the
 old one is reopened. An audio device that stops with an error stops playback and is reported on
 the status line ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).
+When its device has gone, the engine is rebuilt from the project, keeping the playhead, mono
+listening and armed tracks, and runs on the remembered device if present, else the default
+output; any device can be chosen afterwards. A take being recorded then is kept and placed as
+usual ([ADR-0081](../adrs/0081-a-lost-audio-device-s-engine-is-rebuilt-from-the.md)).

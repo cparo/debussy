@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
-use audio_engine::TakeSink;
+use audio_engine::{Processor, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
     DeviceChoice, ImportedTrack, Services, Spectrum, TakeFiles, TakeStatus, spectrum_bands,
@@ -419,6 +419,26 @@ impl Services for AppServices {
         for file in files {
             let _ = std::fs::remove_file(dir.join(file));
         }
+    }
+
+    fn audio_lost(&mut self) -> bool {
+        self.audio.is_lost()
+    }
+
+    fn adopt_engine(&mut self, processor: Processor, device: Option<&str>) -> Result<(), String> {
+        let preferred = device
+            .or(self.settings.device.as_deref())
+            .map(str::to_owned);
+        self.audio
+            .adopt(processor, preferred.as_deref())
+            .map_err(|e| format!("{e:#}"))?;
+        if let Some(id) = device {
+            self.settings.device = Some(id.to_owned());
+            self.settings
+                .save(&self.settings_path)
+                .map_err(|e| format!("the device is in use, but could not be remembered: {e}"))?;
+        }
+        Ok(())
     }
 
     fn set_device(&mut self, id: &str) -> Result<(), String> {
