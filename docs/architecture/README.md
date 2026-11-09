@@ -117,6 +117,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Click track](recording.md#click-track)
   - [Recording alignment](recording.md#recording-alignment)
   - [Capture](recording.md#capture)
+  - [Count-in](recording.md#count-in)
   - [Writer thread](recording.md#writer-thread)
   - [Take placement](recording.md#take-placement)
 - [Signal Graph](signal-graph.md)

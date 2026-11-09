@@ -107,4 +107,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0081](0081-a-lost-audio-device-s-engine-is-rebuilt-from-the.md) | A lost audio device's engine is rebuilt from the project | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 | [ADR-0082](0082-the-project-has-one-tempo-and-meter-saved-in.md) | The project has one tempo and meter, saved in project format 4 | Accepted | [Musical time](../architecture/project.md#musical-time) |
 | [ADR-0083](0083-the-click-is-mixed-at-the-output-stage-from.md) | The click is mixed at the output stage from bundled CC0 samples | Accepted | [Click track](../architecture/recording.md#click-track) |
+| [ADR-0084](0084-recording-s-count-in-splits-the-block-it-ends-in.md) | Recording's count-in splits the block it ends in | Accepted | [Count-in](../architecture/recording.md#count-in) |
 

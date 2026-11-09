@@ -8,8 +8,8 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use audio_engine::{ClickTrack, Engine, Processor};
-use common::{RATE, StreamControl, TestStreams, graph};
+use audio_engine::{ArmedTrack, ClickTrack, Engine, Processor, TransportState};
+use common::{RATE, StreamControl, TestStreams, graph, memory_sink};
 use realtime_guard::{GuardAllocator, assert_realtime};
 
 #[global_allocator]
@@ -108,6 +108,40 @@ fn test_click_level_scales_the_click() -> Result<(), Box<dyn Error>> {
     let full = expected(0, left.len())?;
     for (got, want) in left.iter().zip(&full) {
         assert!((got - want * gain).abs() < 1e-6);
+    }
+    Ok(())
+}
+
+/// A count-in clicks on the grid extended before the playhead, even with the click off, from a
+/// playhead mid-bar; recording then plays with the click off.
+#[test]
+fn test_count_in_clicks_on_the_grid_even_with_the_click_off() -> Result<(), Box<dyn Error>> {
+    for latency in [0, 96] {
+        let g = graph(latency)?;
+        let control = Arc::new(StreamControl::default());
+        let mut streams = TestStreams(Arc::clone(&control));
+        let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+        engine.set_click(ClickTrack::new(sound(), 1000.0, 4)?)?;
+        let (sink, _take) = memory_sink(100_000);
+        engine.arm(vec![ArmedTrack {
+            source: g.mono,
+            inputs: vec![0],
+            monitor: false,
+            sinks: vec![sink],
+        }])?;
+        // Mid-bar: a bar is 4000 frames; count in one bar.
+        let from = 5_500;
+        engine.locate(from, &mut streams)?;
+        engine.record(&mut streams, 4_000)?;
+        control.ready.store(true, Ordering::SeqCst);
+        let (left, right) = run(&mut processor, 50, 128)?;
+        assert_eq!(left, right);
+        assert_eq!(engine.real_time_state(), TransportState::Playing);
+        let counted = expected(from as i64 - 4_000 - latency as i64, 4_000)?;
+        assert_eq!(&left[..4_000], counted.as_slice());
+        assert!(counted.iter().any(|&s| s != 0.0));
+        // The click is off once playing.
+        assert!(left[4_000..].iter().all(|&s| s == 0.0));
     }
     Ok(())
 }
