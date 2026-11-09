@@ -16,7 +16,7 @@ use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
 use crate::theme::{self, Place, Tone};
 use crate::transport::PositionBar;
-use crate::waveform::{Display, LaneView};
+use crate::waveform::{CursorView, Display, LaneView};
 
 /// The height of one channel's lane, in logical pixels.
 pub(crate) const LANE_HEIGHT: f32 = 128.0;
@@ -378,15 +378,20 @@ impl App {
             };
             tracks = tracks.push(self.track_header(*id, &track.name));
             for lane in lanes {
+                let view = LaneView {
+                    lane,
+                    generation: self.generation,
+                    start,
+                    span,
+                    scale: self.scale_factor,
+                };
+                // The cursor is stacked above the lane, in a layer of its own, to draw over
+                // the lane's image.
                 tracks = tracks.push(
-                    canvas(LaneView {
-                        lane,
-                        generation: self.generation,
-                        cursor,
-                        start,
-                        span,
-                        scale: self.scale_factor,
-                    })
+                    stack![
+                        canvas(view).width(Fill).height(Fill),
+                        canvas(CursorView { at: cursor }).width(Fill).height(Fill),
+                    ]
                     .width(Fill)
                     .height(Length::Fixed(LANE_HEIGHT)),
                 );
