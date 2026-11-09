@@ -15,6 +15,7 @@ dsp = { path = "../dsp" }
 project_model = { path = "../project_model" }
 signal_graph = { path = "../signal_graph" }
 thiserror = "2.0.21"
+wav_files = { path = "../wav_files" }
 
 [lints]
 workspace = true

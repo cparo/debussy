@@ -12,22 +12,41 @@ use audio_buffers::Layout;
 use audio_engine::{Processor, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
-    DeviceChoice, ImportedTrack, Services, Spectrum, TakeFiles, TakeStatus, spectrum_bands,
+    ClickPreferences, DeviceChoice, ImportedTrack, Services, Spectrum, TakeFiles, TakeStatus,
+    spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
     WavClipAudio,
 };
-use engine_bridge::track_renderers;
+use engine_bridge::{ClickSound, track_renderers};
 use import_export::{import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
-use project_storage::{AppSettings, Bundle};
+use project_storage::{AppSettings, Bundle, ClickSound as SavedClickSound};
 use signal_graph::NodeId;
 use wav_files::WavReader;
 
 use crate::audio::AudioOutput;
 use crate::project::{build_waveform_caches_for, export_state, waveform_cache};
+
+/// The bundled sound a remembered click sound names.
+fn click_sound(saved: SavedClickSound) -> ClickSound {
+    match saved {
+        SavedClickSound::Block => ClickSound::Block,
+        SavedClickSound::Click => ClickSound::Click,
+        SavedClickSound::Stick => ClickSound::Stick,
+    }
+}
+
+/// How a click sound is remembered.
+fn saved_click_sound(sound: ClickSound) -> SavedClickSound {
+    match sound {
+        ClickSound::Block => SavedClickSound::Block,
+        ClickSound::Click => SavedClickSound::Click,
+        ClickSound::Stick => SavedClickSound::Stick,
+    }
+}
 
 /// Streams before any project audio is loaded: nothing to move.
 struct NoStreams;
@@ -447,5 +466,20 @@ impl Services for AppServices {
         self.settings
             .save(&self.settings_path)
             .map_err(|e| format!("the device is in use, but could not be remembered: {e}"))
+    }
+
+    fn click_preferences(&mut self) -> ClickPreferences {
+        ClickPreferences {
+            sound: click_sound(self.settings.click_sound),
+            level_db: self.settings.click_level_db,
+        }
+    }
+
+    fn set_click_preferences(&mut self, preferences: ClickPreferences) -> Result<(), String> {
+        self.settings.click_sound = saved_click_sound(preferences.sound);
+        self.settings.click_level_db = preferences.level_db;
+        self.settings
+            .save(&self.settings_path)
+            .map_err(|e| format!("the click settings could not be remembered: {e}"))
     }
 }

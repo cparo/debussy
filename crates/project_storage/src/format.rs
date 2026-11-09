@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +34,17 @@ pub(crate) struct SavedProject {
     /// the automatic layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_y: Option<f32>,
+    /// Since version 4: the project's tempo and meter.
+    pub tempo: SavedTempo,
+}
+
+/// The tempo and meter (`docs/architecture/project.md` "Musical time").
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedTempo {
+    pub bpm: f64,
+    pub beats_per_bar: u8,
+    pub beat_unit: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

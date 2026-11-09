@@ -11,9 +11,10 @@ use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
 use iced::widget::image;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse};
-use project_model::{Clip, Source, Track, TrackId};
+use project_model::{Clip, Source, Tempo, Track, TrackId};
 
 use crate::app::Message;
+use crate::grid::grid_lines;
 use crate::raster::Raster;
 use crate::services::Services;
 use crate::theme::{CURSOR, mix, tokens, tone_of};
@@ -353,7 +354,23 @@ impl Program<Message> for LaneView<'_> {
     }
 }
 
-/// The playhead cursor and the range selection over a lane. It is a canvas of its own, stacked
+/// The bars and beats grid over a lane: the project's tempo at its rate, and the stretch of the
+/// timeline the lane shows.
+#[derive(Debug, Clone, Copy)]
+pub struct GridView {
+    /// The tempo and meter.
+    pub tempo: Tempo,
+    /// The project rate.
+    pub rate: u32,
+    /// The first timeline frame shown.
+    pub start: u64,
+    /// The frames shown across the lane's width.
+    pub span: u64,
+    /// The display's physical pixels per logical pixel, to draw lines a pixel wide.
+    pub scale: f32,
+}
+
+/// The grid, playhead cursor and range selection over a lane. It is a canvas of its own, stacked
 /// above the lane's: the renderer draws a layer's vector shapes before its images, so a cursor
 /// in the lane's own canvas would be hidden under the lane image. It takes no events and sets
 /// no mouse pointer, so they reach the lane beneath.
@@ -362,6 +379,8 @@ pub struct CursorView {
     pub at: Option<f32>,
     /// The selected stretch of this lane, as fractions of its width, if any of it is visible.
     pub band: Option<(f32, f32)>,
+    /// The bars and beats grid, if shown.
+    pub grid: Option<GridView>,
 }
 
 impl Program<Message> for CursorView {
@@ -375,10 +394,26 @@ impl Program<Message> for CursorView {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        if self.at.is_none() && self.band.is_none() {
+        if self.at.is_none() && self.band.is_none() && self.grid.is_none() {
             return Vec::new();
         }
         let mut frame = Frame::new(renderer, bounds.size());
+        if let Some(grid) = &self.grid {
+            // Hairlines a physical pixel wide on the pixel grid, so they stay sharp; bars
+            // stronger than beats, in the text colour.
+            let ink = tokens(tone_of(theme)).text;
+            let scale = grid.scale.max(0.5);
+            let lines = grid_lines(&grid.tempo, grid.rate, grid.start, grid.span, bounds.width);
+            for line in lines {
+                let x = (line.x * scale).floor() / scale;
+                let alpha = if line.bar { 0.4 } else { 0.16 };
+                frame.fill_rectangle(
+                    Point::new(x, 0.0),
+                    Size::new(1.0 / scale, bounds.height),
+                    Color { a: alpha, ..ink },
+                );
+            }
+        }
         if let Some((from, to)) = self.band {
             // A light band in the text colour, which contrasts with the lane in either tone.
             let ink = tokens(tone_of(theme)).text;

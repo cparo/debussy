@@ -197,6 +197,13 @@ fn project(tracks: &str, connections: &str) -> String {
     )
 }
 
+/// A version 4 project with this tempo and meter.
+fn tempo(bpm: f64, beats_per_bar: u8, beat_unit: u8) -> String {
+    format!(
+        r#"{{"format_version":4,"sample_rate":48000,"tracks":[],"nodes":[],"connections":[],"tempo":{{"bpm":{bpm},"beats_per_bar":{beats_per_bar},"beat_unit":{beat_unit}}}}}"#
+    )
+}
+
 fn mono_track(file_name: &str) -> String {
     format!(
         r#"{{"id":1,"name":"T","layout":"mono","clips":[{{"id":2,"source":{{"kind":"mono","file":{{"name":"{file_name}","frames":100}}}},"offset":0,"length":10,"position":0,"gain_db":0.0,"fade_in":0,"fade_out":0}}]}}"#
@@ -210,6 +217,8 @@ fn test_open_refuses_untrusted_files() -> Result<(), Box<dyn Error>> {
     // The fixtures are valid apart from the one fault each.
     assert!(Bundle::open(&path).is_ok());
     fs::write(path.join("project.json"), project(&mono_track("a.wav"), ""))?;
+    assert!(Bundle::open(&path).is_ok());
+    fs::write(path.join("project.json"), tempo(97.25, 7, 8))?;
     assert!(Bundle::open(&path).is_ok());
 
     for name in [
@@ -257,6 +266,10 @@ fn test_open_refuses_untrusted_files() -> Result<(), Box<dyn Error>> {
             &format!("{},{}", mono_track("a.wav"), mono_track("b.wav")),
             "",
         ),
+        tempo(400.0, 4, 4),
+        tempo(120.0, 0, 4),
+        tempo(120.0, 4, 3),
+        tempo(120.005, 4, 4),
     ];
     for text in invalid {
         let error = open_with(&path, &text)?;

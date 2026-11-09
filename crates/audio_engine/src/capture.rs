@@ -59,6 +59,8 @@ pub(crate) struct Input {
     channels: Vec<Box<[f32]>>,
     /// Device channels holding this block's input; later ones are silent.
     live: usize,
+    /// The first frame of the block's input still to be used: past a count-in.
+    start: usize,
     silence: Box<[f32]>,
 }
 
@@ -70,6 +72,7 @@ impl Input {
                 .map(|_| vec![0.0; max_frames].into_boxed_slice())
                 .collect(),
             live: 0,
+            start: 0,
             silence: vec![0.0; max_frames].into_boxed_slice(),
         }
     }
@@ -92,6 +95,12 @@ impl Input {
             }
         }
         self.live = live;
+        self.start = 0;
+    }
+
+    /// Moves past `frames` frames of the block's input: later calls see the rest of it.
+    pub(crate) fn skip(&mut self, frames: usize) {
+        self.start = self.start.saturating_add(frames);
     }
 
     /// Device channels holding this block's input.
@@ -106,14 +115,15 @@ impl Input {
             .fold(0.0, |peak: f32, s| peak.max(s.abs()))
     }
 
-    /// Device channel `channel`'s first `frames` frames, silence if it has none.
+    /// Device channel `channel`'s next `frames` frames, silence if it has none.
     pub(crate) fn channel(&self, channel: usize, frames: usize) -> &[f32] {
         let buffer = if channel < self.live {
             self.channels.get(channel).unwrap_or(&self.silence)
         } else {
             &self.silence
         };
-        buffer.get(..frames).unwrap_or(&[])
+        let end = self.start.saturating_add(frames);
+        buffer.get(self.start..end).unwrap_or(&[])
     }
 }
 
@@ -167,6 +177,17 @@ mod tests {
         assert_eq!(input.channel(0, 3), &[0.0; 3]);
         input.load(&[], 0, 3);
         assert_eq!(input.channel(1, 3), &[0.0; 3]);
+    }
+
+    #[test]
+    fn test_skip_moves_past_frames_until_the_next_load() {
+        let mut input = Input::new(4);
+        input.load(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
+        input.skip(2);
+        assert_eq!(input.channel(0, 1), &[5.0]);
+        assert_eq!(input.channel(1, 1), &[6.0]);
+        input.load(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3);
+        assert_eq!(input.channel(0, 3), &[1.0, 3.0, 5.0]);
     }
 
     #[test]
