@@ -205,23 +205,39 @@ fn disabled_ink(ink: Color) -> Color {
     Color { a: 0.45, ..ink }
 }
 
-/// A toolbar button's icon: tinted with the ink its text label would have.
+/// A toolbar button's icon: tinted with the ink its text label would have, or greyed out
+/// towards the button's face when the button is disabled.
 pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) -> svg::Style {
     move |theme, _status| {
-        let (_, ink) = tool_colours(tokens(tone_of(theme)), selected);
+        let (face, ink) = tool_colours(tokens(tone_of(theme)), selected);
         svg::Style {
-            color: Some(if enabled { ink } else { disabled_ink(ink) }),
+            color: Some(if enabled { ink } else { mix(face, ink, 0.4) }),
         }
     }
 }
 
-/// A toolbar button at `place`; `selected` marks the active side of a toggle.
+/// A toolbar button at `place` showing text; `selected` marks the active side of a toggle.
+/// Disabled, its face fades as well as its text.
 pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> button::Style {
+    tool_style(selected, place, true)
+}
+
+/// A toolbar button's style; `fade_disabled` fades a disabled button's face. A button showing an
+/// icon passes `false`: disabled, its face is unchanged and only its icon greys out
+/// ([`tool_icon`]).
+pub fn tool_style(
+    selected: bool,
+    place: Place,
+    fade_disabled: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |theme, status| {
         let t = tokens(tone_of(theme));
         let (face, ink) = tool_colours(t, selected);
         let (background, text) = match status {
-            button::Status::Disabled => (Color { a: 0.35, ..face }, disabled_ink(ink)),
+            button::Status::Disabled if fade_disabled => {
+                (Color { a: 0.35, ..face }, disabled_ink(ink))
+            }
+            button::Status::Disabled => (face, disabled_ink(ink)),
             button::Status::Hovered => (mix(face, ink, 0.08), ink),
             button::Status::Pressed => (mix(face, ink, 0.18), ink),
             button::Status::Active => (face, ink),
