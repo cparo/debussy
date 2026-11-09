@@ -91,6 +91,9 @@ pub enum Message {
     ToggleTone,
     /// The system's appearance, at launch or when it changes.
     SystemTone(Tone),
+    /// The window's scale factor, at launch or when it changes: physical pixels per logical
+    /// pixel.
+    Rescaled(f32),
     /// Open this menu, or close it if it is open.
     OpenMenu(Menu),
     /// Close the open menu.
@@ -206,6 +209,8 @@ pub struct App {
     pub(crate) generation: u64,
     pub(crate) display: Display,
     pub(crate) tone: Tone,
+    /// The window's physical pixels per logical pixel, which the lanes are drawn at.
+    pub(crate) scale_factor: f32,
     pub(crate) menu: Option<Menu>,
     /// The track being renamed, and the name typed so far.
     pub(crate) renaming: Option<(TrackId, String)>,
@@ -266,6 +271,7 @@ impl App {
             generation: 0,
             display: Display::default(),
             tone: Tone::default(),
+            scale_factor: 1.0,
             menu: None,
             renaming: None,
             scrolled: 0.0,
@@ -362,6 +368,11 @@ impl App {
     /// Light or dark chrome.
     pub fn tone(&self) -> Tone {
         self.tone
+    }
+
+    /// The window's physical pixels per logical pixel, which the lanes are drawn at.
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     /// Waveforms or spectrograms.
@@ -473,6 +484,7 @@ impl App {
             Message::Tick
                 | Message::Scrolled(_)
                 | Message::SystemTone(_)
+                | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
                 | Message::DragNode(..)
@@ -488,6 +500,7 @@ impl App {
             Message::Tick
                 | Message::Scrolled(_)
                 | Message::SystemTone(_)
+                | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::FinishRename
         ) {
@@ -559,6 +572,11 @@ impl App {
             }
             Message::ToggleTone => self.set_tone(self.tone.toggled()),
             Message::SystemTone(tone) => self.set_tone(tone),
+            Message::Rescaled(scale) => {
+                if scale.is_finite() && scale > 0.0 {
+                    self.scale_factor = scale;
+                }
+            }
             Message::OpenMenu(menu) => {
                 self.menu = (self.menu != Some(menu)).then_some(menu);
             }
