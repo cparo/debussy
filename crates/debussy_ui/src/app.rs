@@ -195,6 +195,9 @@ pub struct App {
     pub(crate) start: u64,
     /// The zoom level; see [`samples_per_column`].
     zoom: u32,
+    /// Whether the view pages along with the playhead: set once a playing playhead is seen in
+    /// view, cleared when playback stops or the view is panned or zoomed.
+    following: bool,
     /// Where stop returns to: the last place seeked to.
     return_point: u64,
     /// Each track's lanes, one per channel, in track order.
@@ -246,6 +249,7 @@ impl App {
             project_name: String::new(),
             start: 0,
             zoom: DEFAULT_ZOOM,
+            following: false,
             return_point: 0,
             lanes: Vec::new(),
             generation: 0,
@@ -451,6 +455,7 @@ impl App {
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::Tick => {
                 self.engine.collect();
+                self.follow_playhead();
                 let result = self.bridge.commit();
                 self.report(result.map_err(|e| e.to_string()));
                 if let Some(error) = self.services.audio_error() {
@@ -462,6 +467,8 @@ impl App {
             Message::ZoomIn => self.zoom(self.zoom.saturating_sub(1)),
             Message::ZoomOut => self.zoom((self.zoom + 1).min(MAX_ZOOM)),
             Message::Pan(fraction) => {
+                // The next tick follows again if the playhead is still in view.
+                self.following = false;
                 let by = (f64::from(fraction.abs()) * self.view_span() as f64) as u64;
                 self.start = if fraction < 0.0 {
                     self.start.saturating_sub(by)
@@ -820,6 +827,7 @@ impl App {
 
     /// Zooms to `level`, keeping the playhead in place if it is in view, else the view's centre.
     fn zoom(&mut self, level: u32) {
+        self.following = false;
         let old = self.samples_per_column();
         let anchor = match self.playhead_fraction() {
             Some(_) => self.engine.playhead(),
@@ -828,6 +836,26 @@ impl App {
         self.zoom = level;
         self.start = zoomed_start(self.start, old, self.samples_per_column(), anchor);
         self.refresh_lanes();
+    }
+
+    /// Pages the view along with a playing playhead (`docs/architecture/user-interface.md`
+    /// "Transport and seeking"): once it has been seen in view, reaching 80 % of the lane's
+    /// width moves the view to put it at 20 %. A playhead out of view that was not followed
+    /// there is left alone.
+    fn follow_playhead(&mut self) {
+        if !self.engine.is_playing() {
+            self.following = false;
+            return;
+        }
+        let playhead = self.engine.playhead();
+        let span = self.view_span();
+        if playhead >= self.start && playhead < self.start.saturating_add(span) {
+            self.following = true;
+        }
+        if self.following && playhead >= self.start.saturating_add(span * 4 / 5) {
+            self.start = playhead.saturating_sub(span / 5);
+            self.refresh_lanes();
+        }
     }
 
     /// Recomputes every track's lanes for the visible stretch.
