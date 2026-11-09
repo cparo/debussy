@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 
 use audio_engine::{
     ArmedTrack, Engine, Error as EngineError, Processor, TakeInfo, TrackFeed, TrackFeeds,
+    TransportState,
 };
 use common::{RATE, StreamControl, StreamFeed, TestGraph, TestStreams, graph, memory_sink, noise};
 use realtime_guard::{GuardAllocator, assert_realtime};
@@ -79,7 +80,7 @@ fn test_capture_starts_once_primed_and_ends_on_stop() -> Result<(), Box<dyn Erro
         sinks: vec![sink],
     }])?;
     engine.locate(1000, &mut streams)?;
-    engine.record(&mut streams)?;
+    engine.record(&mut streams, 0)?;
     assert!(engine.is_recording());
     let mut at = 0;
     // Not primed: nothing captured.
@@ -106,7 +107,7 @@ fn test_capture_starts_once_primed_and_ends_on_stop() -> Result<(), Box<dyn Erro
     assert_eq!(take.samples().len(), 4 * BLOCK);
     // The takes are spent.
     assert!(matches!(
-        engine.record(&mut streams),
+        engine.record(&mut streams, 0),
         Err(EngineError::NotArmed)
     ));
     Ok(())
@@ -130,7 +131,7 @@ fn test_pause_ends_the_take_and_rearming_ends_the_old_one() -> Result<(), Box<dy
         Ok(take)
     };
     let first = arm(&mut engine)?;
-    engine.record(&mut streams)?;
+    engine.record(&mut streams, 0)?;
     let mut at = 0;
     run(&mut processor, &mut at, 2)?;
     engine.pause()?;
@@ -199,7 +200,7 @@ fn test_unmonitored_armed_track_is_silent_only_while_recording() -> Result<(), B
     let (left, _) = run(&mut processor, &mut at, 2)?;
     assert_eq!(left, timeline[..2 * BLOCK]);
     engine.stop()?;
-    engine.record(&mut streams)?;
+    engine.record(&mut streams, 0)?;
     control.ready.store(true, Ordering::SeqCst);
     let (left, right) = run(&mut processor, &mut at, 2)?;
     assert!(left.iter().chain(&right).all(|&s| s == 0.0));
@@ -213,7 +214,7 @@ fn test_arming_seeking_and_record_are_refused_while_playing() -> Result<(), Box<
     let mut streams = TestStreams(Arc::clone(&control));
     let (mut engine, _processor) = Engine::new(g.runner, g.output, RATE)?;
     assert!(matches!(
-        engine.record(&mut streams),
+        engine.record(&mut streams, 0),
         Err(EngineError::NotArmed)
     ));
     let (sink, _take) = memory_sink(16);
@@ -223,14 +224,14 @@ fn test_arming_seeking_and_record_are_refused_while_playing() -> Result<(), Box<
         monitor: false,
         sinks: vec![sink],
     }])?;
-    engine.record(&mut streams)?;
+    engine.record(&mut streams, 0)?;
     assert!(matches!(engine.arm(Vec::new()), Err(EngineError::Playing)));
     assert!(matches!(
         engine.locate(10, &mut streams),
         Err(EngineError::Recording)
     ));
     assert!(matches!(
-        engine.record(&mut streams),
+        engine.record(&mut streams, 0),
         Err(EngineError::Playing)
     ));
     engine.stop()?;
@@ -258,7 +259,7 @@ fn test_placed_take_lines_up_with_the_playback_it_recorded() -> Result<(), Box<d
             sinks: vec![sink],
         }])?;
         engine.locate(from as u64, &mut streams)?;
-        engine.record(&mut streams)?;
+        engine.record(&mut streams, 0)?;
         control.ready.store(true, Ordering::SeqCst);
 
         // Everything the device output, from its start; its input is that, ROUND_TRIP late.
@@ -318,5 +319,100 @@ fn test_input_peaks_are_published_while_armed_and_cleared_on_read() -> Result<()
     assert_eq!(engine.take_input_peak(1), input(at - 1, 1));
     assert_eq!(engine.take_input_peak(0), 0.0);
     assert_eq!(engine.take_input_peak(audio_engine::MAX_INPUTS), 0.0);
+    Ok(())
+}
+
+/// A count-in of any length, over any block size, holds the playhead with the tracks silent,
+/// then captures from the playhead's frame exactly: the take's first frame is the device input
+/// of the frame the count-in ended on.
+#[test]
+fn test_count_in_then_capture_starts_at_exactly_the_playhead() -> Result<(), Box<dyn Error>> {
+    for block in [64, 100, 128, 512] {
+        for count_in in [0_usize, 1, 384, 1000, 2048] {
+            let g = graph(0)?;
+            let control = Arc::new(StreamControl::default());
+            let (timeline, _, tracks) = stereo_feeds(&g, &control);
+            let mut streams = TestStreams(Arc::clone(&control));
+            let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+            engine.set_tracks(tracks)?;
+            let (sink, take) = memory_sink(100_000);
+            engine.arm(vec![ArmedTrack {
+                source: g.mono,
+                inputs: vec![1],
+                monitor: false,
+                sinks: vec![sink],
+            }])?;
+            let from = 3_000;
+            engine.locate(from, &mut streams)?;
+            engine.record(&mut streams, count_in as u64)?;
+            control.ready.store(true, Ordering::SeqCst);
+            let blocks = 6_000 / block;
+            let mut output = Vec::with_capacity(blocks * block);
+            let mut at = 0;
+            for _ in 0..blocks {
+                let interleaved: Vec<f32> =
+                    (0..block * 2).map(|i| input(at + i / 2, i % 2)).collect();
+                let (mut l, mut r) = (vec![0.0; block], vec![0.0; block]);
+                assert_realtime(|| processor.process(&interleaved, 2, &mut l, &mut r))?;
+                if at + block < count_in {
+                    assert_eq!(engine.real_time_state(), TransportState::CountingIn);
+                    assert_eq!(engine.playhead(), from);
+                }
+                output.extend_from_slice(&l);
+                at += block;
+            }
+            engine.stop()?;
+            let what = format!("block {block}, count-in {count_in}");
+            let info = engine.take().ok_or("capture never began")?;
+            assert_eq!(info.start_frame, from, "{what}");
+            // Captured from the device frame the count-in ended on.
+            let captured = take.samples();
+            assert_eq!(
+                captured,
+                input_channel(1, count_in, at - count_in),
+                "{what}"
+            );
+            // Silent while counting in, then the timeline from the playhead.
+            assert!(output[..count_in].iter().all(|&s| s == 0.0), "{what}");
+            let played = &output[count_in..];
+            let from = from as usize;
+            assert_eq!(played, &timeline[from..from + played.len()], "{what}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_stop_or_pause_during_count_in_captures_nothing() -> Result<(), Box<dyn Error>> {
+    for pause in [false, true] {
+        let g = graph(0)?;
+        let control = Arc::new(StreamControl::default());
+        let (_, _, tracks) = stereo_feeds(&g, &control);
+        let mut streams = TestStreams(Arc::clone(&control));
+        let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+        engine.set_tracks(tracks)?;
+        let (sink, take) = memory_sink(100_000);
+        engine.arm(vec![ArmedTrack {
+            source: g.mono,
+            inputs: vec![0],
+            monitor: false,
+            sinks: vec![sink],
+        }])?;
+        engine.record(&mut streams, 10_000)?;
+        control.ready.store(true, Ordering::SeqCst);
+        let mut at = 0;
+        run(&mut processor, &mut at, 4)?;
+        assert_eq!(engine.real_time_state(), TransportState::CountingIn);
+        if pause {
+            engine.pause()?;
+        } else {
+            engine.stop()?;
+        }
+        run(&mut processor, &mut at, 100)?;
+        assert!(engine.take().is_none());
+        assert!(take.samples().is_empty());
+        assert!(take.ended());
+        assert_eq!(engine.playhead(), 0);
+    }
     Ok(())
 }

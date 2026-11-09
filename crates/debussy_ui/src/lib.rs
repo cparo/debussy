@@ -10,6 +10,8 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `click`: the click, the tempo and the meter.
+//! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
 //! - `range_selection`: the range selected in the lanes.
 //! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
@@ -25,7 +27,9 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod click;
 mod device;
+mod grid;
 mod icon;
 mod menu;
 mod patch_board;
@@ -45,7 +49,10 @@ pub use app::{App, Message, NewNode};
 pub use menu::Menu;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
-pub use services::{DeviceChoice, ImportedTrack, Services, TakeFiles, TakeStatus};
+pub use services::{
+    ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,
+    Services, TakeFiles, TakeStatus,
+};
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;
 pub use waveform::{

@@ -565,3 +565,35 @@ fn test_add_clips_puts_each_on_top_as_one_step() -> TestResult {
     assert_eq!(session.state(), &before);
     Ok(())
 }
+
+#[test]
+fn test_set_tempo_undoes_and_versions_carry_it() -> TestResult {
+    use project_model::Tempo;
+    let mut session = Session::new();
+    assert_eq!(session.state().tempo, Tempo::default());
+    let waltz = Tempo {
+        bpm: 92.5,
+        beats_per_bar: 3,
+        beat_unit: 4,
+    };
+    session.save_version("before")?;
+    session.set_tempo(waltz)?;
+    assert_eq!(session.state().tempo, waltz);
+    session.save_version("waltz")?;
+    assert!(session.undo());
+    assert_eq!(session.state().tempo, Tempo::default());
+    assert!(session.redo());
+    assert_eq!(session.state().tempo, waltz);
+    session.restore_version("before")?;
+    assert_eq!(session.state().tempo, Tempo::default());
+    session.restore_version("waltz")?;
+    assert_eq!(session.state().tempo, waltz);
+    let bad = Tempo {
+        bpm: 400.0,
+        ..waltz
+    };
+    assert_eq!(session.set_tempo(bad), Err(Error::InvalidTempo));
+    assert_eq!(session.apply(Edit::SetTempo(bad)), Err(Error::InvalidTempo));
+    assert_eq!(session.state().tempo, waltz);
+    Ok(())
+}

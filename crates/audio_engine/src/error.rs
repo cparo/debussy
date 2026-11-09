@@ -46,4 +46,7 @@ pub enum Error {
         /// The right buffer's length.
         right: usize,
     },
+    /// A click that cannot be played.
+    #[error("invalid click: {0}")]
+    InvalidClick(&'static str),
 }

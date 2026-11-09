@@ -14,13 +14,15 @@ use iced::{Alignment, Element, Fill, Length, Size};
 use project_model::{Endpoint, NodeKind, TrackId};
 
 use crate::app::{App, Message, NewNode};
+use crate::click::{COUNT_IN_BARS, format_bpm};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
 use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
 use crate::recording::METER_FLOOR_DB;
+use crate::services::{MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB};
 use crate::theme::{self, Accent, Place, Tone};
 use crate::transport::PositionBar;
-use crate::waveform::{CursorView, Display, LaneView};
+use crate::waveform::{CursorView, Display, GridView, LaneView};
 
 /// The height of one channel's lane, in logical pixels.
 pub(crate) const LANE_HEIGHT: f32 = 128.0;
@@ -53,6 +55,14 @@ const TOOL_TEXT: f32 = 13.0;
 const TIME_WIDTH: f32 = 100.0;
 /// The audio device selector's width in the bottom bar.
 const DEVICE_WIDTH: f32 = 200.0;
+/// The tempo field's width in the bottom bar.
+const TEMPO_WIDTH: f32 = 64.0;
+/// The meter pickers' width each.
+const METER_WIDTH: f32 = 56.0;
+/// Where the click menu opens from the window's left edge: about under the click's ▾.
+const CLICK_MENU_X: f32 = 560.0;
+/// The click menu's height, to open it above the bottom bar.
+const CLICK_MENU_HEIGHT: f32 = 290.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
@@ -238,6 +248,12 @@ impl App {
                     display == Display::Spectrogram
                 ),
             ]),
+            gap(4.0),
+            tool(
+                Face::Icon(Icon::Grid),
+                Some(Message::SetGrid(!self.grid())),
+                self.grid()
+            ),
             gap(16.0),
             group(vec![
                 (
@@ -366,6 +382,8 @@ impl App {
                 ),
             ]),
             gap(16.0),
+            self.click_controls(),
+            gap(16.0),
             position,
             gap(12.0),
             // A fixed width, so the position bar beside it does not move as the digits change.
@@ -375,7 +393,12 @@ impl App {
         ]
         .spacing(4)
         .align_y(Alignment::Center);
-        if let Some(status) = self.status() {
+        let status = if self.is_counting_in() {
+            Some("Count-in")
+        } else {
+            self.status()
+        };
+        if let Some(status) = status {
             bar = bar.push(gap(12.0)).push(text(status.to_owned()).size(13));
         }
         container(bar)
@@ -384,6 +407,56 @@ impl App {
             .center_y(Length::Fixed(BAR_HEIGHT))
             .style(theme::chrome)
             .into()
+    }
+
+    /// The click toggle and its ▾ menu, the tempo field and the meter pickers.
+    fn click_controls(&self) -> Element<'_, Message> {
+        let playing = self.engine().is_playing();
+        let click_on = self.engine().click_on();
+        let tempo = self.session().state().tempo;
+        let tempo_text = self
+            .click
+            .tempo_text
+            .clone()
+            .unwrap_or_else(|| format_bpm(tempo.bpm));
+        let beats: Vec<u8> = (1..=project_model::tempo::MAX_BEATS_PER_BAR).collect();
+        // Changing the tempo or meter is refused while playing, with a notice.
+        row![
+            group(vec![
+                (
+                    Face::Icon(Icon::Click),
+                    Some(Message::SetClick(!click_on)),
+                    click_on
+                ),
+                (
+                    Face::Label("▾"),
+                    Some(Message::OpenMenu(Menu::Click)),
+                    false
+                ),
+            ]),
+            gap(8.0),
+            text_input("BPM", &tempo_text)
+                .on_input_maybe((!playing).then_some(Message::TempoText))
+                .on_submit(Message::CommitTempo)
+                .size(TOOL_TEXT)
+                .width(Length::Fixed(TEMPO_WIDTH)),
+            text("BPM").size(TOOL_TEXT),
+            gap(8.0),
+            pick_list(beats, Some(tempo.beats_per_bar), Message::SetBeatsPerBar)
+                .text_size(TOOL_TEXT)
+                .width(Length::Fixed(METER_WIDTH)),
+            text("/").size(TOOL_TEXT),
+            pick_list(
+                project_model::tempo::BEAT_UNITS.to_vec(),
+                Some(tempo.beat_unit),
+                Message::SetBeatUnit
+            )
+            .text_size(TOOL_TEXT)
+            .width(Length::Fixed(METER_WIDTH)),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
     }
 
     /// The track pane, divider, gutter and board, scrolling together under one scrollbar.
@@ -527,6 +600,13 @@ impl App {
         let (start, span) = (self.view_start(), self.view_span());
         let selected = self.selected_range();
         let dragging = self.is_dragging();
+        let grid = self.grid().then(|| GridView {
+            tempo: self.session().state().tempo,
+            rate: self.sample_rate(),
+            start,
+            span,
+            scale: self.scale_factor,
+        });
         let mut tracks = column![];
         for (id, lanes) in &self.lanes {
             let Some(track) = self.session().state().track(*id) else {
@@ -552,9 +632,13 @@ impl App {
                 tracks = tracks.push(
                     stack![
                         canvas(view).width(Fill).height(Fill),
-                        canvas(CursorView { at: cursor, band })
-                            .width(Fill)
-                            .height(Fill),
+                        canvas(CursorView {
+                            at: cursor,
+                            band,
+                            grid
+                        })
+                        .width(Fill)
+                        .height(Fill),
                     ]
                     .width(Fill)
                     .height(Length::Fixed(LANE_HEIGHT)),
@@ -652,6 +736,7 @@ impl App {
                 size.width - MENU_WIDTH - 24.0,
                 BAR_HEIGHT + SPACING + 12.0 + ADD_BUTTON + 4.0,
             ),
+            Menu::Click => (CLICK_MENU_X, size.height - BAR_HEIGHT - CLICK_MENU_HEIGHT),
         };
         (
             x.clamp(0.0, (size.width - MENU_WIDTH).max(0.0)),
@@ -696,6 +781,7 @@ impl App {
                 ),
                 Entry::item("Automation curve", None),
             ],
+            Menu::Click => self.click_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),
                 Entry::item("Bus", Some(Message::AddNode(NewNode::Bus))),
@@ -706,6 +792,43 @@ impl App {
             ],
         };
         dropdown(entries)
+    }
+
+    /// The click menu: the sound, ticked, the level, and the count-in before recording.
+    fn click_menu(&self) -> Vec<Entry> {
+        let preferences = self.click.preferences;
+        let ticked = |on: bool, label: &str| format!("{}{label}", if on { "✓ " } else { "    " });
+        let mut entries: Vec<Entry> = engine_bridge::ClickSound::ALL
+            .into_iter()
+            .map(|sound| {
+                Entry::item(
+                    ticked(sound == preferences.sound, sound.name()),
+                    Some(Message::SetClickSound(sound)),
+                )
+            })
+            .collect();
+        entries.push(Entry::Separator);
+        entries.push(Entry::Slider {
+            label: format!("Level {:+.1} dB", preferences.level_db),
+            range: MIN_CLICK_LEVEL_DB..=MAX_CLICK_LEVEL_DB,
+            value: preferences.level_db,
+            on_change: Message::ClickLevel,
+            on_release: Message::ReleaseClickLevel,
+        });
+        entries.push(Entry::Separator);
+        entries.push(Entry::item("Count-in before recording", None));
+        for bars in COUNT_IN_BARS {
+            let label = match bars {
+                0 => "Off".to_owned(),
+                1 => "1 bar".to_owned(),
+                n => format!("{n} bars"),
+            };
+            entries.push(Entry::item(
+                ticked(bars == self.click.count_in_bars, &label),
+                Some(Message::SetCountIn(bars)),
+            ));
+        }
+        entries
     }
 
     /// A mixer channel's name: the track connected to it, if any, else its number.

@@ -12,6 +12,8 @@ pub enum Icon {
     Waveform,
     /// Show lanes as spectrograms.
     Spectrogram,
+    /// Show the bars and beats grid over the lanes.
+    Grid,
     /// Undo the last edit.
     Undo,
     /// Redo the last undone edit.
@@ -30,6 +32,8 @@ pub enum Icon {
     Stop,
     /// Record.
     Record,
+    /// Turn the click on or off.
+    Click,
     /// Switch to the light tone.
     Light,
     /// Switch to the dark tone.
@@ -65,6 +69,7 @@ macro_rules! artwork {
 artwork! {
     Waveform: WAVEFORM = "waveform.svg";
     Spectrogram: SPECTROGRAM = "spectrogram.svg";
+    Grid: GRID = "grid.svg";
     Undo: UNDO = "undo.svg";
     Redo: REDO = "redo.svg";
     Cut: CUT = "cut.svg";
@@ -74,6 +79,7 @@ artwork! {
     Pause: PAUSE = "pause.svg";
     Stop: STOP = "stop.svg";
     Record: RECORD = "record.svg";
+    Click: CLICK = "click.svg";
     Light: LIGHT = "light.svg";
     Dark: DARK = "dark.svg";
     Menu: MENU = "menu.svg";
@@ -85,6 +91,7 @@ impl Icon {
         match self {
             Icon::Waveform => "Waveform",
             Icon::Spectrogram => "Spectrogram",
+            Icon::Grid => "Bars and Beats",
             Icon::Undo => "Undo",
             Icon::Redo => "Redo",
             Icon::Cut => "Cut",
@@ -94,6 +101,7 @@ impl Icon {
             Icon::Pause => "Pause",
             Icon::Stop => "Stop",
             Icon::Record => "Record",
+            Icon::Click => "Click",
             Icon::Light => "Light Mode",
             Icon::Dark => "Dark Mode",
             Icon::Menu => "Menu",
@@ -105,9 +113,10 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 14] = [
+    const ALL: [Icon; 16] = [
         Icon::Waveform,
         Icon::Spectrogram,
+        Icon::Grid,
         Icon::Undo,
         Icon::Redo,
         Icon::Cut,
@@ -117,6 +126,7 @@ mod tests {
         Icon::Pause,
         Icon::Stop,
         Icon::Record,
+        Icon::Click,
         Icon::Light,
         Icon::Dark,
         Icon::Menu,

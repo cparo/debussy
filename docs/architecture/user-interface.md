@@ -21,13 +21,18 @@ The window is laid out as described under [Layout](#layout).
 
 The window is a top bar, a track pane beside a right pane, and a bottom bar.
 
-- **Top bar:** a logo, the waveform/spectrogram toggle, undo and redo, cut, copy and paste
+- **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
   switch projects), import, export, export mono, and quit.
 - **Bottom bar:** the audio device dropdown, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the position bar, the playhead's time, and the status line
-  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)).
+  ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). After record
+  come the click toggle with a ▾ menu (the sound, ticked, a level slider, and the count-in before
+  recording: off, 1 bar or 2 bars), the tempo field in
+  BPM, and the meter as two pickers, beats per bar over beat unit. A typed tempo is recorded on
+  Enter or the next other action; changing the tempo or meter is refused while playing
+  ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
@@ -48,6 +53,11 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
   σ = 0.5 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
   ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
+  With the grid toggle on (session state, off at launch), bar and beat lines of the project's
+  grid (see `docs/architecture/project.md` "Musical time") are drawn sharp over the lanes too,
+  one physical pixel wide, bars stronger than beats. Beat lines are hidden when they would fall
+  closer than 6 logical pixels; bar lines then thin to every 2^k bars, for the least k that keeps
+  them 6 pixels apart ([ADR-0085](../adrs/0085-the-bars-and-beats-grid-is-a-sharp-overlay-thinned.md)).
 - **Colours:** audio signals (and a selected button's face, and the logo) are orange in the dark
   tone and blue in the light tone
   ([ADR-0071](../adrs/0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md)); control
@@ -67,8 +77,8 @@ transparent background; the interface tints it with a theme colour, so a file's 
 never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
 toolbar button, with no box or background of its own.
 
-The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
-light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
+The waveform/spectrogram toggle, the grid toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
+click toggle (an in-house metronome) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
 outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the
 button's face, and black on a red face while recording
@@ -194,7 +204,8 @@ the device duplex, and disarming the last reopens it output-only.
 
 Record is enabled while stopped or paused with a track armed, the device's inputs open and the
 previous take saved. It records every armed track from the playhead while the other tracks play,
-and runs on past the project's end. Stop or pause ends the pass. Once its files are written, one
+after the chosen count-in, and runs on past the project's end. Record is lit from the press, and
+the status line reads "Count-in" while counting in. Stop or pause ends the pass. Once its files are written, one
 clip per armed track is placed as one undo step (see `docs/architecture/recording.md` "Take
 placement"); a pass that captured nothing or failed is discarded with its files. Overruns are
 reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-and-inputs-open-only.md)).
