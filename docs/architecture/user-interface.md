@@ -56,6 +56,14 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
 
+## Icons
+
+Application icons and interface glyphs are SVG files in `crates/debussy_ui/assets/icons/`,
+compiled into the binary and drawn with `iced`'s `svg` widget. Each is a single-colour shape on a
+transparent background; the interface tints it with a theme colour, so a file's own fill colour
+never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
+toolbar button, with no box or background of its own.
+
 ## Patch board
 
 The patch board draws the routing; it pans horizontally with its own scrollbar when wider than
