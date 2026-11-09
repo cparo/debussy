@@ -49,7 +49,8 @@ mixer existed send tracks straight to the output.)
 ## Recording
 
 Recording needs a device with both inputs and outputs, such as an audio interface. (A Mac's
-built-in speakers and microphone are separate devices; combine them in Audio MIDI Setup as an
+built-in speakers and microphone are separate devices; combine them in
+[Audio MIDI Setup](https://support.apple.com/en-ca/guide/audio-midi-setup/ams59f301fda/mac) as an
 aggregate device to record with them.)
 
 1. While stopped, click **Arm** on each track to record. The first armed track opens the device's
