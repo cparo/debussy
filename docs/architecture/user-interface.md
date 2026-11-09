@@ -25,8 +25,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
   switch projects), import, export, export mono, the audio device, and quit.
-- **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the playhead's time,
-  the status line, and the position bar.
+- **Bottom bar:** mono/stereo listening, play/pause, stop, record (disabled), the position bar,
+  the playhead's time, and the status line.
 - **Track pane:** each track is a header (its name and a ≡ menu: rename, import audio into,
   delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
   or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
@@ -114,7 +114,9 @@ playback too, and makes that frame the return point. Stop returns to the return 
 and playing again leaves it in place. A seek outside the visible window recentres the view on it.
 The position bar shows the playhead as a red bar along a grey channel over the timeline's length
 (the end of the last clip, or more to take in the window and the playhead), with ticks at the
-visible window's edges.
+visible window's edges. The playhead's time beside it reads `HH:MM:SS.000`, dropping the hours
+while the later of the project's end and the playhead is under an hour, and the minutes while it
+is under a minute ([ADR-0075](../adrs/0075-the-playhead-time-reads-hh-mm-ss-000-dropping.md)).
 
 While playing, once the playhead is in view and reaches 80 % of the lane's width, the view moves
 to put it at 20 %, including when it has passed the right edge since the last display frame. A

@@ -98,4 +98,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0072](0072-toolbar-controls-show-icons-named-in-tooltips.md) | Toolbar controls show icons named in tooltips | Accepted | [Icons](../architecture/user-interface.md#icons) |
 | [ADR-0073](0073-range-edits-split-clips-without-new-fades-never.md) | Range edits split clips without new fades, never ripple, and paste as an overlay | Accepted | [Range edits](../architecture/project.md#range-edits) |
 | [ADR-0074](0074-a-drag-in-the-lanes-selects-a-range-and-edit.md) | A drag in the lanes selects a range, and edit shortcuts act on it | Accepted | [Range selection and shortcuts](../architecture/user-interface.md#range-selection-and-shortcuts) |
+| [ADR-0075](0075-the-playhead-time-reads-hh-mm-ss-000-dropping.md) | The playhead time reads HH:MM:SS.000, dropping leading units a short project does not need | Accepted | [Transport and seeking](../architecture/user-interface.md#transport-and-seeking) |
 
