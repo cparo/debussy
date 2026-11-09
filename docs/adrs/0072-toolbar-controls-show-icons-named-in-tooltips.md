@@ -19,6 +19,8 @@ buttons keep text.
 
 - The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and
   the tone toggle show an icon in place of their text. The tone toggle shows the tone it switches to, as its text did.
+- The tone toggle has no button face or outline; its icon is drawn in the accent, as the logo
+  is, and it highlights on hover like the ≡ buttons.
 - An icon is tinted with the ink its button's text would have. A disabled icon button keeps the
   face it has when enabled; only its icon greys out, mixed 40 % of the way from the face to the
   ink.
@@ -33,6 +35,8 @@ buttons keep text.
 - **Icon and text together.** Rejected: it widens the bars, and the set was drawn to stand alone.
 - **Fading a disabled icon button's face, as text buttons do.** Rejected by the developer: an
   unavailable action should read as a greyed-out icon, not a changed button.
+- **The tone toggle as a framed toolbar button.** Rejected by the developer in favour of a bare
+  icon in the accent.
 - **No tooltip.** Rejected: an icon alone gives a new user nothing to read, and the tooltip costs
   only `iced`'s built-in widget.
 - **Tooltips placed above or below the button.** Rejected: the same helper serves the top and

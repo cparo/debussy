@@ -67,10 +67,11 @@ never shows. The logo (`debussy.svg`) sits at the left of the top bar in the acc
 toolbar button, with no box or background of its own.
 
 The waveform/spectrogram toggle, undo, redo, cut, copy, paste, play/pause, stop, record and the
-light/dark toggle show 16 px
-icons instead of text, padded to a text button's height; the light/dark toggle shows the tone it
-switches to. An icon takes its button's text colour; a disabled icon button keeps its face and
-greys its icon out towards the face. A tooltip that follows the cursor names the action. Other toolbar buttons keep text labels
+light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
+light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
+outline, like the ≡ buttons. Any other icon takes its button's text colour; a disabled icon button
+keeps its face and greys its icon out towards the face. A tooltip that follows the cursor names the
+action. Other toolbar buttons keep text labels
 ([ADR-0072](../adrs/0072-toolbar-controls-show-icons-named-in-tooltips.md)).
 
 ## Patch board
