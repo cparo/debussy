@@ -170,7 +170,7 @@ impl App {
         let logo = svg(LOGO.clone())
             .width(Length::Shrink)
             .height(LOGO_HEIGHT)
-            .style(theme::logo);
+            .style(theme::accent_icon);
         let bar = row![
             logo,
             gap(16.0),
@@ -217,14 +217,7 @@ impl App {
             Space::new().width(Fill),
             text(self.project_name.clone()).size(24),
             gap(16.0),
-            tool(
-                Face::Icon(match self.tone() {
-                    Tone::Light => Icon::Dark,
-                    Tone::Dark => Icon::Light,
-                }),
-                Some(Message::ToggleTone),
-                false
-            ),
+            self.tone_toggle(),
             burger(Menu::App, 26.0),
         ]
         .spacing(4)
@@ -236,6 +229,32 @@ impl App {
             .center_y(Length::Fixed(BAR_HEIGHT))
             .style(theme::chrome)
             .into()
+    }
+
+    /// The light/dark toggle: the icon of the tone it switches to, in the accent, with no button
+    /// face or outline.
+    fn tone_toggle(&self) -> Element<'_, Message> {
+        let icon = match self.tone() {
+            Tone::Light => Icon::Dark,
+            Tone::Dark => Icon::Light,
+        };
+        let face = button(
+            svg(icon.handle())
+                .width(ICON_SIZE)
+                .height(ICON_SIZE)
+                .style(theme::accent_icon),
+        )
+        .on_press(Message::ToggleTone)
+        .padding(8)
+        .style(theme::flat);
+        tooltip(
+            face,
+            container(text(icon.name()).size(TOOL_TEXT))
+                .padding([4, 8])
+                .style(theme::popup),
+            tooltip::Position::FollowCursor,
+        )
+        .into()
     }
 
     fn bottom_bar(&self) -> Element<'_, Message> {

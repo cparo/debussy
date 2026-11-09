@@ -181,8 +181,9 @@ impl Place {
     }
 }
 
-/// The logo: drawn in the accent of a selected toolbar button, straight onto the bar.
-pub fn logo(theme: &Theme, _status: svg::Status) -> svg::Style {
+/// The logo and the tone toggle's icon: drawn in the accent of a selected toolbar button,
+/// straight onto the bar.
+pub fn accent_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(tokens(tone_of(theme)).audio),
     }
@@ -328,11 +329,11 @@ mod tests {
     }
 
     #[test]
-    fn test_logo_takes_the_selected_button_accent() {
+    fn test_accent_icon_takes_the_selected_button_accent() {
         for tone in [Tone::Light, Tone::Dark] {
             let accent = tool(true, Place::Alone)(&theme(tone), button::Status::Active).background;
-            let logo = logo(&theme(tone), svg::Status::Idle).color;
-            assert_eq!(logo.map(Background::Color), accent);
+            let icon = accent_icon(&theme(tone), svg::Status::Idle).color;
+            assert_eq!(icon.map(Background::Color), accent);
         }
     }
 
