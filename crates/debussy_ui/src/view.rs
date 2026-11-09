@@ -22,7 +22,7 @@ use crate::recording::METER_FLOOR_DB;
 use crate::services::{MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB};
 use crate::theme::{self, Accent, Place, Tone};
 use crate::transport::PositionBar;
-use crate::waveform::{CursorView, Display, LaneView};
+use crate::waveform::{CursorView, Display, GridView, LaneView};
 
 /// The height of one channel's lane, in logical pixels.
 pub(crate) const LANE_HEIGHT: f32 = 128.0;
@@ -248,6 +248,12 @@ impl App {
                     display == Display::Spectrogram
                 ),
             ]),
+            gap(4.0),
+            tool(
+                Face::Icon(Icon::Grid),
+                Some(Message::SetGrid(!self.grid())),
+                self.grid()
+            ),
             gap(16.0),
             group(vec![
                 (
@@ -594,6 +600,13 @@ impl App {
         let (start, span) = (self.view_start(), self.view_span());
         let selected = self.selected_range();
         let dragging = self.is_dragging();
+        let grid = self.grid().then(|| GridView {
+            tempo: self.session().state().tempo,
+            rate: self.sample_rate(),
+            start,
+            span,
+            scale: self.scale_factor,
+        });
         let mut tracks = column![];
         for (id, lanes) in &self.lanes {
             let Some(track) = self.session().state().track(*id) else {
@@ -619,9 +632,13 @@ impl App {
                 tracks = tracks.push(
                     stack![
                         canvas(view).width(Fill).height(Fill),
-                        canvas(CursorView { at: cursor, band })
-                            .width(Fill)
-                            .height(Fill),
+                        canvas(CursorView {
+                            at: cursor,
+                            band,
+                            grid
+                        })
+                        .width(Fill)
+                        .height(Fill),
                     ]
                     .width(Fill)
                     .height(Length::Fixed(LANE_HEIGHT)),

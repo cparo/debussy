@@ -12,6 +12,8 @@ pub enum Icon {
     Waveform,
     /// Show lanes as spectrograms.
     Spectrogram,
+    /// Show the bars and beats grid over the lanes.
+    Grid,
     /// Undo the last edit.
     Undo,
     /// Redo the last undone edit.
@@ -67,6 +69,7 @@ macro_rules! artwork {
 artwork! {
     Waveform: WAVEFORM = "waveform.svg";
     Spectrogram: SPECTROGRAM = "spectrogram.svg";
+    Grid: GRID = "grid.svg";
     Undo: UNDO = "undo.svg";
     Redo: REDO = "redo.svg";
     Cut: CUT = "cut.svg";
@@ -88,6 +91,7 @@ impl Icon {
         match self {
             Icon::Waveform => "Waveform",
             Icon::Spectrogram => "Spectrogram",
+            Icon::Grid => "Bars and Beats",
             Icon::Undo => "Undo",
             Icon::Redo => "Redo",
             Icon::Cut => "Cut",
@@ -109,9 +113,10 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 15] = [
+    const ALL: [Icon; 16] = [
         Icon::Waveform,
         Icon::Spectrogram,
+        Icon::Grid,
         Icon::Undo,
         Icon::Redo,
         Icon::Cut,
