@@ -199,6 +199,8 @@ pub enum Message {
     Export(bool),
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
+    /// The device dropdown opened: re-read the devices present, so one plugged in since shows.
+    RefreshDevices,
     /// A mixer gain or pan slider moved: applied live, recorded on [`Message::Release`].
     Slide {
         /// The mixer node.
@@ -584,6 +586,7 @@ impl App {
                 | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
+                | Message::RefreshDevices
                 | Message::DragNode(..)
                 | Message::DragOutput(_)
                 | Message::DelayText(..)
@@ -857,6 +860,7 @@ impl App {
                 Ok(None) => {}
                 Err(message) => self.status = Some(message),
             },
+            Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
                     self.status = Some("Stop playback to change the audio device.".to_owned());
@@ -1141,6 +1145,11 @@ impl App {
             self.status = Some(format!("Stop playback to {what}."));
         }
         playing
+    }
+
+    /// The audio devices present when last read, for the device dropdown.
+    pub fn device_choices(&self) -> &[crate::services::DeviceChoice] {
+        &self.devices.0
     }
 
     /// Re-reads the device list and the device in use.

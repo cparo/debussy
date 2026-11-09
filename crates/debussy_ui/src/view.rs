@@ -342,6 +342,7 @@ impl App {
         let mut bar = row![
             // Changing device is refused while playing, with a notice.
             pick_list(choices.clone(), device, Message::Device)
+                .on_open(Message::RefreshDevices)
                 .placeholder("No audio device")
                 .text_size(TOOL_TEXT)
                 .width(Length::Fixed(DEVICE_WIDTH)),

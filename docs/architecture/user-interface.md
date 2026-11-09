@@ -205,8 +205,8 @@ Import and export use the system's file dialogs through `rfd`, used only in `deb
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
 Import is refused while playing.
 
-One audio device is chosen for both input and output. The choice is remembered in the application
-settings; at launch a remembered device that is gone falls back to the system default output. The
+One audio device is chosen for both input and output, from a list re-read each time the device
+dropdown opens. The choice is remembered in the application settings; at launch a remembered device that is gone falls back to the system default output. The
 device can be changed only while stopped: the engine's real-time side is handed back from the old
 stream and handed to the new one without being rebuilt, and if the new device fails to open the
 old one is reopened. An audio device that stops with an error stops playback and is reported on

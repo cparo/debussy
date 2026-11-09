@@ -32,6 +32,8 @@ struct Calls {
     samples: Vec<(String, u64, usize)>,
     exports: Vec<bool>,
     device: Option<String>,
+    /// Devices present beyond the two built in, as if plugged in.
+    plugged: Vec<DeviceChoice>,
     /// Each call to open or close the device's inputs.
     input: Vec<bool>,
     /// Input channels the device has.
@@ -171,7 +173,7 @@ impl Services for Fake {
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
-        let choices = vec![
+        let mut choices = vec![
             DeviceChoice {
                 id: "a".into(),
                 name: "Built-in".into(),
@@ -181,6 +183,7 @@ impl Services for Fake {
                 name: "Interface".into(),
             },
         ];
+        choices.extend(self.calls.borrow().plugged.iter().cloned());
         (
             choices,
             Some(
@@ -1592,5 +1595,21 @@ fn test_input_meter_follows_the_track_input_and_falls() -> Result<(), Box<dyn Er
     app.update(Message::Arm(track));
     app.update(Message::Tick);
     assert!(app.input_levels(track).is_empty());
+    Ok(())
+}
+
+#[test]
+fn test_opening_the_device_dropdown_rereads_the_devices() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    // A notice survives opening the dropdown.
+    app.update(Message::Record);
+    calls.borrow_mut().plugged.push(DeviceChoice {
+        id: "c".into(),
+        name: "M6".into(),
+    });
+    app.update(Message::RefreshDevices);
+    assert_eq!(app.status(), Some("Arm a track to record."));
+    let last = app.device_choices().last().map(|d| d.name.as_str());
+    assert_eq!(last, Some("M6"));
     Ok(())
 }
