@@ -279,6 +279,13 @@ pub fn strip(theme: &Theme) -> container::Style {
     }
 }
 
+/// An icon on a flat button: drawn in the chrome's text colour.
+pub fn flat_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
+    svg::Style {
+        color: Some(tokens(tone_of(theme)).text),
+    }
+}
+
 /// A flat button on chrome: menu items and the ≡ buttons.
 pub fn flat(theme: &Theme, status: button::Status) -> button::Style {
     let t = tokens(tone_of(theme));

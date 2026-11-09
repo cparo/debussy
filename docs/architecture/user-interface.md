@@ -71,7 +71,8 @@ light/dark toggle show 16 px icons instead of text, padded to a text button's he
 light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
 outline, like the ≡ buttons. Any other icon takes its button's text colour; a disabled icon button
 keeps its face and greys its icon out towards the face. A tooltip that follows the cursor names the
-action. Other toolbar buttons keep text labels
+action. The ≡ buttons draw a menu icon in the chrome's text colour, centred in their button. Other
+toolbar buttons keep text labels
 ([ADR-0072](../adrs/0072-toolbar-controls-show-icons-named-in-tooltips.md)).
 
 ## Patch board

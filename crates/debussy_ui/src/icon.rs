@@ -34,6 +34,8 @@ pub enum Icon {
     Light,
     /// Switch to the dark tone.
     Dark,
+    /// Open a ≡ menu.
+    Menu,
 }
 
 /// Declares the artwork file of each icon, and a lazily parsed handle for it.
@@ -74,6 +76,7 @@ artwork! {
     Record: RECORD = "record.svg";
     Light: LIGHT = "light.svg";
     Dark: DARK = "dark.svg";
+    Menu: MENU = "menu.svg";
 }
 
 impl Icon {
@@ -93,6 +96,7 @@ impl Icon {
             Icon::Record => "Record",
             Icon::Light => "Light Mode",
             Icon::Dark => "Dark Mode",
+            Icon::Menu => "Menu",
         }
     }
 }
@@ -101,7 +105,7 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 13] = [
+    const ALL: [Icon; 14] = [
         Icon::Waveform,
         Icon::Spectrogram,
         Icon::Undo,
@@ -115,6 +119,7 @@ mod tests {
         Icon::Record,
         Icon::Light,
         Icon::Dark,
+        Icon::Menu,
     ];
 
     /// Every icon's artwork is a single-colour SVG with no text, as tinting requires.
