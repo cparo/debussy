@@ -7,8 +7,8 @@ use audio_buffers::Layout;
 use std::collections::BTreeMap;
 
 use project_model::{
-    AudioFile, Clip, ClipId, ConnectionId, Edit, Endpoint, NodeId, NodeKind, Session, Source,
-    State, TrackId,
+    AudioFile, Clip, ClipId, ConnectionId, Edit, Endpoint, Excerpt, NodeId, NodeKind, Range,
+    Session, Source, State, TrackId,
 };
 
 type TestResult = Result<(), Box<dyn StdError>>;
@@ -128,9 +128,62 @@ fn some_clip(rng: &mut Rng, state: &State) -> Option<ClipId> {
     (!clips.is_empty()).then(|| clips[rng.index(clips.len())])
 }
 
+/// One to three of the tracks, possibly repeated, with an unknown id now and then.
+fn some_tracks(rng: &mut Rng, state: &State) -> Vec<TrackId> {
+    let mut tracks: Vec<TrackId> = (0..1 + rng.below(3))
+        .filter_map(|_| some_track(rng, state).map(|(id, _)| id))
+        .collect();
+    if rng.below(20) == 0 {
+        tracks.push(TrackId(rng.below(1_000)));
+    }
+    tracks
+}
+
+/// A range somewhere over the clips.
+fn some_range(rng: &mut Rng) -> Option<Range> {
+    let start = rng.below(11_000);
+    Range::new(start, start + 1 + rng.below(3_000)).ok()
+}
+
+/// A range gesture: delete, cut (keeping the excerpt), or paste the last excerpt. Returns whether
+/// it made an undo step, which a gesture that changes nothing does not.
+fn range_gesture(
+    rng: &mut Rng,
+    session: &mut Session,
+    state: &State,
+    excerpt: &mut Option<Excerpt>,
+) -> bool {
+    let revision = session.revision();
+    let tracks = some_tracks(rng, state);
+    let Some(range) = some_range(rng) else {
+        return false;
+    };
+    match rng.below(3) {
+        0 => {
+            let _ = session.delete_range(&tracks, range);
+        }
+        1 => {
+            if let Ok(cut) = session.cut_range(&tracks, range) {
+                *excerpt = Some(cut);
+            }
+        }
+        _ => {
+            if let (Some(excerpt), Some((track, _))) = (excerpt.as_ref(), some_track(rng, state)) {
+                let _ = session.paste(excerpt, track, rng.below(10_000));
+            }
+        }
+    }
+    session.revision() != revision
+}
+
 /// Makes one random gesture and returns whether it was an accepted edit (one undo step).
 /// Refused gestures are allowed and must change nothing.
-fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> bool {
+fn random_gesture(
+    rng: &mut Rng,
+    session: &mut Session,
+    versions: &mut u32,
+    excerpt: &mut Option<Excerpt>,
+) -> bool {
     let state = session.state().clone();
     let layout = if rng.below(2) == 0 {
         Layout::Mono
@@ -141,7 +194,7 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
     let clip_id = some_clip(rng, &state);
     let node = some_node(rng, &state);
     let connection = some_connection(rng, &state);
-    let result = match (rng.below(19), track, clip_id) {
+    let result = match (rng.below(25), track, clip_id) {
         (0, _, _) => session.add_track("t", layout).map(|_| ()),
         (1 | 2, Some((track, layout)), _) => {
             let clip = clip(rng, layout);
@@ -217,6 +270,7 @@ fn random_gesture(rng: &mut Rng, session: &mut Session, versions: &mut u32) -> b
             }),
             None => return false,
         },
+        (19..=24, _, _) => return range_gesture(rng, session, &state, excerpt),
         _ => return false,
     };
     result.is_ok()
@@ -228,10 +282,11 @@ fn test_undo_restores_every_earlier_state_exactly() -> TestResult {
         let mut rng = Rng::new(seed);
         let mut session = Session::new();
         let mut versions = 0;
+        let mut excerpt = None;
         let mut history = vec![session.state().clone()];
         for _ in 0..60 {
             let before = session.state().clone();
-            if random_gesture(&mut rng, &mut session, &mut versions) {
+            if random_gesture(&mut rng, &mut session, &mut versions, &mut excerpt) {
                 history.push(session.state().clone());
             } else {
                 assert_eq!(
