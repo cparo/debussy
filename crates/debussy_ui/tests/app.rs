@@ -741,3 +741,84 @@ fn test_node_dialogs_edit_mixers_and_delays() -> Result<(), Box<dyn Error>> {
     assert_eq!(app.selection(), None);
     Ok(())
 }
+
+/// Where the playhead falls in the view, as a fraction of its width.
+fn playhead_at(app: &App) -> f64 {
+    (app.engine().playhead() as f64 - app.view_start() as f64) / app.view_span() as f64
+}
+
+#[test]
+fn test_tick_pages_view_when_playhead_reaches_80_percent() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    for _ in 0..40 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    assert_eq!(app.view_start(), 0);
+    // A block at a time until a tick sees the playhead at or past 80 %.
+    let mut before = playhead_at(&app);
+    for _ in 0..app.view_span() / 256 + 1 {
+        block(&mut processor)?;
+        app.update(Message::Tick);
+        if app.view_start() > 0 {
+            break;
+        }
+        assert!(playhead_at(&app) < 0.8);
+        before = playhead_at(&app);
+    }
+    // It paged on the first tick past 80 %, not before.
+    assert!(app.view_start() > 0);
+    assert!(before < 0.8);
+    assert!((playhead_at(&app) - 0.2).abs() < 0.01);
+    Ok(())
+}
+
+#[test]
+fn test_tick_does_not_follow_playhead_panned_out_of_view() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    for _ in 0..40 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    // Ahead of the playhead.
+    app.update(Message::Pan(3.0));
+    let start = app.view_start();
+    for _ in 0..4 {
+        block(&mut processor)?;
+        app.update(Message::Tick);
+    }
+    assert_eq!(app.view_start(), start);
+    // Behind it: the playhead is past the right edge but was not followed there.
+    app.update(Message::Seek(100_000));
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    app.update(Message::Pan(-3.0));
+    let start = app.view_start();
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    assert_eq!(app.view_start(), start);
+    Ok(())
+}
+
+#[test]
+fn test_tick_follows_playhead_that_jumps_past_the_edge() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    for _ in 0..40 {
+        app.update(Message::ZoomIn);
+    }
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::Tick);
+    // More audio than the lane shows between two ticks.
+    let blocks = app.view_span() / 256 + 2;
+    for _ in 0..blocks {
+        block(&mut processor)?;
+    }
+    app.update(Message::Tick);
+    assert!((playhead_at(&app) - 0.2).abs() < 0.01);
+    Ok(())
+}
