@@ -111,7 +111,11 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
 
 A click in a lane, or a click or drag on the position bar, seeks the playhead there, during
 playback too, and makes that frame the return point. Stop returns to the return point; pausing
-and playing again leaves it in place. A seek outside the visible window recentres the view on it.
+and playing again leaves it in place. Playback stops by itself at the project's end, leaving the
+playhead there; Play from the end, or from past it, starts from the return point if that is before
+the end, otherwise from the start
+([ADR-0076](../adrs/0076-playback-stops-by-itself-at-the-project-s-end.md)). A seek past the end
+is kept. A seek outside the visible window recentres the view on it.
 The position bar shows the playhead as a red bar along a grey channel over the timeline's length
 (the end of the last clip, or more to take in the window and the playhead), with ticks at the
 visible window's edges. The playhead's time beside it reads `HH:MM:SS.000`, dropping the hours
