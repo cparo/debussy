@@ -52,9 +52,12 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
   [display](#effect-displays): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
-  a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
-  toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
-  stopped-only parameter shows "Stop to change" in place of its control while playing.
+  a slider over its logarithm, an integer one a slider in whole steps, and a choice a pick list,
+  each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz
+  from 1000 up as kilohertz. A two-valued parameter (a toggle, or a choice of two options) is a
+  strip of two mutually exclusive buttons, each showing the value it selects ("On" then "Off" for
+  a toggle), with no name label. A stopped-only parameter shows "Stop to change" in place of its
+  control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
   strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; Mute above

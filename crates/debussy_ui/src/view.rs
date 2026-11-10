@@ -178,7 +178,7 @@ fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
-fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
+pub(crate) fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
     if let [(face, message, selected)] = buttons.as_slice() {
         return tool(*face, message.clone(), *selected);
     }

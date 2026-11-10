@@ -1,7 +1,7 @@
 //! A built-in effect's dialog body: one control per parameter, chosen by its scale and grouped
 //! into strips (`docs/architecture/user-interface.md` "Layout").
 
-use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text};
+use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
 use iced::{Element, Length};
 use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
@@ -9,7 +9,7 @@ use signal_graph::{ParameterInfo, Scale};
 use crate::app::{App, Message};
 use crate::effect_display::display_area;
 use crate::theme;
-use crate::view::{Face, tool};
+use crate::view::{Face, group};
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
@@ -72,7 +72,9 @@ impl App {
         .into()
     }
 
-    /// A labelled control for parameter `info` of node `id`.
+    /// The control for parameter `info` of node `id`. A two-valued parameter is a strip of two
+    /// buttons, one per value, named by the values alone; any other is labelled with its name,
+    /// and a slider shows its value as a tooltip.
     fn control<'a>(&'a self, id: NodeId, info: &'a ParameterInfo) -> Element<'a, Message> {
         let value = self.parameter_value(id, &info.name);
         let (min, max) = (info.min, info.max);
@@ -87,6 +89,17 @@ impl App {
             value,
         };
         let frozen = info.stopped_only && self.engine().is_playing();
+        if !frozen && let Some(options) = binary_options(info) {
+            let selected = selected_option(&options, value);
+            let buttons = options
+                .iter()
+                .enumerate()
+                .map(|(i, &(name, option))| (Face::Label(name), Some(set(option)), i == selected))
+                .collect();
+            return container(group(buttons))
+                .width(Length::Fixed(CONTROL_WIDTH))
+                .into();
+        }
         let input: Element<'a, Message> = match &info.scale {
             // Shown, not offered, until playback stops (ADR-0088).
             _ if frozen => text("Stop to change").size(11).into(),
@@ -115,21 +128,51 @@ impl App {
                 .text_size(12)
                 .into()
             }
-            Scale::Toggle => {
-                let on = value >= 0.5;
-                tool(
-                    Face::Label(if on { "On" } else { "Off" }),
-                    Some(set(if on { 0.0 } else { 1.0 })),
-                    on,
-                )
-            }
+            // A toggle is two-valued, so it is a button strip unless frozen.
+            Scale::Toggle => Space::new().into(),
         };
-        let mut control = column![text(label(info)).size(12), input].spacing(4);
-        if !matches!(info.scale, Scale::Choice(_) | Scale::Toggle) {
-            control = control.push(text(format_value(info, value)).size(12));
-        }
-        control.width(Length::Fixed(CONTROL_WIDTH)).into()
+        let input = if !frozen && is_slider(&info.scale) {
+            tooltip(
+                input,
+                container(text(format_value(info, value)).size(12))
+                    .padding([4, 8])
+                    .style(theme::popup),
+                tooltip::Position::FollowCursor,
+            )
+            .into()
+        } else {
+            input
+        };
+        column![text(label(info)).size(12), input]
+            .spacing(4)
+            .width(Length::Fixed(CONTROL_WIDTH))
+            .into()
     }
+}
+
+/// Whether a parameter of `scale` is shown as a slider.
+fn is_slider(scale: &Scale) -> bool {
+    matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
+}
+
+/// The two values of a two-valued parameter, each with the name its button shows, in the order
+/// they are shown: a toggle's "On" (1) and "Off" (0), or a two-option choice's options in order.
+/// `None` for any other parameter.
+fn binary_options(info: &ParameterInfo) -> Option<[(&str, f32); 2]> {
+    match &info.scale {
+        Scale::Toggle => Some([("On", 1.0), ("Off", 0.0)]),
+        Scale::Choice(options) => match options.as_slice() {
+            [first, second] => Some([(first.as_str(), 0.0), (second.as_str(), 1.0)]),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The index in `options` of the value nearest `value`.
+fn selected_option(options: &[(&str, f32); 2], value: f32) -> usize {
+    let [(_, a), (_, b)] = *options;
+    usize::from((value - b).abs() < (value - a).abs())
 }
 
 /// `text` with its first letter in capitals.
@@ -196,5 +239,34 @@ mod tests {
         assert_eq!(format_value(&db, -3.25), "-3.25 dB");
         let order = ParameterInfo::new("order", 1.0, 8.0, 2.0).with_scale(Scale::Integer);
         assert_eq!(format_value(&order, 4.0), "4");
+    }
+
+    #[test]
+    fn test_binary_options_cover_toggles_and_two_option_choices() {
+        let toggle = ParameterInfo::new("band 1 enabled", 0.0, 1.0, 0.0).with_scale(Scale::Toggle);
+        let options = binary_options(&toggle);
+        assert_eq!(options, Some([("On", 1.0), ("Off", 0.0)]));
+        let two = ["mono", "stereo"].map(String::from).to_vec();
+        let choice = ParameterInfo::new("mode", 0.0, 1.0, 0.0).with_scale(Scale::Choice(two));
+        assert_eq!(
+            binary_options(&choice),
+            Some([("mono", 0.0), ("stereo", 1.0)])
+        );
+        let four = ["a", "b", "c", "d"].map(String::from).to_vec();
+        let many = ParameterInfo::new("type", 0.0, 3.0, 0.0).with_scale(Scale::Choice(four));
+        assert_eq!(binary_options(&many), None);
+        assert_eq!(
+            binary_options(&ParameterInfo::new("gain", -1.0, 1.0, 0.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_selected_option_picks_the_nearest_value() {
+        let options = [("On", 1.0), ("Off", 0.0)];
+        assert_eq!(selected_option(&options, 1.0), 0);
+        assert_eq!(selected_option(&options, 0.0), 1);
+        assert_eq!(selected_option(&options, 0.2), 1);
+        assert!(is_slider(&Scale::Integer) && !is_slider(&Scale::Toggle));
     }
 }
