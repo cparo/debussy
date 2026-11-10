@@ -5,7 +5,7 @@
 use std::sync::LazyLock;
 
 use audio_buffers::Layout;
-use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB};
+use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
 use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
@@ -68,7 +68,7 @@ const MENU_ITEM_HEIGHT: f32 = 27.0;
 
 /// What a toolbar button shows: a text label or an icon.
 #[derive(Clone, Copy)]
-enum Face<'a> {
+pub(crate) enum Face<'a> {
     /// A text label.
     Label(&'a str),
     /// An icon, named in a tooltip.
@@ -76,7 +76,11 @@ enum Face<'a> {
 }
 
 /// A button in a bar showing `face`, sending `message` if there is one.
-fn tool<'a>(face: Face<'a>, message: Option<Message>, selected: bool) -> Element<'a, Message> {
+pub(crate) fn tool<'a>(
+    face: Face<'a>,
+    message: Option<Message>,
+    selected: bool,
+) -> Element<'a, Message> {
     button_at(face, message, selected, Place::Alone)
 }
 
@@ -669,7 +673,8 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Bus(_) | NodeKind::Effect { .. } => Space::new().into(),
+            NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
+            NodeKind::Bus(_) => Space::new().into(),
         };
         Some(
             container(column![header, body].spacing(12))
@@ -885,7 +890,16 @@ impl App {
                     "Feedback delay",
                     Some(Message::AddNode(NewNode::FeedbackDelay)),
                 ),
-            ],
+                Entry::Separator,
+            ]
+            .into_iter()
+            .chain(audio_effects::EFFECTS.iter().map(|effect| {
+                Entry::item(
+                    effect.name,
+                    Some(Message::AddNode(NewNode::Effect(effect.id))),
+                )
+            }))
+            .collect(),
         };
         dropdown(entries)
     }
@@ -910,17 +924,23 @@ impl App {
 
     /// One mixer channel's gain, pan, mute and solo.
     fn strip(&self, id: project_model::NodeId, ch: usize, name: String) -> Element<'_, Message> {
-        let gain = self.mixer_value(id, ch, Control::Gain);
-        let pan = self.mixer_value(id, ch, Control::Pan);
-        let mode = Mode::from_value(self.mixer_value(id, ch, Control::Mode));
-        let toggle = |target: Mode| if mode == target { Mode::Play } else { target };
+        let gain_name = parameter_name(ch, Control::Gain);
+        let pan_name = parameter_name(ch, Control::Pan);
+        let mode_name = parameter_name(ch, Control::Mode);
+        let gain = self.parameter_value(id, &gain_name);
+        let pan = self.parameter_value(id, &pan_name);
+        let mode = Mode::from_value(self.parameter_value(id, &mode_name));
+        let set_mode = |target: Mode| Message::SetParameter {
+            node: id,
+            name: mode_name.clone(),
+            value: if mode == target { Mode::Play } else { target }.value(),
+        };
         column![
             text(name).size(13),
             vertical_slider(SILENCE_DB..=MAX_GAIN_DB, gain, move |value| {
                 Message::Slide {
                     node: id,
-                    channel: ch,
-                    control: Control::Gain,
+                    name: gain_name.clone(),
                     value,
                 }
             })
@@ -930,8 +950,7 @@ impl App {
             text(format!("{gain:.1} dB")).size(12),
             slider(-1.0..=1.0, pan, move |value| Message::Slide {
                 node: id,
-                channel: ch,
-                control: Control::Pan,
+                name: pan_name.clone(),
                 value,
             })
             .step(0.01_f32)
@@ -940,20 +959,12 @@ impl App {
             group(vec![
                 (
                     Face::Label("M"),
-                    Some(Message::SetMode {
-                        node: id,
-                        channel: ch,
-                        mode: toggle(Mode::Mute)
-                    }),
+                    Some(set_mode(Mode::Mute)),
                     mode == Mode::Mute
                 ),
                 (
                     Face::Label("S"),
-                    Some(Message::SetMode {
-                        node: id,
-                        channel: ch,
-                        mode: toggle(Mode::Solo)
-                    }),
+                    Some(set_mode(Mode::Solo)),
                     mode == Mode::Solo
                 ),
             ]),

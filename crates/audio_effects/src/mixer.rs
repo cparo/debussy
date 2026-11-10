@@ -3,7 +3,7 @@
 
 use audio_buffers::Layout;
 use dsp::{db_to_gain, pan_gains};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Smoothed};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale, Smoothed};
 
 use crate::error::Error;
 
@@ -85,18 +85,19 @@ struct Channel {
 
 impl Channel {
     fn new(index: usize) -> Result<Self, Error> {
+        let group = format!("channel {}", index + 1);
         let parameter = |control, min, max| {
-            Parameter::new(ParameterInfo {
-                name: parameter_name(index, control),
-                min,
-                max,
-                default: 0.0,
-            })
+            ParameterInfo::new(parameter_name(index, control), min, max, 0.0).with_group(&group)
         };
+        let modes = ["play", "mute", "solo"].map(String::from).to_vec();
         Ok(Channel {
-            gain: parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB)?,
-            pan: parameter(Control::Pan, -1.0, 1.0)?,
-            mode: parameter(Control::Mode, 0.0, 2.0)?,
+            gain: Parameter::new(
+                parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB).with_unit("dB"),
+            )?,
+            pan: Parameter::new(parameter(Control::Pan, -1.0, 1.0))?,
+            mode: Parameter::new(
+                parameter(Control::Mode, 0.0, 2.0).with_scale(Scale::Choice(modes)),
+            )?,
             level: None,
             pan_smoothed: None,
         })
@@ -250,6 +251,12 @@ mod tests {
         );
         let gain = mixer.parameters()[0].info().clone();
         assert_eq!((gain.min, gain.max, gain.default), (-96.0, 12.0, 0.0));
+        assert_eq!(
+            (gain.unit.as_str(), gain.group.as_str()),
+            ("dB", "channel 1")
+        );
+        let mode = mixer.parameters()[2].info().clone();
+        assert!(matches!(mode.scale, Scale::Choice(ref o) if o.len() == 3));
         Ok(())
     }
 

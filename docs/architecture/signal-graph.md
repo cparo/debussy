@@ -76,6 +76,14 @@ Effects are built-in nodes. The effect node interface must not assume an effect 
 reports its latency, declares its ports, and exposes its parameters through the same interface a
 third-party plugin wrapper would implement. Third-party plugins are not hosted ([ADR-0019](../adrs/0019-only-built-in-effects-for-now-behind-a-plugin.md)).
 
+Each parameter declares, besides its name, range and default, a unit (possibly empty), a scale
+(linear, logarithmic, integer, choice of named options by index, or toggle) and a group (possibly
+empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
+stopped-only: it changes only while playback is stopped or paused, and no automation drives it. The
+node dialog draws an
+effect's controls from this metadata alone, one strip per group. The metadata is not saved
+([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).
+
 ## Port types
 
 Every port and connection has a type. Audio is the only type; connections between ports of

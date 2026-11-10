@@ -9,10 +9,35 @@ use crate::error::Error;
 /// How long a parameter takes to ramp to a new value, in seconds.
 pub const RAMP_SECONDS: f64 = 0.01;
 
-/// What a parameter is: its name and range.
+/// How a parameter's range is presented and stepped: what a generic control for it looks like.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Scale {
+    /// Continuous, spaced evenly.
+    #[default]
+    Linear,
+    /// Continuous, spaced evenly in the logarithm of the value; the minimum is above 0.
+    Logarithmic,
+    /// Whole numbers only.
+    Integer,
+    /// One of the named options: the value is the option's index, from 0.
+    Choice(Vec<String>),
+    /// Off (0) or on (1).
+    Toggle,
+}
+
+impl Scale {
+    /// Whether the value is always a whole number: [`Scale::Integer`], [`Scale::Choice`] and
+    /// [`Scale::Toggle`].
+    pub fn is_stepped(&self) -> bool {
+        matches!(self, Scale::Integer | Scale::Choice(_) | Scale::Toggle)
+    }
+}
+
+/// What a parameter is: its name, range, unit, scale and group, enough for a generic control, and
+/// whether it may change while playing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParameterInfo {
-    /// A name for display.
+    /// The parameter's name, unique within its node; saved projects key values by it.
     pub name: String,
     /// The smallest value.
     pub min: f32,
@@ -20,6 +45,80 @@ pub struct ParameterInfo {
     pub max: f32,
     /// The value a new parameter starts at; clamped to the range.
     pub default: f32,
+    /// The unit shown after the value, such as `"dB"` or `"Hz"`; empty for none.
+    pub unit: String,
+    /// How the range is presented and stepped.
+    pub scale: Scale,
+    /// The group a control is shown in, such as `"band 1"`; empty for none.
+    pub group: String,
+    /// Whether the value may change only while playback is stopped or paused: the UI offers no
+    /// change while playing and no automation may drive it, so a node may apply a change at once,
+    /// without a ramp.
+    pub stopped_only: bool,
+}
+
+impl ParameterInfo {
+    /// A linear parameter with no unit or group, named `name`, from `min` to `max`, starting at
+    /// `default`.
+    pub fn new(name: impl Into<String>, min: f32, max: f32, default: f32) -> Self {
+        ParameterInfo {
+            name: name.into(),
+            min,
+            max,
+            default,
+            unit: String::new(),
+            scale: Scale::Linear,
+            group: String::new(),
+            stopped_only: false,
+        }
+    }
+
+    /// This, changeable only while playback is stopped or paused.
+    #[must_use]
+    pub fn stopped_only(self) -> Self {
+        ParameterInfo {
+            stopped_only: true,
+            ..self
+        }
+    }
+
+    /// This, with unit `unit`.
+    #[must_use]
+    pub fn with_unit(self, unit: impl Into<String>) -> Self {
+        ParameterInfo {
+            unit: unit.into(),
+            ..self
+        }
+    }
+
+    /// This, with scale `scale`.
+    #[must_use]
+    pub fn with_scale(self, scale: Scale) -> Self {
+        ParameterInfo { scale, ..self }
+    }
+
+    /// This, in group `group`.
+    #[must_use]
+    pub fn with_group(self, group: impl Into<String>) -> Self {
+        ParameterInfo {
+            group: group.into(),
+            ..self
+        }
+    }
+
+    /// `value` as the parameter holds it: clamped to the range, and rounded to a whole number if
+    /// the scale is stepped. `None` for NaN.
+    pub fn constrain(&self, value: f32) -> Option<f32> {
+        if value.is_nan() {
+            return None;
+        }
+        let value = value.clamp(self.min, self.max);
+        Some(if self.scale.is_stepped() {
+            value.round().clamp(self.min, self.max)
+        } else {
+            value
+        })
+    }
 }
 
 /// The state every handle to one parameter shares.
@@ -46,16 +145,25 @@ impl Parameter {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidParameterRange`] if the range is not finite or `min > max`.
+    /// [`Error::InvalidParameterRange`] if the range is not finite, `min > max`, a logarithmic
+    /// range does not stay above 0, or a choice's range is not its options' indices.
     pub fn new(info: ParameterInfo) -> Result<Self, Error> {
         if !info.min.is_finite() || !info.max.is_finite() || info.min > info.max {
             return Err(Error::InvalidParameterRange);
         }
-        let default = if info.default.is_nan() {
-            info.min
-        } else {
-            info.default.clamp(info.min, info.max)
+        let valid = match &info.scale {
+            Scale::Linear | Scale::Integer => true,
+            Scale::Logarithmic => info.min > 0.0,
+            #[allow(clippy::cast_precision_loss)] // a handful of options
+            Scale::Choice(options) => {
+                !options.is_empty() && info.min == 0.0 && info.max == (options.len() - 1) as f32
+            }
+            Scale::Toggle => info.min == 0.0 && info.max == 1.0,
         };
+        if !valid {
+            return Err(Error::InvalidParameterRange);
+        }
+        let default = info.constrain(info.default).unwrap_or(info.min);
         let info = ParameterInfo { default, ..info };
         Ok(Parameter {
             shared: Arc::new(Shared {
@@ -65,7 +173,7 @@ impl Parameter {
         })
     }
 
-    /// The parameter's name and range.
+    /// The parameter's name, range, unit, scale and group.
     pub fn info(&self) -> &ParameterInfo {
         &self.shared.info
     }
@@ -75,14 +183,11 @@ impl Parameter {
         f32::from_bits(self.shared.bits.load(Ordering::Relaxed))
     }
 
-    /// Sets the value, clamped to the range. NaN is ignored.
+    /// Sets the value, clamped to the range and, for a stepped scale, rounded. NaN is ignored.
     pub fn set(&self, value: f32) {
-        if value.is_nan() {
-            return;
+        if let Some(value) = self.shared.info.constrain(value) {
+            self.shared.bits.store(value.to_bits(), Ordering::Relaxed);
         }
-        let info = &self.shared.info;
-        let value = value.clamp(info.min, info.max);
-        self.shared.bits.store(value.to_bits(), Ordering::Relaxed);
     }
 }
 
@@ -206,25 +311,51 @@ mod tests {
     use super::*;
 
     fn gain() -> Result<Parameter, Error> {
-        Parameter::new(ParameterInfo {
-            name: "gain".into(),
-            min: 0.0,
-            max: 2.0,
-            default: 1.0,
-        })
+        Parameter::new(ParameterInfo::new("gain", 0.0, 2.0, 1.0))
     }
 
     #[test]
     fn test_new_refuses_bad_ranges() {
-        let info = |min, max| ParameterInfo {
-            name: String::new(),
-            min,
-            max,
-            default: 0.0,
-        };
+        let info = |min, max| ParameterInfo::new("", min, max, 0.0);
         assert!(Parameter::new(info(1.0, 0.0)).is_err());
         assert!(Parameter::new(info(f32::NEG_INFINITY, 0.0)).is_err());
         assert!(Parameter::new(info(0.0, f32::NAN)).is_err());
+        assert!(Parameter::new(info(0.0, 1.0).with_scale(Scale::Logarithmic)).is_err());
+        assert!(Parameter::new(info(1.0, 10.0).with_scale(Scale::Logarithmic)).is_ok());
+        let choice = |n: usize| Scale::Choice((0..n).map(|i| i.to_string()).collect());
+        assert!(Parameter::new(info(0.0, 2.0).with_scale(choice(3))).is_ok());
+        assert!(Parameter::new(info(0.0, 2.0).with_scale(choice(2))).is_err());
+        assert!(Parameter::new(info(0.0, 0.0).with_scale(choice(0))).is_err());
+        assert!(Parameter::new(info(0.0, 1.0).with_scale(Scale::Toggle)).is_ok());
+        assert!(Parameter::new(info(0.0, 2.0).with_scale(Scale::Toggle)).is_err());
+    }
+
+    #[test]
+    fn test_set_rounds_stepped_scales() -> Result<(), Error> {
+        let order =
+            Parameter::new(ParameterInfo::new("order", 1.0, 8.0, 2.4).with_scale(Scale::Integer))?;
+        assert_eq!(order.get(), 2.0);
+        order.set(7.6);
+        assert_eq!(order.get(), 8.0);
+        order.set(0.2);
+        assert_eq!(order.get(), 1.0);
+        let level = Parameter::new(ParameterInfo::new("level", 0.0, 1.0, 0.25))?;
+        assert_eq!(level.get(), 0.25);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parameter_info_builders_set_metadata() {
+        let info = ParameterInfo::new("band 1 gain", -24.0, 24.0, 0.0)
+            .with_unit("dB")
+            .with_group("band 1");
+        assert_eq!(info.unit, "dB");
+        assert_eq!(info.group, "band 1");
+        assert_eq!(info.scale, Scale::Linear);
+        assert!(!info.stopped_only);
+        assert!(info.clone().stopped_only().stopped_only);
+        assert_eq!(info.constrain(30.0), Some(24.0));
+        assert_eq!(info.constrain(f32::NAN), None);
     }
 
     #[test]

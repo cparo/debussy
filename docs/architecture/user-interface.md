@@ -46,7 +46,13 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   vertically together under one scrollbar at the window's right edge.
 - **Node dialogs** open over the track pane for the selected node: a header with its name and a
   delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
-  or a feedback delay's time in seconds; a bus has only the header.
+  a feedback delay's time in seconds, or a built-in effect's controls; a bus or an effect this
+  build does not know has only the header. An effect's controls are drawn from its parameters'
+  metadata (`docs/architecture/signal-graph.md` "Effect nodes"): ungrouped parameters in a row,
+  then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
+  a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
+  toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
+  stopped-only parameter shows "Stop to change" in place of its control while playing.
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform
   summaries"), or spectrograms: one spectrum per two waveform columns, computed on demand
@@ -119,8 +125,9 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
 - Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes the
   selection, except while text is being typed. A click on empty board clears the selection and
   closes the dialog.
-- The "+" at the board's top right adds a two-channel mixer, a stereo bus or a stereo feedback
-  delay; no effects are offered yet.
+- The "+" at the board's top right adds a two-channel mixer, a stereo bus, a stereo feedback
+  delay, or, below a separator, each built-in effect at its defaults, by the name shown in
+  `docs/architecture/effects.md` "Effect kinds". A node's title is that name.
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
 

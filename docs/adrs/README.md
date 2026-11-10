@@ -110,4 +110,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0084](0084-recording-s-count-in-splits-the-block-it-ends-in.md) | Recording's count-in splits the block it ends in | Accepted | [Count-in](../architecture/recording.md#count-in) |
 | [ADR-0085](0085-the-bars-and-beats-grid-is-a-sharp-overlay-thinned.md) | The bars and beats grid is a sharp overlay thinned by zoom | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0086](0086-the-bottom-bar-opens-the-audio-device-list-and-the.md) | The bottom bar opens the audio device list and the click dialog from icon buttons | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0087](0087-a-parameter-declares-its-unit-scale-and-group-so-a.md) | A parameter declares its unit, scale and group so a generic control can be drawn for it | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
+| [ADR-0088](0088-equalisers-are-built-on-a-trapezoidal-state.md) | Equalisers are built on a trapezoidal state-variable filter, and a filter's order changes only while stopped | Accepted | [Filters](../architecture/effects.md#filters) |
 

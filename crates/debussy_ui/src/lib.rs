@@ -10,6 +10,7 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
 //! - `click`: the click, the tempo and the meter.
 //! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
@@ -29,6 +30,7 @@
 mod app;
 mod click;
 mod device;
+mod effect_panel;
 mod grid;
 mod icon;
 mod menu;

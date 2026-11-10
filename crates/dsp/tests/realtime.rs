@@ -31,3 +31,21 @@ fn test_level_operations_do_not_allocate() {
     });
     assert!(gains.0.0 > gains.0.1);
 }
+
+#[test]
+fn test_filters_do_not_allocate() {
+    let mut svf = dsp::Svf::new();
+    let mut pole = dsp::OnePole::new();
+    let out = assert_realtime(|| {
+        let mut sum = 0.0;
+        for i in 0..512 {
+            let frequency = 100.0 + i as f32 * 10.0;
+            let c = dsp::SvfCoefficients::bell(frequency, 1.0, 6.0, 48_000.0)
+                .lerp(&dsp::SvfCoefficients::identity(), 0.5);
+            let p = dsp::OnePoleCoefficients::high_pass(frequency, 48_000.0);
+            sum += pole.process(svf.process(0.5, &c), &p);
+        }
+        sum
+    });
+    assert!(out.is_finite());
+}

@@ -19,12 +19,7 @@ pub struct Gain {
 
 impl Gain {
     pub fn new(gain: f32) -> Result<Self, signal_graph::Error> {
-        let parameter = Parameter::new(ParameterInfo {
-            name: "gain".into(),
-            min: 0.0,
-            max: 4.0,
-            default: gain,
-        })?;
+        let parameter = Parameter::new(ParameterInfo::new("gain", 0.0, 4.0, gain))?;
         Ok(Gain {
             parameter,
             smoothed: None,

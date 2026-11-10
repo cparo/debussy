@@ -5,16 +5,29 @@
 //!
 //! - `mixer`: [`Mixer`], channels of gain, pan and mute/solo summed to stereo
 //!   (`docs/architecture/signal-graph.md` "Mixer").
-//! - `utility`: [`Bus`], [`Pick`], [`Place`], [`Silence`] and [`effect`], the effect registry by
-//!   kind id.
+//! - `filters`: [`Butterworth`], the high-pass and low-pass filters
+//!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
+//! - `parametric`: [`ParametricEq`], the 8-band equaliser
+//!   (`docs/architecture/effects.md` "Parametric equaliser").
+//! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
+//! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
+//!   effects by kind id.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
 mod error;
+mod filters;
 mod mixer;
+mod parametric;
+mod registry;
 mod utility;
 
 pub use error::Error;
+pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};
-pub use utility::{Bus, Pick, Place, Silence, effect};
+pub use parametric::{
+    BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, band_parameter_name,
+};
+pub use registry::{EFFECTS, EffectKind, display_name, effect, parameter_infos};
+pub use utility::{Bus, Pick, Place, Silence};

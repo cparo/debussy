@@ -11,5 +11,8 @@ The algorithms implemented in-house under this policy, each with its evidence: T
 ([ADR-0025](../adrs/0025-wav-is-built-in-house-and-integer-exports-are.md)), the xorshift64*
 noise source seeded by SplitMix64 ([ADR-0035](../adrs/0035-the-dither-noise-source-is-xorshift64-seeded-by.md)),
 exact rational polyphase resampling ([ADR-0036](../adrs/0036-sample-rate-conversion-is-exact-rational-polyphase.md)), the radix-2 FFT with
-real-input packing and the Hann-windowed STFT ([ADR-0039](../adrs/0039-the-fft-is-radix-2-cooley-tukey-with-real-input.md)), and the
-intensity-graded waveform trace ([ADR-0064](../adrs/0064-the-intensity-graded-trace-may-be-built-in-house.md)).
+real-input packing and the Hann-windowed STFT ([ADR-0039](../adrs/0039-the-fft-is-radix-2-cooley-tukey-with-real-input.md)), the
+intensity-graded waveform trace ([ADR-0064](../adrs/0064-the-intensity-graded-trace-may-be-built-in-house.md)), and the
+trapezoidal state-variable and one-pole filters with their bell, shelf, notch and Butterworth
+designers, prewarped bilinear transform and log-frequency smoothing
+([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)).
