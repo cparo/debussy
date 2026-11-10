@@ -8,12 +8,12 @@
 use std::collections::BTreeMap;
 
 use audio_buffers::Layout;
-use audio_effects::{Control, Mode, parameter_name};
 use audio_engine::Engine;
 use engine_bridge::Bridge;
 use project_model::{
     Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
 };
+use signal_graph::ParameterInfo;
 
 use crate::click::Click;
 use crate::menu::Menu;
@@ -45,6 +45,8 @@ pub enum NewNode {
     Bus,
     /// A stereo feedback delay of a quarter second.
     FeedbackDelay,
+    /// A built-in effect of this kind id (`audio_effects::EFFECTS`), at its defaults.
+    Effect(&'static str),
 }
 
 impl NewNode {
@@ -58,6 +60,10 @@ impl NewNode {
             NewNode::FeedbackDelay => NodeKind::FeedbackDelay {
                 layout: Layout::Stereo,
                 seconds: 0.25,
+            },
+            NewNode::Effect(kind) => NodeKind::Effect {
+                kind: kind.to_owned(),
+                parameters: std::collections::BTreeMap::new(),
             },
         }
     }
@@ -223,27 +229,25 @@ pub enum Message {
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
     RefreshDevices,
-    /// A mixer gain or pan slider moved: applied live, recorded on [`Message::Release`].
+    /// A parameter's slider moved: applied live, recorded on [`Message::Release`].
     Slide {
-        /// The mixer node.
+        /// The mixer or effect node.
         node: NodeId,
-        /// The channel, from 0.
-        channel: usize,
-        /// Gain or pan.
-        control: Control,
+        /// The parameter's name, such as `"channel 1 gain"`.
+        name: String,
         /// The value.
         value: f32,
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
-    /// A channel's mute or solo button: sets its mode as one undo step.
-    SetMode {
-        /// The mixer node.
+    /// A button or choice set a parameter: applied and recorded as one undo step.
+    SetParameter {
+        /// The mixer or effect node.
         node: NodeId,
-        /// The channel, from 0.
-        channel: usize,
-        /// The new mode.
-        mode: Mode,
+        /// The parameter's name, such as `"channel 1 mode"`.
+        name: String,
+        /// The new value.
+        value: f32,
     },
 }
 
@@ -327,6 +331,8 @@ pub struct App {
     pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
     /// The click, and the tempo being typed.
     pub(crate) click: Click,
+    /// Each built-in effect kind's parameters, read once at launch.
+    effect_parameters: BTreeMap<&'static str, Vec<ParameterInfo>>,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -390,6 +396,10 @@ impl App {
             pass: None,
             meters: BTreeMap::new(),
             click: Click::new(preferences),
+            effect_parameters: audio_effects::EFFECTS
+                .iter()
+                .filter_map(|e| Some((e.id, audio_effects::parameter_infos(e.id)?)))
+                .collect(),
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -963,13 +973,13 @@ impl App {
                     self.inputs = self.services.input_channels();
                 }
             }
-            Message::Slide {
-                node,
-                channel,
-                control,
-                value,
-            } => {
-                let name = parameter_name(channel, control);
+            Message::Slide { node, ref name, .. }
+            | Message::SetParameter { node, ref name, .. }
+                if self.engine.is_playing() && self.is_stopped_only(node, name) =>
+            {
+                self.status = Some(format!("Pause or stop playback to change the {name}."));
+            }
+            Message::Slide { node, name, value } => {
                 if let Some(parameter) = self.bridge.parameter(node, &name) {
                     parameter.set(value);
                 }
@@ -983,24 +993,32 @@ impl App {
                     self.report(result.map_err(|e| e.to_string()));
                 }
             }
-            Message::SetMode {
-                node,
-                channel,
-                mode,
-            } => {
-                let name = parameter_name(channel, Control::Mode);
+            Message::SetParameter { node, name, value } => {
                 let result = self.bridge.edit(&mut self.session, |s| {
-                    s.set_parameter(node, &name, Some(mode.value()))
+                    s.set_parameter(node, &name, Some(value))
                 });
                 self.report(result.map_err(|e| e.to_string()));
             }
         }
     }
 
-    /// A mixer parameter's value as shown: the one being dragged, else the model's, else its
-    /// default.
-    pub fn mixer_value(&self, node: NodeId, channel: usize, control: Control) -> f32 {
-        let name = parameter_name(channel, control);
+    /// The parameters of built-in effect kind `kind`, or `None` for a kind this build does not
+    /// know.
+    pub(crate) fn effect_parameters(&self, kind: &str) -> Option<&[ParameterInfo]> {
+        self.effect_parameters.get(kind).map(Vec::as_slice)
+    }
+
+    /// Whether parameter `name` of node `node` may change only while playback is stopped or
+    /// paused (ADR-0088).
+    pub(crate) fn is_stopped_only(&self, node: NodeId, name: &str) -> bool {
+        self.bridge
+            .parameter(node, name)
+            .is_some_and(|p| p.info().stopped_only)
+    }
+
+    /// A mixer or effect parameter's value as shown: the one being dragged, else the model's,
+    /// else the running parameter's default, else 0.
+    pub fn parameter_value(&self, node: NodeId, name: &str) -> f32 {
         if let Some(live) = self
             .live
             .as_ref()
@@ -1012,9 +1030,12 @@ impl App {
             .state()
             .node(node)
             .and_then(|n| match &n.kind {
-                NodeKind::Mixer { parameters, .. } => parameters.get(&name).copied(),
+                NodeKind::Mixer { parameters, .. } | NodeKind::Effect { parameters, .. } => {
+                    parameters.get(name).copied()
+                }
                 _ => None,
             })
+            .or_else(|| self.bridge.parameter(node, name).map(|p| p.info().default))
             .unwrap_or(0.0)
     }
 

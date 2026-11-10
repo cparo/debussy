@@ -1,6 +1,6 @@
 [package]
 name = "audio_effects"
-description = "The built-in effect nodes, built from dsp: the mixer."
+description = "The built-in effect nodes, built from dsp: the mixer, filters and equaliser."
 version = "0.0.0"
 publish = false
 edition.workspace = true

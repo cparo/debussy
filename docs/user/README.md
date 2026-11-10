@@ -83,6 +83,23 @@ Recording counts in one bar first, with the click, even when the click is off; t
 shows **Count-in**. Pick **Off** or **2 bars** in the click dialog. The take starts where the playhead
 is, after the count-in.
 
+## Routing and effects
+
+The board on the right shows how tracks reach the output. Click **+** at its top right to add a
+mixer, bus, feedback delay or effect, drag from an output to an input to connect, and click a node
+to open its controls. Changes are heard while you drag; letting go makes one undo step.
+
+- **High-pass filter** removes what is below its **Cutoff** (default 80 Hz), such as rumble;
+  **Low-pass filter** removes what is above it (default 12 kHz), such as hiss. **Order** sets how
+  steeply: each step adds 6 dB per octave, from 1 (gentle) to 8 (48 dB per octave). Order can only
+  be changed while stopped or paused.
+- **Parametric EQ** has eight bands, each off until you turn it **On**. Pick its **Type**: **bell**
+  boosts or cuts around its **Frequency**, **low shelf** and **high shelf** everything below or
+  above it, and **notch** removes a narrow range. **Gain** is the boost or cut in dB (±24), and
+  **Q** sets the width: higher is narrower.
+
+Effect settings are saved with the project.
+
 ## Exporting
 
 Click **Export…** or **Export mono…** and choose where; the file name's extension picks the
@@ -98,5 +115,5 @@ Export renders the whole project and exits without opening the window.
 
 ## Not yet available
 
-Punch-in and loop recording, editing clips in the window, adding mixers and effects (the patch
-board), and spectrograms.
+Punch-in and loop recording, editing clips in the window, automation, and effects beyond the
+filters and equaliser.

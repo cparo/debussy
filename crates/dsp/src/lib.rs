@@ -12,6 +12,8 @@
 //! - `level`: gain in decibels, the −3 dB pan law (ADR-0018) and the mono fold-down (ADR-0030).
 //! - `fft`: [`Fft`] and [`RealFft`], radix-2 transforms, and [`Stft`], Hann-windowed spectra
 //!   (ADR-0039).
+//! - `filter`: [`Svf`] and [`OnePole`], trapezoidal filters, their coefficient designers and
+//!   [`butterworth_q`].
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `error`: [`Error`].
 
@@ -20,6 +22,7 @@
 mod dither;
 mod error;
 mod fft;
+mod filter;
 mod level;
 mod noise;
 mod resample;
@@ -28,6 +31,9 @@ pub use dither::{Depth, Ditherer};
 pub use error::Error;
 pub use fft::{
     Complex, Fft, MAX_SIZE as MAX_FFT_SIZE, MIN_SIZE as MIN_FFT_SIZE, RealFft, Stft, hann,
+};
+pub use filter::{
+    MAX_FREQUENCY_RATIO, OnePole, OnePoleCoefficients, Svf, SvfCoefficients, butterworth_q, prewarp,
 };
 pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,

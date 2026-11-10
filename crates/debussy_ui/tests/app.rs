@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
-use audio_effects::{Control, Mode};
+use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, SPECTRUM_BANDS, Services,
-    Spectrum, TakeFiles, TakeStatus,
+    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, NewNode, SPECTRUM_BANDS,
+    Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -354,6 +354,10 @@ fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
     ))
 }
 
+/// The first mixer channel's gain and mode parameters.
+const GAIN: &str = "channel 1 gain";
+const MODE: &str = "channel 1 mode";
+
 fn block(processor: &mut Processor) -> Result<(), Box<dyn Error>> {
     let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
     processor.process(&[], 0, &mut l, &mut r)?;
@@ -367,8 +371,7 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
     for value in [-1.0, -3.0, -7.5] {
         app.update(Message::Slide {
             node: mixer,
-            channel: 0,
-            control: Control::Gain,
+            name: GAIN.to_owned(),
             value,
         });
     }
@@ -379,14 +382,14 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
             .map(|p| p.get()),
         Some(-7.5)
     );
-    assert_eq!(app.mixer_value(mixer, 0, Control::Gain), -7.5);
+    assert_eq!(app.parameter_value(mixer, GAIN), -7.5);
     assert!(!app.session().can_undo());
     app.update(Message::Release);
     assert!(app.session().can_undo());
-    assert_eq!(app.mixer_value(mixer, 0, Control::Gain), -7.5);
+    assert_eq!(app.parameter_value(mixer, GAIN), -7.5);
     app.update(Message::Undo);
     assert!(!app.session().can_undo(), "the drag was one step");
-    assert_eq!(app.mixer_value(mixer, 0, Control::Gain), 0.0);
+    assert_eq!(app.parameter_value(mixer, GAIN), 0.0);
     assert_eq!(
         app.bridge()
             .parameter(mixer, "channel 1 gain")
@@ -399,29 +402,102 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
 #[test]
 fn test_mute_and_solo_are_steps() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
-    app.update(Message::SetMode {
+    app.update(Message::SetParameter {
         node: mixer,
-        channel: 0,
-        mode: Mode::Mute,
+        name: MODE.to_owned(),
+        value: Mode::Mute.value(),
     });
     assert_eq!(
-        Mode::from_value(app.mixer_value(mixer, 0, Control::Mode)),
+        Mode::from_value(app.parameter_value(mixer, MODE)),
         Mode::Mute
     );
-    app.update(Message::SetMode {
+    app.update(Message::SetParameter {
         node: mixer,
-        channel: 0,
-        mode: Mode::Solo,
+        name: MODE.to_owned(),
+        value: Mode::Solo.value(),
     });
     assert_eq!(
-        Mode::from_value(app.mixer_value(mixer, 0, Control::Mode)),
+        Mode::from_value(app.parameter_value(mixer, MODE)),
         Mode::Solo
     );
     app.update(Message::Undo);
     assert_eq!(
-        Mode::from_value(app.mixer_value(mixer, 0, Control::Mode)),
+        Mode::from_value(app.parameter_value(mixer, MODE)),
         Mode::Mute
     );
+    Ok(())
+}
+
+/// Adds an effect of `kind` from the board's "+", returning its node.
+fn add_effect(app: &mut App, kind: &'static str) -> Result<NodeId, Box<dyn Error>> {
+    app.update(Message::AddNode(NewNode::Effect(kind)));
+    match app.selection() {
+        Some(Selection::Node(node)) => Ok(node),
+        _ => Err("the new effect is not selected".into()),
+    }
+}
+
+#[test]
+fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let eq = add_effect(&mut app, "parametric-eq")?;
+    let state = app.session().state();
+    let node = state.node(eq).ok_or("no node")?;
+    assert!(matches!(&node.kind, NodeKind::Effect { kind, .. } if kind == "parametric-eq"));
+    // Unset values show the effect's defaults.
+    assert_eq!(app.parameter_value(eq, "band 1 frequency"), 50.0);
+    assert_eq!(app.parameter_value(eq, "band 8 frequency"), 10_000.0);
+    app.update(Message::Slide {
+        node: eq,
+        name: "band 2 gain".to_owned(),
+        value: 4.5,
+    });
+    app.update(Message::Release);
+    app.update(Message::SetParameter {
+        node: eq,
+        name: "band 2 enabled".to_owned(),
+        value: 1.0,
+    });
+    let NodeKind::Effect { parameters, .. } =
+        &app.session().state().node(eq).ok_or("no node")?.kind
+    else {
+        return Err("not an effect".into());
+    };
+    assert_eq!(parameters.get("band 2 gain"), Some(&4.5));
+    assert_eq!(parameters.get("band 2 enabled"), Some(&1.0));
+    assert_eq!(
+        app.bridge().parameter(eq, "band 2 gain").map(|p| p.get()),
+        Some(4.5)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_filter_order_changes_only_while_stopped() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let filter = add_effect(&mut app, "high-pass")?;
+    let order = |value| Message::SetParameter {
+        node: filter,
+        name: "order".to_owned(),
+        value,
+    };
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(order(4.0));
+    assert!(app.status().is_some());
+    assert_eq!(app.parameter_value(filter, "order"), 2.0);
+    // The cutoff may move while playing.
+    app.update(Message::Slide {
+        node: filter,
+        name: "cutoff".to_owned(),
+        value: 120.0,
+    });
+    assert_eq!(app.parameter_value(filter, "cutoff"), 120.0);
+    app.update(Message::Release);
+    app.update(Message::Pause);
+    block(&mut processor)?;
+    app.update(order(4.0));
+    assert_eq!(app.parameter_value(filter, "order"), 4.0);
     Ok(())
 }
 

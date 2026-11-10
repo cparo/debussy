@@ -161,11 +161,3 @@ impl Node for Place {
         }
     }
 }
-
-/// The built-in effect of stable kind id `kind`, ready to add to a graph, or `None` for an id
-/// this build does not know. No effects are built in yet (#58–#62).
-pub fn effect(kind: &str) -> Option<Box<dyn Node>> {
-    // Each built-in effect adds an arm here, keyed by its saved kind id.
-    let _ = kind;
-    None
-}
