@@ -13,8 +13,8 @@ use audio_buffers::Layout;
 use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, NewNode, SPECTRUM_BANDS,
-    Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, MixerFocus, NewNode,
+    SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -1185,21 +1185,86 @@ fn test_commit_node_text_clamps_mixer_channels() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_release_snapped_rounds_gain() -> Result<(), Box<dyn Error>> {
+fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
-    for (slid, kept) in [(-3.4, -3.0), (-96.0, -96.0), (11.6, 12.0)] {
-        app.update(Message::Slide {
-            node: mixer,
-            name: GAIN.to_owned(),
-            value: slid,
-        });
-        app.update(Message::ReleaseSnapped { step: 1.0 });
-        assert_eq!(app.parameter_value(mixer, GAIN), kept);
-        assert_eq!(
-            app.bridge().parameter(mixer, GAIN).map(|p| p.get()),
-            Some(kept)
-        );
-    }
+    // With no mixer dialog open, Tab does nothing.
+    app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), None);
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Channels));
+    // Up on the field adds a channel, as one step.
+    app.update(Message::FocusAdjust(1));
+    assert_eq!(channels(&app, mixer), Some(2));
+    app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(0)));
+    // Gain moves a whole dB a press, each an undo step.
+    app.update(Message::FocusAdjust(1));
+    app.update(Message::FocusAdjust(1));
+    assert_eq!(app.parameter_value(mixer, GAIN), 2.0);
+    app.update(Message::Undo);
+    assert_eq!(app.parameter_value(mixer, GAIN), 1.0);
+    // Up on pan moves it left.
+    app.update(Message::FocusNext);
+    app.update(Message::FocusAdjust(1));
+    assert_eq!(app.parameter_value(mixer, "channel 1 pan"), -0.01);
+    // Space or Enter on mute toggles it.
+    app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(0)));
+    app.update(Message::FocusPress);
+    assert_eq!(
+        Mode::from_value(app.parameter_value(mixer, "channel 1 mode")),
+        Mode::Mute
+    );
+    app.update(Message::FocusPress);
+    assert_eq!(
+        Mode::from_value(app.parameter_value(mixer, "channel 1 mode")),
+        Mode::Play
+    );
+    // Past channel 1's solo comes channel 2's gain; back from the field wraps to the last solo.
+    app.update(Message::FocusNext);
+    app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(1)));
+    app.update(Message::FocusPrevious);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Solo(0)));
+    // Selecting elsewhere drops the focus.
+    app.update(Message::Select(None));
+    assert_eq!(app.mixer_focus(), None);
+    Ok(())
+}
+
+#[test]
+fn test_step_mixer_channels_stays_in_range() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    // Channel 1 is connected: down does nothing.
+    app.update(Message::StepMixerChannels(mixer, -1));
+    assert_eq!(channels(&app, mixer), Some(1));
+    assert!(!app.session().can_undo());
+    app.update(Message::StepMixerChannels(mixer, 1));
+    assert_eq!(channels(&app, mixer), Some(2));
+    set_channels(&mut app, mixer, "128");
+    app.update(Message::StepMixerChannels(mixer, 1));
+    assert_eq!(channels(&app, mixer), Some(128));
+    Ok(())
+}
+
+#[test]
+fn test_slide_on_another_parameter_records_the_last() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    // Arrow keys on a hovered slider slide it with no release.
+    app.update(Message::Slide {
+        node: mixer,
+        name: GAIN.to_owned(),
+        value: -4.0,
+    });
+    app.update(Message::Slide {
+        node: mixer,
+        name: "channel 1 pan".to_owned(),
+        value: 0.5,
+    });
+    app.update(Message::Release);
+    app.update(Message::Undo);
+    assert_eq!(app.parameter_value(mixer, GAIN), -4.0);
     Ok(())
 }
 

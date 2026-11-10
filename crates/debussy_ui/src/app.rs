@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 
+use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
+
 use audio_buffers::Layout;
 use audio_engine::Engine;
 use engine_bridge::Bridge;
@@ -18,6 +20,7 @@ use signal_graph::ParameterInfo;
 
 use crate::click::Click;
 use crate::menu::Menu;
+use crate::mixer_strip::{GAIN_STEP_DB, MixerFocus, PAN_STEP, toggled};
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
 use crate::recording::{Arming, InputChoice, Pass};
@@ -238,12 +241,17 @@ pub enum Message {
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
-    /// As [`Message::Release`], but the value is first rounded to the nearest multiple of
-    /// `step` and kept in the parameter's range.
-    ReleaseSnapped {
-        /// The step to round to.
-        step: f32,
-    },
+    /// Move the mixer dialog's keyboard focus to its next control (Tab).
+    FocusNext,
+    /// Move the mixer dialog's keyboard focus to its previous control (Shift-Tab).
+    FocusPrevious,
+    /// Adjust the focused mixer control up (`1`) or down (`-1`) a step (the arrow keys).
+    FocusAdjust(i32),
+    /// Press the focused mixer button (Space or Enter).
+    FocusPress,
+    /// Change a mixer's channel count by `1` or `-1`, within [`App::channel_range`], as one
+    /// step (the channel field's up and down buttons).
+    StepMixerChannels(NodeId, i32),
     /// A button or choice set a parameter: applied and recorded as one undo step.
     SetParameter {
         /// The mixer or effect node.
@@ -317,6 +325,8 @@ pub struct App {
     /// The tracks the engine's feeds were made from.
     pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
+    /// The mixer dialog control with the keyboard focus.
+    pub(crate) mixer_focus: Option<MixerFocus>,
     /// The audio devices present, and the one in use.
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
     /// The last error or notice, for the status line.
@@ -391,6 +401,7 @@ impl App {
             node_text: None,
             loaded: None,
             live: None,
+            mixer_focus: None,
             devices: (Vec::new(), None),
             status: None,
             saved_revision: 0,
@@ -661,6 +672,10 @@ impl App {
                 | Message::TempoText(_)
                 | Message::ClickLevel(_)
                 | Message::ReleaseClickLevel
+                | Message::FocusNext
+                | Message::FocusPrevious
+                | Message::FocusAdjust(_)
+                | Message::FocusPress
         ) {
             self.status = None;
             if !in_click_dialog {
@@ -883,6 +898,7 @@ impl App {
             Message::Select(selection) => {
                 // A click on the board leaves any field being typed.
                 self.node_text = None;
+                self.mixer_focus = None;
                 self.selection = selection;
             }
             Message::DragNode(node, position) => {
@@ -933,7 +949,46 @@ impl App {
                     self.selection = None;
                 }
             }
-            Message::NodeText(node, text) => self.node_text = Some((node, text)),
+            Message::NodeText(node, text) => {
+                if self.dialog_mixer().is_some_and(|(mixer, _)| mixer == node) {
+                    self.mixer_focus = Some(MixerFocus::Channels);
+                }
+                self.node_text = Some((node, text));
+            }
+            Message::StepMixerChannels(node, delta) => self.step_channels(node, delta),
+            Message::FocusNext | Message::FocusPrevious => {
+                let Some((mixer, channels)) = self.dialog_mixer() else {
+                    return;
+                };
+                if self.mixer_focus == Some(MixerFocus::Channels) {
+                    // Leaving the field records what was typed in it.
+                    if let Some((node, text)) = self.node_text.take() {
+                        self.commit_node_text(node, &text);
+                    }
+                }
+                let channels = self.channel_count(mixer).unwrap_or(channels);
+                let forward = matches!(message, Message::FocusNext);
+                self.mixer_focus = Some(MixerFocus::moved(self.mixer_focus, channels, forward));
+            }
+            Message::FocusAdjust(delta) => self.adjust_focus(delta),
+            Message::FocusPress => {
+                let (Some((mixer, _)), Some(MixerFocus::Mute(ch) | MixerFocus::Solo(ch))) =
+                    (self.dialog_mixer(), self.mixer_focus)
+                else {
+                    return;
+                };
+                let target = match self.mixer_focus {
+                    Some(MixerFocus::Mute(_)) => Mode::Mute,
+                    _ => Mode::Solo,
+                };
+                let name = parameter_name(ch, Control::Mode);
+                let current = Mode::from_value(self.parameter_value(mixer, &name));
+                self.update(Message::SetParameter {
+                    node: mixer,
+                    name,
+                    value: toggled(current, target).value(),
+                });
+            }
             Message::CommitNodeText => {
                 if let Some((node, text)) = self.node_text.take() {
                     self.commit_node_text(node, &text);
@@ -965,6 +1020,15 @@ impl App {
                 self.status = Some(format!("Pause or stop playback to change the {name}."));
             }
             Message::Slide { node, name, value } => {
+                // A value left live on another parameter, by arrow keys on a hovered slider, is
+                // recorded first.
+                if self
+                    .live
+                    .as_ref()
+                    .is_some_and(|l| l.node != node || l.name != name)
+                {
+                    self.update(Message::Release);
+                }
                 if let Some(parameter) = self.bridge.parameter(node, &name) {
                     parameter.set(value);
                 }
@@ -978,23 +1042,6 @@ impl App {
                     self.report(result.map_err(|e| e.to_string()));
                 }
             }
-            Message::ReleaseSnapped { step } => {
-                if let Some(live) = self.live.take() {
-                    let mut value = live.value;
-                    if step > 0.0 {
-                        value = (value / step).round() * step;
-                    }
-                    if let Some(parameter) = self.bridge.parameter(live.node, &live.name) {
-                        let info = parameter.info();
-                        value = value.clamp(info.min, info.max);
-                        parameter.set(value);
-                    }
-                    let result = self.bridge.edit(&mut self.session, |s| {
-                        s.set_parameter(live.node, &live.name, Some(value))
-                    });
-                    self.report(result.map_err(|e| e.to_string()));
-                }
-            }
             Message::SetParameter { node, name, value } => {
                 let result = self.bridge.edit(&mut self.session, |s| {
                     s.set_parameter(node, &name, Some(value))
@@ -1002,6 +1049,80 @@ impl App {
                 self.report(result.map_err(|e| e.to_string()));
             }
         }
+    }
+
+    /// The selected node and its channel count, if it is a mixer: the mixer whose dialog is open.
+    pub(crate) fn dialog_mixer(&self) -> Option<(NodeId, usize)> {
+        let Some(Selection::Node(id)) = self.selection else {
+            return None;
+        };
+        self.channel_count(id).map(|channels| (id, channels))
+    }
+
+    /// Mixer `node`'s channel count; `None` if it is not a mixer.
+    fn channel_count(&self, node: NodeId) -> Option<usize> {
+        match self.session.state().node(node)?.kind {
+            NodeKind::Mixer { channels, .. } => Some(channels),
+            _ => None,
+        }
+    }
+
+    /// The mixer dialog control with the keyboard focus, if any.
+    pub fn mixer_focus(&self) -> Option<MixerFocus> {
+        self.mixer_focus
+    }
+
+    /// Changes mixer `node`'s channel count by `delta`, within [`App::channel_range`], as one
+    /// step; what was typed in its field is dropped.
+    fn step_channels(&mut self, node: NodeId, delta: i32) {
+        let (Some(channels), Some(range)) = (self.channel_count(node), self.channel_range(node))
+        else {
+            return;
+        };
+        if self.node_text.as_ref().is_some_and(|(n, _)| *n == node) {
+            self.node_text = None;
+        }
+        let wanted = channels
+            .saturating_add_signed(delta as isize)
+            .clamp(*range.start(), *range.end());
+        if wanted != channels {
+            let result = self.bridge.edit(&mut self.session, |s| {
+                s.apply(Edit::SetMixerChannels {
+                    node,
+                    channels: wanted,
+                })
+            });
+            self.report(result.map_err(|e| e.to_string()));
+        }
+    }
+
+    /// Adjusts the focused mixer control by `delta` steps, each recorded as one undo step: the
+    /// channel count by one, gain by [`GAIN_STEP_DB`], pan by [`PAN_STEP`] (up is left).
+    fn adjust_focus(&mut self, delta: i32) {
+        let (Some((mixer, _)), Some(focus)) = (self.dialog_mixer(), self.mixer_focus) else {
+            return;
+        };
+        let (name, value) = match focus {
+            MixerFocus::Channels => return self.step_channels(mixer, delta),
+            MixerFocus::Gain(ch) => {
+                let name = parameter_name(ch, Control::Gain);
+                let gain = self.parameter_value(mixer, &name);
+                let value = ((gain / GAIN_STEP_DB).round() + delta as f32) * GAIN_STEP_DB;
+                (name, value.clamp(SILENCE_DB, MAX_GAIN_DB))
+            }
+            MixerFocus::Pan(ch) => {
+                let name = parameter_name(ch, Control::Pan);
+                let pan = self.parameter_value(mixer, &name);
+                let value = ((pan / PAN_STEP).round() - delta as f32) * PAN_STEP;
+                (name, value.clamp(-1.0, 1.0))
+            }
+            MixerFocus::Mute(_) | MixerFocus::Solo(_) => return,
+        };
+        self.update(Message::SetParameter {
+            node: mixer,
+            name,
+            value,
+        });
     }
 
     /// Records `text`, typed in node `node`'s dialog field, as one step: a feedback delay's time,

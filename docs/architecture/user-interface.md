@@ -52,12 +52,17 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
   toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
   stopped-only parameter shows "Stop to change" in place of its control while playing.
-- **Mixer dialogs** have a "Channels" field, clamped on commit from one past the highest connected
-  input (at least 1) to 128 and applied as one step, above narrow strips in a horizontal scroll.
-  A strip shows its channel number; a vertical gain slider between +12dB and -96dB labels; a
-  vertical pan slider between L (top) and R (bottom) labels; then mute above solo. Each slider has
-  a tic mark under its handle at 0 dB or centre, and shows its value only as a hover tip. Releasing
-  the gain slider rounds it to the nearest whole dB
+- **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
+  past the highest connected input (at least 1) to 128 and applied as one step, above narrow
+  strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; a vertical
+  gain slider between +12dB and -96dB labels, in whole-dB steps; a vertical pan slider between L
+  (top) and R (bottom) labels; then Mute above Solo. Each slider has a tic mark under its handle
+  at 0 dB or centre, and shows its value only as a hover tip; arrow keys on a hovered slider are
+  recorded as one step when the cursor leaves it. Tab and Shift-Tab move a keyboard focus, drawn
+  as an accent ring, from the field down each strip's gain, pan, mute and solo, strip by strip,
+  wrapping; the up and down arrows step the focused field or slider (1 channel, 1 dB, 1 % pan
+  with up to the left), each press one step, and Space or Enter presses a focused button. The
+  dialog's × has no button face, and "Delete node" sits at its bottom right
   ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform

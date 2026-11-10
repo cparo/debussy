@@ -50,6 +50,7 @@ use std::sync::Mutex;
 
 pub use app::{App, Message, NewNode};
 pub use menu::Menu;
+pub use mixer_strip::MixerFocus;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
@@ -112,8 +113,17 @@ impl Shell {
             Message::StartRename(_) => iced::widget::operation::focus(view::RENAME_INPUT),
             _ => iced::Task::none(),
         };
+        let moves_focus = matches!(message, Message::FocusNext | Message::FocusPrevious);
         if let Some(app) = &mut self.0 {
             app.update(message);
+            // Tab into the "Channels" field focuses it; Tab out of it takes its focus away.
+            if moves_focus && app.dialog_mixer().is_some() {
+                let field = match app.mixer_focus() {
+                    Some(MixerFocus::Channels) => mixer_strip::CHANNELS_INPUT,
+                    _ => mixer_strip::NO_FIELD,
+                };
+                return iced::widget::operation::focus(field);
+            }
         }
         task
     }

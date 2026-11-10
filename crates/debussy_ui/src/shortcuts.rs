@@ -15,6 +15,15 @@ pub fn shortcut(event: Event) -> Option<Message> {
     }
     match key.as_ref() {
         Key::Named(Named::Escape) if modifiers.is_empty() => Some(Message::ClearRange),
+        Key::Named(Named::Tab) if modifiers.shift() && !modifiers.command() => {
+            Some(Message::FocusPrevious)
+        }
+        Key::Named(Named::Tab) if modifiers.is_empty() => Some(Message::FocusNext),
+        Key::Named(Named::ArrowUp) if modifiers.is_empty() => Some(Message::FocusAdjust(1)),
+        Key::Named(Named::ArrowDown) if modifiers.is_empty() => Some(Message::FocusAdjust(-1)),
+        Key::Named(Named::Space | Named::Enter) if modifiers.is_empty() => {
+            Some(Message::FocusPress)
+        }
         Key::Named(Named::Delete | Named::Backspace) if modifiers.is_empty() => {
             Some(Message::DeleteRange)
         }
@@ -76,6 +85,32 @@ mod tests {
             shortcut(press(character("x"), command | Modifiers::ALT)),
             None
         );
+    }
+
+    #[test]
+    fn test_shortcut_focus_keys() {
+        let none = Modifiers::empty();
+        let named = |n| Key::Named(n);
+        assert_eq!(
+            shortcut(press(named(Named::Tab), none)),
+            Some(Message::FocusNext)
+        );
+        assert_eq!(
+            shortcut(press(named(Named::Tab), Modifiers::SHIFT)),
+            Some(Message::FocusPrevious)
+        );
+        assert_eq!(
+            shortcut(press(named(Named::ArrowUp), none)),
+            Some(Message::FocusAdjust(1))
+        );
+        assert_eq!(
+            shortcut(press(named(Named::ArrowDown), none)),
+            Some(Message::FocusAdjust(-1))
+        );
+        for key in [Named::Space, Named::Enter] {
+            assert_eq!(shortcut(press(named(key), none)), Some(Message::FocusPress));
+        }
+        assert_eq!(shortcut(press(named(Named::Tab), Modifiers::COMMAND)), None);
     }
 
     #[test]

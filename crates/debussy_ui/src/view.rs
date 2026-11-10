@@ -648,15 +648,20 @@ impl App {
         let header = row![
             text(crate::patch_board::title(&node.kind)).size(18),
             Space::new().width(Fill),
+            button(text("×").size(22))
+                .on_press(Message::Select(None))
+                .padding([0, 4])
+                .style(theme::bare),
+        ]
+        .align_y(Alignment::Center);
+        let footer = row![
+            Space::new().width(Fill),
             tool(
                 Face::Label("Delete node"),
                 Some(Message::DeleteNode(id)),
                 false
             ),
-            tool(Face::Label("×"), Some(Message::Select(None)), false),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        ];
         let body: Element<'_, Message> = match &node.kind {
             NodeKind::Mixer { channels, .. } => self.mixer_panel(id, *channels),
             NodeKind::FeedbackDelay { seconds, .. } => {
@@ -679,7 +684,7 @@ impl App {
             NodeKind::Bus(_) => Space::new().into(),
         };
         Some(
-            container(column![header, scrollable(body).height(Fill)].spacing(12))
+            container(column![header, scrollable(body).height(Fill), footer].spacing(12))
                 .padding(12)
                 .width(Length::Fixed(size.width))
                 .height(Length::Fixed(size.height))

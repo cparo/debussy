@@ -365,6 +365,38 @@ pub fn flat(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A button with no face at all: its label in the text colour, in the accent while hovered or
+/// pressed; the dialog's × close button.
+pub fn bare(theme: &Theme, status: button::Status) -> button::Style {
+    let t = tokens(tone_of(theme));
+    let text = match status {
+        button::Status::Disabled => Color { a: 0.4, ..t.text },
+        button::Status::Hovered | button::Status::Pressed => t.audio,
+        button::Status::Active => t.text,
+    };
+    button::Style {
+        background: None,
+        text_color: text,
+        ..button::Style::default()
+    }
+}
+
+/// The ring around a mixer dialog control with the keyboard focus: an outline in the accent;
+/// nothing when `focused` is false, so the control does not move as focus does.
+pub fn focus_ring(focused: bool) -> impl Fn(&Theme) -> container::Style {
+    move |theme| {
+        let t = tokens(tone_of(theme));
+        container::Style {
+            border: Border {
+                color: if focused { t.audio } else { Color::TRANSPARENT },
+                width: 1.5,
+                radius: border::radius(4.0),
+            },
+            ..container::Style::default()
+        }
+    }
+}
+
 /// `a` moved towards `b` by `amount` (0 to 1).
 pub fn mix(a: Color, b: Color, amount: f32) -> Color {
     let k = amount.clamp(0.0, 1.0);
