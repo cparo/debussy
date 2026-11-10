@@ -6,6 +6,9 @@
 //! the running graph's parameter; releasing it records one undo step.
 
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
+
+use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
 
 use audio_buffers::Layout;
 use audio_engine::Engine;
@@ -17,6 +20,7 @@ use signal_graph::ParameterInfo;
 
 use crate::click::Click;
 use crate::menu::Menu;
+use crate::mixer_strip::{GAIN_STEP_DB, MixerFocus, PAN_STEP, toggled};
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
 use crate::recording::{Arming, InputChoice, Pass};
@@ -215,14 +219,15 @@ pub enum Message {
     AddNode(NewNode),
     /// Delete a node and its connections.
     DeleteNode(NodeId),
-    /// Add a channel to a mixer.
-    AddMixerChannel(NodeId),
-    /// Remove a mixer's last channel, if nothing is connected to it.
-    RemoveMixerChannel(NodeId),
-    /// The feedback delay time being typed, in seconds.
-    DelayText(NodeId, String),
-    /// Record the typed delay time as one step.
-    CommitDelay,
+    /// Ask to confirm deleting a node: its dialog's "Delete" button.
+    AskDeleteNode(NodeId),
+    /// Close the delete confirmation without deleting.
+    CancelDelete,
+    /// The text being typed in a node dialog's field: a feedback delay's time in seconds, or a
+    /// mixer's channel count.
+    NodeText(NodeId, String),
+    /// Record the typed field as one step.
+    CommitNodeText,
     /// Export the mix, through a file dialog; the mono mix if `true`.
     Export(bool),
     /// Use this audio device for input and output.
@@ -240,6 +245,31 @@ pub enum Message {
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
+    /// Move the mixer dialog's keyboard focus to its next control (Tab).
+    FocusNext,
+    /// Move the mixer dialog's keyboard focus to its previous control (Shift-Tab).
+    FocusPrevious,
+    /// Adjust the focused mixer control up (`1`) or down (`-1`) a step (the arrow keys).
+    FocusAdjust(i32),
+    /// Press the focused mixer button (Space or Enter); with a delete confirmation open, cancel
+    /// it, its default.
+    FocusPress,
+    /// Give the mixer dialog's keyboard focus to a control, or take it away: a press on a control
+    /// or on the dialog's background.
+    SetMixerFocus(Option<MixerFocus>),
+    /// A mixer channel's mute or solo button: set the channel to `mode`, or back to playing if it
+    /// is already. Soloing a channel unsolos the mixer's others in the same undo step.
+    ToggleMode {
+        /// The mixer node.
+        node: NodeId,
+        /// The channel index, from 0.
+        channel: usize,
+        /// [`Mode::Mute`] or [`Mode::Solo`].
+        mode: Mode,
+    },
+    /// Change a mixer's channel count by `1` or `-1`, within [`App::channel_range`], as one
+    /// step (the channel field's up and down buttons).
+    StepMixerChannels(NodeId, i32),
     /// A button or choice set a parameter: applied and recorded as one undo step.
     SetParameter {
         /// The mixer or effect node.
@@ -308,11 +338,15 @@ pub struct App {
     pub(crate) wiring: Option<Pin>,
     /// A node or the outputs being dragged.
     pub(crate) moving: Option<Moving>,
-    /// A feedback delay's time being typed.
-    pub(crate) delay_text: Option<(NodeId, String)>,
+    /// A node dialog's field being typed: a feedback delay's time, or a mixer's channel count.
+    pub(crate) node_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
     pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
+    /// The mixer dialog control with the keyboard focus.
+    pub(crate) mixer_focus: Option<MixerFocus>,
+    /// The node whose deletion is waiting to be confirmed.
+    pub(crate) confirming_delete: Option<NodeId>,
     /// The audio devices present, and the one in use.
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
     /// The last error or notice, for the status line.
@@ -384,9 +418,11 @@ impl App {
             clipboard: None,
             wiring: None,
             moving: None,
-            delay_text: None,
+            node_text: None,
             loaded: None,
             live: None,
+            mixer_focus: None,
+            confirming_delete: None,
             devices: (Vec::new(), None),
             status: None,
             saved_revision: 0,
@@ -574,19 +610,22 @@ impl App {
             .filter(|&id| self.session.state().track(id).is_some()))
     }
 
-    /// The number of channels `node` would keep after removing its last one, if it is a mixer
-    /// of more than one channel with nothing connected to its last.
-    pub fn removable_channel(&self, node: NodeId) -> Option<usize> {
+    /// The channel counts mixer `node` may be given: from one past its highest connected input
+    /// (at least 1) to [`audio_effects::MAX_CHANNELS`]; `None` if it is not a mixer.
+    pub fn channel_range(&self, node: NodeId) -> Option<RangeInclusive<usize>> {
         let state = self.session.state();
-        let NodeKind::Mixer { channels, .. } = state.node(node)?.kind else {
+        let NodeKind::Mixer { .. } = state.node(node)?.kind else {
             return None;
         };
-        let last = channels.checked_sub(1).filter(|&n| n >= 1)?;
-        let used = state
+        let min = state
             .connections
             .iter()
-            .any(|c| c.to == Endpoint::Node(node) && c.input == last);
-        (!used).then_some(last)
+            .filter(|c| c.to == Endpoint::Node(node))
+            .map(|c| c.input + 1)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        Some(min..=audio_effects::MAX_CHANNELS)
     }
 
     /// The open menu, if any.
@@ -648,12 +687,17 @@ impl App {
                 | Message::RefreshDevices
                 | Message::DragNode(..)
                 | Message::DragOutput(_)
-                | Message::DelayText(..)
+                | Message::NodeText(..)
                 | Message::LaneDrag { .. }
                 | Message::LaneRelease
                 | Message::TempoText(_)
                 | Message::ClickLevel(_)
                 | Message::ReleaseClickLevel
+                | Message::FocusNext
+                | Message::FocusPrevious
+                | Message::FocusAdjust(_)
+                | Message::FocusPress
+                | Message::SetMixerFocus(_)
         ) {
             self.status = None;
             if !in_click_dialog {
@@ -708,6 +752,9 @@ impl App {
             } => self.lane_press(track, frame, extend),
             Message::LaneDrag { track, frame } => self.lane_drag(track, frame),
             Message::LaneRelease => self.drag = None,
+            Message::ClearRange if self.confirming_delete.is_some() => {
+                self.confirming_delete = None;
+            }
             Message::ClearRange => self.range = None,
             Message::Cut => self.cut(),
             Message::Copy => {
@@ -874,8 +921,10 @@ impl App {
                 self.wiring = None;
             }
             Message::Select(selection) => {
-                // A click on the board leaves any delay time being typed.
-                self.delay_text = None;
+                // A click on the board leaves any field being typed.
+                self.node_text = None;
+                self.mixer_focus = None;
+                self.confirming_delete = None;
                 self.selection = selection;
             }
             Message::DragNode(node, position) => {
@@ -896,7 +945,7 @@ impl App {
             }
             Message::DeleteSelection => {
                 // Delete and Backspace edit the text being typed instead.
-                if self.renaming.is_some() || self.delay_text.is_some() {
+                if self.renaming.is_some() || self.node_text.is_some() {
                     return;
                 }
                 let result = match self.selection.take() {
@@ -919,39 +968,62 @@ impl App {
                     Err(error) => self.status = Some(error.to_string()),
                 }
             }
+            Message::AskDeleteNode(node) => self.confirming_delete = Some(node),
+            Message::CancelDelete => self.confirming_delete = None,
             Message::DeleteNode(node) => {
+                self.confirming_delete = None;
                 let result = self.bridge.edit(&mut self.session, |s| s.remove_node(node));
                 self.report(result.map_err(|e| e.to_string()));
                 if self.selection == Some(Selection::Node(node)) {
                     self.selection = None;
                 }
             }
-            Message::AddMixerChannel(node) => {
-                let result = self
-                    .bridge
-                    .edit(&mut self.session, |s| s.add_mixer_channels(node, 1));
-                self.report(result.map_err(|e| e.to_string()));
+            Message::NodeText(node, text) => {
+                if self.dialog_mixer().is_some_and(|(mixer, _)| mixer == node) {
+                    self.mixer_focus = Some(MixerFocus::Channels);
+                }
+                self.node_text = Some((node, text));
             }
-            Message::RemoveMixerChannel(node) => {
-                if let Some(channels) = self.removable_channel(node) {
-                    let result = self.bridge.edit(&mut self.session, |s| {
-                        s.apply(Edit::SetMixerChannels { node, channels })
-                    });
-                    self.report(result.map_err(|e| e.to_string()));
+            Message::StepMixerChannels(node, delta) => self.step_channels(node, delta),
+            // The confirmation holds the keyboard while open.
+            Message::FocusNext | Message::FocusPrevious | Message::FocusAdjust(_)
+                if self.confirming_delete.is_some() => {}
+            Message::FocusPress if self.confirming_delete.is_some() => {
+                self.confirming_delete = None;
+            }
+            Message::FocusNext | Message::FocusPrevious => {
+                let Some((_, channels)) = self.dialog_mixer() else {
+                    return;
+                };
+                let forward = matches!(message, Message::FocusNext);
+                let next = MixerFocus::moved(self.mixer_focus, channels, forward);
+                self.set_mixer_focus(Some(next));
+            }
+            Message::SetMixerFocus(focus) => {
+                if self.dialog_mixer().is_some() {
+                    self.set_mixer_focus(focus);
                 }
             }
-            Message::DelayText(node, text) => self.delay_text = Some((node, text)),
-            Message::CommitDelay => {
-                if let Some((node, text)) = self.delay_text.take() {
-                    match text.trim().parse::<f64>() {
-                        Ok(seconds) => {
-                            let result = self.bridge.edit(&mut self.session, |s| {
-                                s.apply(Edit::SetDelay { node, seconds })
-                            });
-                            self.report(result.map_err(|e| e.to_string()));
-                        }
-                        Err(_) => self.status = Some(format!("{text:?} is not a time in seconds")),
-                    }
+            Message::FocusAdjust(delta) => self.adjust_focus(delta),
+            Message::FocusPress => {
+                let Some((node, _)) = self.dialog_mixer() else {
+                    return;
+                };
+                let (channel, mode) = match self.mixer_focus {
+                    Some(MixerFocus::Mute(ch)) => (ch, Mode::Mute),
+                    Some(MixerFocus::Solo(ch)) => (ch, Mode::Solo),
+                    _ => return,
+                };
+                self.toggle_mode(node, channel, mode);
+            }
+            Message::ToggleMode {
+                node,
+                channel,
+                mode,
+            } => self.toggle_mode(node, channel, mode),
+            Message::CommitNodeText => {
+                if let Some((node, text)) = self.node_text.take() {
+                    self.commit_node_text(node, &text);
                 }
             }
             Message::Export(mono) => match self.services.export(self.session.state(), mono) {
@@ -1000,6 +1072,158 @@ impl App {
                 self.report(result.map_err(|e| e.to_string()));
             }
         }
+    }
+
+    /// The selected node and its channel count, if it is a mixer: the mixer whose dialog is open.
+    pub(crate) fn dialog_mixer(&self) -> Option<(NodeId, usize)> {
+        let Some(Selection::Node(id)) = self.selection else {
+            return None;
+        };
+        self.channel_count(id).map(|channels| (id, channels))
+    }
+
+    /// Mixer `node`'s channel count; `None` if it is not a mixer.
+    fn channel_count(&self, node: NodeId) -> Option<usize> {
+        match self.session.state().node(node)?.kind {
+            NodeKind::Mixer { channels, .. } => Some(channels),
+            _ => None,
+        }
+    }
+
+    /// The mixer dialog control with the keyboard focus, if any.
+    pub fn mixer_focus(&self) -> Option<MixerFocus> {
+        self.mixer_focus
+    }
+
+    /// Moves the mixer dialog's keyboard focus to `focus`; leaving the "Channels" field records
+    /// what was typed in it.
+    fn set_mixer_focus(&mut self, focus: Option<MixerFocus>) {
+        if self.mixer_focus == Some(MixerFocus::Channels)
+            && focus != self.mixer_focus
+            && let Some((node, text)) = self.node_text.take()
+        {
+            self.commit_node_text(node, &text);
+        }
+        self.mixer_focus = focus;
+    }
+
+    /// Sets mixer `node`'s channel `channel` to `mode`, or back to playing if it is already, as
+    /// one undo step; soloing it unsolos the mixer's other channels in the same step.
+    fn toggle_mode(&mut self, node: NodeId, channel: usize, mode: Mode) {
+        let Some(channels) = self.channel_count(node) else {
+            return;
+        };
+        let mode_of = |app: &Self, ch: usize| {
+            Mode::from_value(app.parameter_value(node, &parameter_name(ch, Control::Mode)))
+        };
+        let set = |ch: usize, mode: Mode| Edit::SetParameter {
+            node,
+            name: parameter_name(ch, Control::Mode),
+            value: Some(mode.value()),
+        };
+        let wanted = toggled(mode_of(self, channel), mode);
+        let mut edits = vec![set(channel, wanted)];
+        if wanted == Mode::Solo {
+            edits.extend(
+                (0..channels)
+                    .filter(|&ch| ch != channel && mode_of(self, ch) == Mode::Solo)
+                    .map(|ch| set(ch, Mode::Play)),
+            );
+        }
+        let edit = match edits.len() {
+            1 => edits.remove(0),
+            _ => Edit::Batch(edits),
+        };
+        let result = self.bridge.edit(&mut self.session, |s| s.apply(edit));
+        self.report(result.map_err(|e| e.to_string()));
+    }
+
+    /// Changes mixer `node`'s channel count by `delta`, within [`App::channel_range`], as one
+    /// step; what was typed in its field is dropped.
+    fn step_channels(&mut self, node: NodeId, delta: i32) {
+        let (Some(channels), Some(range)) = (self.channel_count(node), self.channel_range(node))
+        else {
+            return;
+        };
+        if self.node_text.as_ref().is_some_and(|(n, _)| *n == node) {
+            self.node_text = None;
+        }
+        let wanted = channels
+            .saturating_add_signed(delta as isize)
+            .clamp(*range.start(), *range.end());
+        if wanted != channels {
+            let result = self.bridge.edit(&mut self.session, |s| {
+                s.apply(Edit::SetMixerChannels {
+                    node,
+                    channels: wanted,
+                })
+            });
+            self.report(result.map_err(|e| e.to_string()));
+        }
+    }
+
+    /// Adjusts the focused mixer control by `delta` steps, each recorded as one undo step: the
+    /// channel count by one, gain by [`GAIN_STEP_DB`], pan by [`PAN_STEP`] (up is left).
+    fn adjust_focus(&mut self, delta: i32) {
+        let (Some((mixer, _)), Some(focus)) = (self.dialog_mixer(), self.mixer_focus) else {
+            return;
+        };
+        let (name, value) = match focus {
+            MixerFocus::Channels => return self.step_channels(mixer, delta),
+            MixerFocus::Gain(ch) => {
+                let name = parameter_name(ch, Control::Gain);
+                let gain = self.parameter_value(mixer, &name);
+                let value = ((gain / GAIN_STEP_DB).round() + delta as f32) * GAIN_STEP_DB;
+                (name, value.clamp(SILENCE_DB, MAX_GAIN_DB))
+            }
+            MixerFocus::Pan(ch) => {
+                let name = parameter_name(ch, Control::Pan);
+                let pan = self.parameter_value(mixer, &name);
+                let value = ((pan / PAN_STEP).round() - delta as f32) * PAN_STEP;
+                (name, value.clamp(-1.0, 1.0))
+            }
+            MixerFocus::Mute(_) | MixerFocus::Solo(_) => return,
+        };
+        self.update(Message::SetParameter {
+            node: mixer,
+            name,
+            value,
+        });
+    }
+
+    /// Records `text`, typed in node `node`'s dialog field, as one step: a feedback delay's time,
+    /// or a mixer's channel count clamped into [`App::channel_range`].
+    fn commit_node_text(&mut self, node: NodeId, text: &str) {
+        let kind = self.session.state().node(node).map(|n| &n.kind);
+        let edit = match kind {
+            Some(NodeKind::FeedbackDelay { .. }) => match text.trim().parse::<f64>() {
+                Ok(seconds) => Edit::SetDelay { node, seconds },
+                Err(_) => {
+                    self.status = Some(format!("{text:?} is not a time in seconds"));
+                    return;
+                }
+            },
+            Some(&NodeKind::Mixer { channels, .. }) => {
+                let Ok(typed) = text.trim().parse::<usize>() else {
+                    self.status = Some(format!("{text:?} is not a channel count"));
+                    return;
+                };
+                let Some(range) = self.channel_range(node) else {
+                    return;
+                };
+                let wanted = typed.clamp(*range.start(), *range.end());
+                if wanted == channels {
+                    return;
+                }
+                Edit::SetMixerChannels {
+                    node,
+                    channels: wanted,
+                }
+            }
+            _ => return,
+        };
+        let result = self.bridge.edit(&mut self.session, |s| s.apply(edit));
+        self.report(result.map_err(|e| e.to_string()));
     }
 
     /// The parameters of built-in effect kind `kind`, or `None` for a kind this build does not
@@ -1181,7 +1405,7 @@ impl App {
 
     fn delete_range(&mut self) {
         // Delete and Backspace edit the text being typed instead.
-        if self.renaming.is_some() || self.delay_text.is_some() {
+        if self.renaming.is_some() || self.node_text.is_some() {
             return;
         }
         let Some((tracks, range)) = self.selected_range() else {

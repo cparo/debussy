@@ -5,19 +5,20 @@
 use std::sync::LazyLock;
 
 use audio_buffers::Layout;
-use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
 use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
-    responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip, vertical_slider,
+    responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Size};
-use project_model::{Endpoint, NodeKind, TrackId};
+use project_model::{Endpoint, NodeKind, Side, TrackId};
 
 use crate::app::{App, Message, NewNode};
 use crate::click::{COUNT_IN_BARS, format_bpm};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
-use crate::patch_board::{BoardView, Divider, GUTTER_WIDTH, GutterView, Selection};
+use crate::patch_board::{
+    BoardView, Divider, GUTTER_WIDTH, GutterView, PIN_RADIUS, Selection, gutter_pin_x,
+};
 use crate::recording::METER_FLOOR_DB;
 use crate::services::{MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB};
 use crate::theme::{self, Accent, Place, Tone};
@@ -63,6 +64,8 @@ const CLICK_DIALOG_X: f32 = 370.0;
 const CLICK_DIALOG_WIDTH: f32 = 290.0;
 /// The click dialog's height, to open it above the bottom bar.
 const CLICK_DIALOG_HEIGHT: f32 = 390.0;
+/// The delete confirmation's width.
+const CONFIRM_WIDTH: f32 = 280.0;
 /// The height of one item in a dropdown menu, to open the device menu above the bottom bar.
 const MENU_ITEM_HEIGHT: f32 = 27.0;
 
@@ -563,6 +566,32 @@ impl App {
             .filter(|(p, _)| matches!(p.endpoint, Endpoint::Track(_)))
             .map(|(p, at)| (*p, at.y))
             .collect();
+        // Each gutter pin's name shows on hover; the tip's anchor captures nothing, so a press
+        // still reaches the gutter and starts a wire.
+        let mut gutter_layers = stack![
+            canvas(GutterView(gutter.clone()))
+                .width(Length::Fixed(GUTTER_WIDTH))
+                .height(Length::Fixed(height))
+        ];
+        for (p, y) in &gutter {
+            let Endpoint::Track(track) = p.endpoint else {
+                continue;
+            };
+            let Some(name) = self.port_name(track, p.side) else {
+                continue;
+            };
+            let anchor = tooltip(
+                Space::new()
+                    .width(Length::Fixed(2.0 * PIN_RADIUS))
+                    .height(Length::Fixed(2.0 * PIN_RADIUS)),
+                container(text(name).size(TOOL_TEXT))
+                    .padding([4, 8])
+                    .style(theme::popup),
+                tooltip::Position::Right,
+            );
+            gutter_layers =
+                gutter_layers.push(pin(anchor).x(gutter_pin_x() - PIN_RADIUS).y(y - PIN_RADIUS));
+        }
         let board_size = board.size;
         let content = row![
             container(self.track_pane())
@@ -574,9 +603,7 @@ impl App {
             })
             .width(Length::Fixed(DIVIDER_WIDTH))
             .height(Length::Fixed(height)),
-            canvas(GutterView(gutter))
-                .width(Length::Fixed(GUTTER_WIDTH))
-                .height(Length::Fixed(height)),
+            gutter_layers,
             scrollable(
                 canvas(BoardView {
                     board,
@@ -623,51 +650,32 @@ impl App {
         let header = row![
             text(crate::patch_board::title(&node.kind)).size(18),
             Space::new().width(Fill),
+            button(text("×").size(22))
+                .on_press(Message::Select(None))
+                .padding([0, 4])
+                .style(theme::bare),
+        ]
+        .align_y(Alignment::Center);
+        let footer = row![
+            Space::new().width(Fill),
             tool(
-                Face::Label("Delete node"),
-                Some(Message::DeleteNode(id)),
+                Face::Label("Delete"),
+                Some(Message::AskDeleteNode(id)),
                 false
             ),
-            tool(Face::Label("×"), Some(Message::Select(None)), false),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        ];
         let body: Element<'_, Message> = match &node.kind {
-            NodeKind::Mixer { channels, .. } => {
-                let strips =
-                    row((0..*channels).map(|ch| self.strip(id, ch, self.channel_name(id, ch))))
-                        .spacing(12);
-                column![
-                    scrollable(strips).direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::default(),
-                    )),
-                    group(vec![
-                        (
-                            Face::Label("Add channel"),
-                            Some(Message::AddMixerChannel(id)),
-                            false
-                        ),
-                        (
-                            Face::Label("Remove channel"),
-                            self.removable_channel(id)
-                                .map(|_| Message::RemoveMixerChannel(id)),
-                            false
-                        ),
-                    ]),
-                ]
-                .spacing(10)
-                .into()
-            }
+            NodeKind::Mixer { channels, .. } => self.mixer_panel(id, *channels),
             NodeKind::FeedbackDelay { seconds, .. } => {
-                let typed = match &self.delay_text {
+                let typed = match &self.node_text {
                     Some((node, typed)) if *node == id => typed.clone(),
                     _ => format!("{seconds}"),
                 };
                 row![
                     text("Time (seconds)").size(14),
                     text_input("0.25", &typed)
-                        .on_input(move |t| Message::DelayText(id, t))
-                        .on_submit(Message::CommitDelay)
+                        .on_input(move |t| Message::NodeText(id, t))
+                        .on_submit(Message::CommitNodeText)
                         .width(Length::Fixed(100.0)),
                 ]
                 .spacing(10)
@@ -677,14 +685,52 @@ impl App {
             NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
             NodeKind::Bus(_) => Space::new().into(),
         };
-        Some(
-            container(column![header, scrollable(body).height(Fill)].spacing(12))
-                .padding(12)
-                .width(Length::Fixed(size.width))
-                .height(Length::Fixed(size.height))
-                .style(theme::panel)
-                .into(),
+        let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
+            .padding(12)
+            .width(Length::Fixed(size.width))
+            .height(Length::Fixed(size.height))
+            .style(theme::panel);
+        // A press on the dialog's background, not on a control, takes the keyboard focus away.
+        let dialog = mouse_area(dialog).on_press(Message::SetMixerFocus(None));
+        if self.confirming_delete != Some(id) {
+            return Some(dialog.into());
+        }
+        let title = crate::patch_board::title(&node.kind);
+        let confirm = container(
+            column![
+                text(format!("Delete the {title} node?")).size(14),
+                row![
+                    Space::new().width(Fill),
+                    // Cancel is the default: lit, and what Enter or Space does.
+                    tool(Face::Label("Cancel"), Some(Message::CancelDelete), true),
+                    tool(Face::Label("Delete"), Some(Message::DeleteNode(id)), false),
+                ]
+                .spacing(6),
+            ]
+            .spacing(14),
         )
+        .padding(16)
+        .width(Length::Fixed(CONFIRM_WIDTH))
+        .style(theme::popup);
+        Some(
+            stack![
+                dialog,
+                // A press outside the confirmation cancels it.
+                mouse_area(container(opaque(confirm)).center(Fill).style(theme::scrim))
+                    .on_press(Message::CancelDelete),
+            ]
+            .into(),
+        )
+    }
+
+    /// A track port's name: the track's, with " L" or " R" for one side of a stereo port.
+    fn port_name(&self, track: TrackId, side: Option<Side>) -> Option<String> {
+        let name = &self.session().state().track(track)?.name;
+        Some(match side {
+            Some(Side::Left) => format!("{name} L"),
+            Some(Side::Right) => format!("{name} R"),
+            None => name.clone(),
+        })
     }
 
     fn track_pane(&self) -> Element<'_, Message> {
@@ -904,76 +950,6 @@ impl App {
             .collect(),
         };
         dropdown(entries)
-    }
-
-    /// A mixer channel's name: the track connected to it, if any, else its number.
-    fn channel_name(&self, node: project_model::NodeId, channel: usize) -> String {
-        let state = self.session().state();
-        state
-            .connections
-            .iter()
-            .find(|c| c.to == Endpoint::Node(node) && c.input == channel)
-            .and_then(|c| match c.from {
-                Endpoint::Track(id) => state.track(id).map(|t| match c.from_side {
-                    Some(project_model::Side::Left) => format!("{} L", t.name),
-                    Some(project_model::Side::Right) => format!("{} R", t.name),
-                    None => t.name.clone(),
-                }),
-                _ => None,
-            })
-            .unwrap_or_else(|| format!("{}", channel + 1))
-    }
-
-    /// One mixer channel's gain, pan, mute and solo.
-    fn strip(&self, id: project_model::NodeId, ch: usize, name: String) -> Element<'_, Message> {
-        let gain_name = parameter_name(ch, Control::Gain);
-        let pan_name = parameter_name(ch, Control::Pan);
-        let mode_name = parameter_name(ch, Control::Mode);
-        let gain = self.parameter_value(id, &gain_name);
-        let pan = self.parameter_value(id, &pan_name);
-        let mode = Mode::from_value(self.parameter_value(id, &mode_name));
-        let set_mode = |target: Mode| Message::SetParameter {
-            node: id,
-            name: mode_name.clone(),
-            value: if mode == target { Mode::Play } else { target }.value(),
-        };
-        column![
-            text(name).size(13),
-            vertical_slider(SILENCE_DB..=MAX_GAIN_DB, gain, move |value| {
-                Message::Slide {
-                    node: id,
-                    name: gain_name.clone(),
-                    value,
-                }
-            })
-            .step(0.1_f32)
-            .on_release(Message::Release)
-            .height(Length::Fixed(120.0)),
-            text(format!("{gain:.1} dB")).size(12),
-            slider(-1.0..=1.0, pan, move |value| Message::Slide {
-                node: id,
-                name: pan_name.clone(),
-                value,
-            })
-            .step(0.01_f32)
-            .on_release(Message::Release)
-            .width(Length::Fixed(80.0)),
-            group(vec![
-                (
-                    Face::Label("M"),
-                    Some(set_mode(Mode::Mute)),
-                    mode == Mode::Mute
-                ),
-                (
-                    Face::Label("S"),
-                    Some(set_mode(Mode::Solo)),
-                    mode == Mode::Solo
-                ),
-            ]),
-        ]
-        .spacing(6)
-        .width(Length::Fixed(90.0))
-        .into()
     }
 }
 
