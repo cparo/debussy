@@ -11,6 +11,9 @@ use crate::effect_display::display_area;
 use crate::theme;
 use crate::view::toggle_button;
 
+/// The gap between the group strips and their horizontal scrollbar, in logical pixels.
+const STRIP_SCROLLBAR_GAP: f32 = 4.0;
+
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
 
@@ -64,8 +67,10 @@ impl App {
         column![
             display,
             ungrouped,
+            // Embedded, so the scrollbar takes its own row below the strips instead of
+            // covering their lowest controls.
             scrollable(strips).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
+                scrollable::Scrollbar::default().spacing(STRIP_SCROLLBAR_GAP),
             )),
         ]
         .spacing(10)
