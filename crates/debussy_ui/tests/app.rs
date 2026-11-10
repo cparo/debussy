@@ -13,8 +13,8 @@ use audio_buffers::Layout;
 use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, ImportedTrack, Menu, Message, MixerFocus, NewNode,
-    SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    App, ClickPreferences, DeviceChoice, DialogFocus, ImportedTrack, Menu, Message, MixerFocus,
+    NewNode, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -470,6 +470,88 @@ fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<d
         app.bridge().parameter(eq, "band 2 gain").map(|p| p.get()),
         Some(4.5)
     );
+    Ok(())
+}
+
+#[test]
+fn test_tab_moves_focus_through_effect_controls_and_arrows_adjust() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let eq = add_effect(&mut app, "parametric-eq")?;
+    // The EQ's controls are all grouped, so Tab visits them as declared: the high-pass stage
+    // (enabled, cutoff, order), then each band (enabled, type, frequency, gain, q).
+    app.update(Message::FocusNext);
+    assert_eq!(app.effect_focus(), Some(0));
+    assert_eq!(app.mixer_focus(), None);
+    // Space or Enter flips a toggle.
+    app.update(Message::FocusPress);
+    assert_eq!(app.parameter_value(eq, "high-pass enabled"), 1.0);
+    for _ in 0..6 {
+        app.update(Message::FocusNext);
+    }
+    assert_eq!(app.focus(), Some(DialogFocus::Parameter(6)));
+    // A linear slider moves 1 % of its range a press, each an undo step.
+    app.update(Message::FocusAdjust(1));
+    app.update(Message::FocusAdjust(1));
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
+    app.update(Message::Undo);
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
+    // Right and left step a slider too.
+    app.update(Message::FocusSlide(1));
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
+    app.update(Message::FocusSlide(-1));
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
+    // Pressing a slider does nothing.
+    app.update(Message::FocusPress);
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
+    // A logarithmic slider moves 1 % of its logarithm's range.
+    app.update(Message::FocusPrevious);
+    app.update(Message::FocusAdjust(-1));
+    let step = (20_000.0_f32.ln() - 20.0_f32.ln()) / 100.0;
+    let expected = (100.0_f32.ln() - step).exp();
+    assert!((app.parameter_value(eq, "band 1 frequency") - expected).abs() < 1e-2);
+    // Shift-Tab from the first control wraps to the last.
+    app.update(Message::SetFocus(Some(DialogFocus::Parameter(0))));
+    app.update(Message::FocusPrevious);
+    assert_eq!(app.effect_focus(), Some(25));
+    // Selecting elsewhere drops the focus.
+    app.update(Message::Select(None));
+    assert_eq!(app.focus(), None);
+    app.update(Message::FocusNext);
+    assert_eq!(app.focus(), None);
+    Ok(())
+}
+
+#[test]
+fn test_focus_adjust_steps_choices_and_integers() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let eq = add_effect(&mut app, "parametric-eq")?;
+    // Band 1's type: a choice of four, stepped one option a press and held at the ends.
+    app.update(Message::SetFocus(Some(DialogFocus::Parameter(4))));
+    app.update(Message::FocusAdjust(-1));
+    assert_eq!(app.parameter_value(eq, "band 1 type"), 0.0);
+    for _ in 0..5 {
+        app.update(Message::FocusAdjust(1));
+    }
+    assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
+    // Right and left leave a choice alone.
+    app.update(Message::FocusSlide(-1));
+    assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
+    // The high-pass order: an integer, from 2 by one a press, held at 1.
+    app.update(Message::SetFocus(Some(DialogFocus::Parameter(2))));
+    app.update(Message::FocusAdjust(1));
+    assert_eq!(app.parameter_value(eq, "high-pass order"), 3.0);
+    for _ in 0..4 {
+        app.update(Message::FocusAdjust(-1));
+    }
+    assert_eq!(app.parameter_value(eq, "high-pass order"), 1.0);
+    // An integer is a slider: right steps it.
+    app.update(Message::FocusSlide(1));
+    assert_eq!(app.parameter_value(eq, "high-pass order"), 2.0);
+    // A mixer's focus is not taken while an effect's dialog is open.
+    app.update(Message::SetFocus(Some(DialogFocus::Mixer(
+        MixerFocus::Channels,
+    ))));
+    assert_eq!(app.effect_focus(), Some(2));
     Ok(())
 }
 
@@ -1324,13 +1406,15 @@ fn test_pressing_controls_moves_focus_and_commits_the_field() -> Result<(), Box<
     app.update(Message::NodeText(mixer, "3".into()));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Channels));
     // Pressing a slider focuses it and records what was typed.
-    app.update(Message::SetMixerFocus(Some(MixerFocus::Gain(1))));
+    app.update(Message::SetFocus(Some(DialogFocus::Mixer(
+        MixerFocus::Gain(1),
+    ))));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(1)));
     assert_eq!(channels(&app, mixer), Some(3));
     app.update(Message::FocusAdjust(-1));
     assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);
     // A press on the background takes the focus away; arrows then do nothing.
-    app.update(Message::SetMixerFocus(None));
+    app.update(Message::SetFocus(None));
     assert_eq!(app.mixer_focus(), None);
     app.update(Message::FocusAdjust(-1));
     assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);

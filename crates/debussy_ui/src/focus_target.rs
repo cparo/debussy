@@ -1,12 +1,25 @@
-//! A wrapper that makes a mixer dialog control take the dialog's keyboard focus when pressed,
-//! and, for a slider, keeps the keyboard and wheel from it so the arrow keys reach the focused
+//! A wrapper that makes a mixer or effect dialog control take the dialog's keyboard focus when
+//! pressed, and, for a slider or toggle, keeps the keyboard and wheel from it so the arrow keys reach the focused
 //! control rather than the hovered one (`docs/architecture/user-interface.md` "Layout").
 
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Clipboard, Layout, Shell, layout, overlay, renderer};
+use iced::widget::container;
 use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 use crate::app::Message;
+use crate::theme;
+
+/// `control` in a focus ring, drawn when `focused`.
+pub(crate) fn ringed<'a>(
+    control: impl Into<Element<'a, Message>>,
+    focused: bool,
+) -> Element<'a, Message> {
+    container(control)
+        .padding(2)
+        .style(theme::focus_ring(focused))
+        .into()
+}
 
 /// `content`, sending `on_press` when the left button is pressed over it, whether or not
 /// `content` takes the press too. Unless `keys`, `content` sees no keyboard or wheel events;

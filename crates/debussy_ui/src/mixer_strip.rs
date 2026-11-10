@@ -11,9 +11,10 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme, mouse};
 use project_model::NodeId;
 
+use crate::app::DialogFocus;
 use crate::app::{App, Message};
 use crate::effect_panel::STRIP_SCROLLBAR_GAP;
-use crate::focus_target::focus_target;
+use crate::focus_target::{focus_target, ringed};
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
 /// The gain slider's step, and an arrow key's change to it, in dB.
@@ -172,14 +173,6 @@ fn tipped<'a>(control: Element<'a, Message>, tip: String) -> Element<'a, Message
     .into()
 }
 
-/// `control` in a focus ring, drawn when `focused`.
-fn ringed<'a>(control: impl Into<Element<'a, Message>>, focused: bool) -> Element<'a, Message> {
-    container(control)
-        .padding(2)
-        .style(theme::focus_ring(focused))
-        .into()
-}
-
 /// A pan value as shown: "C" at the centre, else the side and percent, such as "L 35".
 fn pan_label(pan: f32) -> String {
     let percent = (pan.abs() * 100.0).round();
@@ -248,10 +241,10 @@ impl App {
                         ],
                     ]
                     .align_y(Alignment::Center),
-                    Message::SetMixerFocus(Some(MixerFocus::Channels)),
+                    Message::SetFocus(Some(DialogFocus::Mixer(MixerFocus::Channels))),
                     true,
                 ),
-                self.mixer_focus == Some(MixerFocus::Channels),
+                self.mixer_focus() == Some(MixerFocus::Channels),
             ),
         ]
         .spacing(10)
@@ -285,8 +278,12 @@ impl App {
         // A press on a control focuses it; sliders leave the arrow keys to the focused control.
         let target = |control: Element<'static, Message>, focus: MixerFocus| {
             ringed(
-                focus_target(control, Message::SetMixerFocus(Some(focus)), false),
-                self.mixer_focus == Some(focus),
+                focus_target(
+                    control,
+                    Message::SetFocus(Some(DialogFocus::Mixer(focus))),
+                    false,
+                ),
+                self.mixer_focus() == Some(focus),
             )
         };
         let unity = (0.0 - SILENCE_DB) / (MAX_GAIN_DB - SILENCE_DB);

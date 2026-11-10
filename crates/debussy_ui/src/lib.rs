@@ -12,6 +12,7 @@
 //! - `view`: drawing the window.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
 //! - `effect_display`: [`EffectDisplay`], the picture above an effect's controls.
+//! - `equal_heights`: a row whose children all take its tallest child's height.
 //! - `response_display`: the equalisers' display, their frequency response.
 //! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
 //! - `typeface`: the `Typeface` seam and the in-house stroke font behind it.
@@ -36,6 +37,7 @@ mod click;
 mod device;
 mod effect_display;
 mod effect_panel;
+mod equal_heights;
 mod focus_target;
 mod grid;
 mod icon;
@@ -57,7 +59,7 @@ mod waveform;
 
 use std::sync::Mutex;
 
-pub use app::{App, Message, NewNode};
+pub use app::{App, DialogFocus, Message, NewNode};
 pub use effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
@@ -115,8 +117,9 @@ impl Shell {
         let moves_focus = matches!(message, Message::FocusNext | Message::FocusPrevious);
         if let Some(app) = &mut self.0 {
             app.update(message);
-            // Tab into the "Channels" field focuses it; Tab out of it takes its focus away.
-            if moves_focus && app.dialog_mixer().is_some() {
+            // Tab into a mixer's "Channels" field focuses it; Tab out of it, or through an
+            // effect's controls, takes its focus away.
+            if moves_focus && (app.dialog_mixer().is_some() || app.dialog_effect().is_some()) {
                 let field = match app.mixer_focus() {
                     Some(MixerFocus::Channels) => mixer_strip::CHANNELS_INPUT,
                     _ => mixer_strip::NO_FIELD,

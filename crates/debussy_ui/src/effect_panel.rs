@@ -1,13 +1,16 @@
 //! A built-in effect's dialog body: one control per parameter, chosen by its scale and grouped
-//! into strips (`docs/architecture/user-interface.md` "Layout").
+//! into strips as tall as the tallest; and the keyboard focus that Tab and presses move through
+//! them (`docs/architecture/user-interface.md` "Layout").
 
 use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
 use iced::{Element, Length};
 use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
 
-use crate::app::{App, Message};
+use crate::app::{App, DialogFocus, Message};
 use crate::effect_display::display_area;
+use crate::equal_heights::equal_heights;
+use crate::focus_target::{focus_target, ringed};
 use crate::theme;
 use crate::view::toggle_button;
 
@@ -17,6 +20,72 @@ pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
+
+/// The share of a slider's range (of its logarithm, if logarithmic) an arrow key moves it.
+const ARROW_STEP: f32 = 0.01;
+
+/// The order an effect's controls are drawn and visited by Tab, as indices into `infos`: the
+/// ungrouped parameters, then each group's, groups in the order they first appear.
+pub(crate) fn tab_order(infos: &[ParameterInfo]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..infos.len())
+        .filter(|&i| infos[i].group.is_empty())
+        .collect();
+    let mut groups: Vec<&str> = Vec::new();
+    for info in infos.iter().filter(|i| !i.group.is_empty()) {
+        if !groups.contains(&info.group.as_str()) {
+            groups.push(&info.group);
+        }
+    }
+    for group in groups {
+        order.extend((0..infos.len()).filter(|&i| infos[i].group == group));
+    }
+    order
+}
+
+/// The control after `from` (`forward`) or before it in `order`, wrapping at the ends. From no
+/// control, or one not in `order`, forward is the first and back the last; `None` if `order` is
+/// empty.
+pub(crate) fn moved(from: Option<usize>, order: &[usize], forward: bool) -> Option<usize> {
+    let count = order.len();
+    if count == 0 {
+        return None;
+    }
+    let next = match (
+        from.and_then(|f| order.iter().position(|&i| i == f)),
+        forward,
+    ) {
+        (None, true) => 0,
+        (None, false) => count - 1,
+        (Some(at), true) => (at + 1) % count,
+        (Some(at), false) => (at + count - 1) % count,
+    };
+    Some(order[next])
+}
+
+/// Parameter `info` at `value` moved `delta` arrow presses up (positive) or down, within its
+/// range: a linear slider by [`ARROW_STEP`] of its range, a logarithmic one by that share of its
+/// logarithm's, an integer by one, a choice to the next or previous option. `None` for a toggle,
+/// which arrows leave alone.
+pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f32> {
+    #[allow(clippy::cast_precision_loss)] // a handful of key presses
+    let delta = delta as f32;
+    let (min, max) = (info.min, info.max);
+    let value = match &info.scale {
+        Scale::Toggle => return None,
+        Scale::Linear => value + delta * ARROW_STEP * (max - min),
+        Scale::Logarithmic => {
+            let step = ARROW_STEP * (max.ln() - min.ln());
+            (value.max(min).ln() + delta * step).exp()
+        }
+        Scale::Integer => value.round() + delta,
+        Scale::Choice(options) => {
+            #[allow(clippy::cast_precision_loss)] // a handful of options
+            let last = options.len().saturating_sub(1) as f32;
+            (value.round() + delta).clamp(0.0, last)
+        }
+    };
+    Some(value.clamp(min, max))
+}
 
 impl App {
     /// The display and controls of effect node `id` of kind `kind`; empty for a kind this build does not know. The display comes first; then the
@@ -37,32 +106,26 @@ impl App {
             self.sample_rate(),
             self.scale_factor(),
         );
-        let ungrouped = row(infos
-            .iter()
-            .filter(|i| i.group.is_empty())
-            .map(|info| self.control(id, info)))
-        .spacing(16);
-        let mut groups: Vec<&str> = Vec::new();
-        for info in infos.iter().filter(|i| !i.group.is_empty()) {
-            if !groups.contains(&info.group.as_str()) {
-                groups.push(&info.group);
-            }
-        }
-        let strips = row(groups.into_iter().map(|group| {
-            let controls = infos
-                .iter()
-                .filter(|i| i.group == group)
-                .map(|info| self.control(id, info));
-            container(
-                column![text(capitalised(group)).size(13)]
-                    .extend(controls)
-                    .spacing(8),
-            )
-            .padding(6)
-            .style(theme::strip)
-            .into()
-        }))
-        .spacing(8);
+        // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's
+        // run as a strip.
+        let order = tab_order(infos);
+        let split = order.partition_point(|&i| infos[i].group.is_empty());
+        let (ungrouped, grouped) = order.split_at(split);
+        let ungrouped = row(ungrouped.iter().map(|&i| self.control(id, infos, i))).spacing(16);
+        let strips = grouped
+            .chunk_by(|&a, &b| infos[a].group == infos[b].group)
+            .map(|run| {
+                let group = run.first().map_or("", |&i| infos[i].group.as_str());
+                container(
+                    column![text(capitalised(group)).size(13)]
+                        .extend(run.iter().map(|&i| self.control(id, infos, i)))
+                        .spacing(8),
+                )
+                .padding(6)
+                .style(theme::strip)
+                .into()
+            });
+        let strips = equal_heights(strips, 8.0);
         column![
             display,
             ungrouped,
@@ -76,10 +139,31 @@ impl App {
         .into()
     }
 
-    /// The control for parameter `info` of node `id`. A toggle is one button named for the
+    /// The control for parameter `infos[index]` of node `id`, ringed while it has the keyboard
+    /// focus and taking the focus when pressed. A pick list keeps the keyboard and wheel; a
+    /// slider or toggle leaves them to the focused control.
+    fn control<'a>(
+        &'a self,
+        id: NodeId,
+        infos: &'a [ParameterInfo],
+        index: usize,
+    ) -> Element<'a, Message> {
+        let info = &infos[index];
+        let keys = matches!(info.scale, Scale::Choice(_));
+        ringed(
+            focus_target(
+                self.input(id, info),
+                Message::SetFocus(Some(DialogFocus::Parameter(index))),
+                keys,
+            ),
+            self.effect_focus() == Some(index),
+        )
+    }
+
+    /// The input for parameter `info` of node `id`. A toggle is one button named for the
     /// parameter, lit while on; any other is labelled with its name, and a slider shows its value
     /// as a tooltip.
-    fn control<'a>(&'a self, id: NodeId, info: &'a ParameterInfo) -> Element<'a, Message> {
+    fn input<'a>(&'a self, id: NodeId, info: &'a ParameterInfo) -> Element<'a, Message> {
         let value = self.parameter_value(id, &info.name);
         let (min, max) = (info.min, info.max);
         let slide = move |value: f32| Message::Slide {
@@ -165,7 +249,7 @@ fn toggle_label(info: &ParameterInfo, on: bool) -> String {
 }
 
 /// Whether a parameter of `scale` is shown as a slider.
-fn is_slider(scale: &Scale) -> bool {
+pub(crate) fn is_slider(scale: &Scale) -> bool {
     matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
 }
 
@@ -245,6 +329,55 @@ mod tests {
         let named = plain.with_state_labels("Enabled", "Disabled");
         assert_eq!(toggle_label(&named, true), "Enabled");
         assert_eq!(toggle_label(&named, false), "Disabled");
+    }
+
+    #[test]
+    fn test_tab_order_lists_ungrouped_then_groups() -> Result<(), Box<dyn std::error::Error>> {
+        let eq = audio_effects::parameter_infos("parametric-eq").ok_or("no parametric EQ")?;
+        // All grouped, each group's parameters together: the order they are declared.
+        assert_eq!(tab_order(&eq), (0..eq.len()).collect::<Vec<_>>());
+        let infos = [
+            ParameterInfo::new("a gain", 0.0, 1.0, 0.0).with_group("a"),
+            ParameterInfo::new("mix", 0.0, 1.0, 0.0),
+            ParameterInfo::new("b gain", 0.0, 1.0, 0.0).with_group("b"),
+            ParameterInfo::new("a q", 0.0, 1.0, 0.0).with_group("a"),
+            ParameterInfo::new("level", 0.0, 1.0, 0.0),
+        ];
+        assert_eq!(tab_order(&infos), [1, 4, 0, 3, 2]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_moved_wraps_and_starts_from_the_ends() {
+        let order = [1, 4, 0];
+        assert_eq!(moved(None, &order, true), Some(1));
+        assert_eq!(moved(None, &order, false), Some(0));
+        assert_eq!(moved(Some(4), &order, true), Some(0));
+        assert_eq!(moved(Some(0), &order, true), Some(1));
+        assert_eq!(moved(Some(1), &order, false), Some(0));
+        assert_eq!(moved(Some(9), &order, true), Some(1));
+        assert_eq!(moved(Some(0), &[], true), None);
+    }
+
+    #[test]
+    fn test_stepped_moves_by_scale_and_clamps() {
+        let linear = ParameterInfo::new("gain", -24.0, 24.0, 0.0);
+        assert_eq!(stepped(&linear, 0.0, 1), Some(0.48));
+        assert_eq!(stepped(&linear, 23.9, 1), Some(24.0));
+        let log = ParameterInfo::new("cutoff", 20.0, 20_000.0, 80.0).with_scale(Scale::Logarithmic);
+        let up = stepped(&log, 20.0, 100).unwrap_or_default();
+        assert!((up - 20_000.0).abs() < 1.0);
+        assert_eq!(stepped(&log, 20.0, -1), Some(20.0));
+        let order = ParameterInfo::new("order", 1.0, 8.0, 2.0).with_scale(Scale::Integer);
+        assert_eq!(stepped(&order, 2.4, 1), Some(3.0));
+        assert_eq!(stepped(&order, 1.0, -1), Some(1.0));
+        let options = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        let choice = ParameterInfo::new("type", 0.0, 2.0, 0.0).with_scale(Scale::Choice(options));
+        assert_eq!(stepped(&choice, 1.0, 1), Some(2.0));
+        assert_eq!(stepped(&choice, 2.0, 1), Some(2.0));
+        assert_eq!(stepped(&choice, 0.0, -1), Some(0.0));
+        let toggle = ParameterInfo::new("on", 0.0, 1.0, 0.0).with_scale(Scale::Toggle);
+        assert_eq!(stepped(&toggle, 0.0, 1), None);
     }
 
     #[test]

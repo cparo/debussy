@@ -16,9 +16,10 @@ use engine_bridge::Bridge;
 use project_model::{
     Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
 };
-use signal_graph::ParameterInfo;
+use signal_graph::{ParameterInfo, Scale};
 
 use crate::click::Click;
+use crate::effect_panel;
 use crate::menu::Menu;
 use crate::mixer_strip::{GAIN_STEP_DB, MixerFocus, PAN_STEP, toggled};
 use crate::patch_board::{Pin, Selection, can_connect};
@@ -80,6 +81,16 @@ pub(crate) enum Moving {
     Node(NodeId, Position),
     /// The L/R outputs, L now at this height.
     Output(f32),
+}
+
+/// The open dialog's control with the keyboard focus: Tab and Shift-Tab move it, the arrow keys
+/// adjust it, and Space or Enter press it (ADR-0089).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogFocus {
+    /// A mixer dialog's control.
+    Mixer(MixerFocus),
+    /// An effect dialog's control, by index into its kind's parameters.
+    Parameter(usize),
 }
 
 /// Something the user did, or a frame tick.
@@ -243,18 +254,21 @@ pub enum Message {
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
-    /// Move the mixer dialog's keyboard focus to its next control (Tab).
+    /// Move the open dialog's keyboard focus to its next control (Tab).
     FocusNext,
-    /// Move the mixer dialog's keyboard focus to its previous control (Shift-Tab).
+    /// Move the open dialog's keyboard focus to its previous control (Shift-Tab).
     FocusPrevious,
-    /// Adjust the focused mixer control up (`1`) or down (`-1`) a step (the arrow keys).
+    /// Adjust the focused control up (`1`) or down (`-1`) a step (the arrow keys).
     FocusAdjust(i32),
-    /// Press the focused mixer button (Space or Enter); with a delete confirmation open, cancel
-    /// it, its default.
+    /// Step the focused effect slider up (`1`) or down (`-1`), as [`Message::FocusAdjust`] does;
+    /// other controls ignore it (the right and left arrows).
+    FocusSlide(i32),
+    /// Press the focused button or toggle (Space or Enter); with a delete confirmation open,
+    /// cancel it, its default.
     FocusPress,
-    /// Give the mixer dialog's keyboard focus to a control, or take it away: a press on a control
+    /// Give the open dialog's keyboard focus to a control, or take it away: a press on a control
     /// or on the dialog's background.
-    SetMixerFocus(Option<MixerFocus>),
+    SetFocus(Option<DialogFocus>),
     /// A mixer channel's mute or solo button: set the channel to `mode`, or back to playing if it
     /// is already. Soloing a channel unsolos the mixer's others in the same undo step.
     ToggleMode {
@@ -344,8 +358,8 @@ pub struct App {
     /// The tracks the engine's feeds were made from.
     pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
-    /// The mixer dialog control with the keyboard focus.
-    pub(crate) mixer_focus: Option<MixerFocus>,
+    /// The open dialog's control with the keyboard focus.
+    pub(crate) focus: Option<DialogFocus>,
     /// The node whose deletion is waiting to be confirmed.
     pub(crate) confirming_delete: Option<NodeId>,
     /// The audio devices present, and the one in use.
@@ -424,7 +438,7 @@ impl App {
             node_text: None,
             loaded: None,
             live: None,
-            mixer_focus: None,
+            focus: None,
             confirming_delete: None,
             devices: (Vec::new(), None),
             status: None,
@@ -701,8 +715,9 @@ impl App {
                 | Message::FocusNext
                 | Message::FocusPrevious
                 | Message::FocusAdjust(_)
+                | Message::FocusSlide(_)
                 | Message::FocusPress
-                | Message::SetMixerFocus(_)
+                | Message::SetFocus(_)
         ) {
             self.status = None;
             if !in_click_dialog {
@@ -922,7 +937,7 @@ impl App {
             Message::Select(selection) => {
                 // A click on the board leaves any field being typed.
                 self.node_text = None;
-                self.mixer_focus = None;
+                self.focus = None;
                 self.confirming_delete = None;
                 self.selection = selection;
             }
@@ -963,7 +978,10 @@ impl App {
                     .bridge
                     .edit(&mut self.session, |s| s.add_node(choice.kind()));
                 match result {
-                    Ok(node) => self.selection = Some(Selection::Node(node)),
+                    Ok(node) => {
+                        self.focus = None;
+                        self.selection = Some(Selection::Node(node));
+                    }
                     Err(error) => self.status = Some(error.to_string()),
                 }
             }
@@ -979,36 +997,70 @@ impl App {
             }
             Message::NodeText(node, text) => {
                 if self.dialog_mixer().is_some_and(|(mixer, _)| mixer == node) {
-                    self.mixer_focus = Some(MixerFocus::Channels);
+                    self.focus = Some(DialogFocus::Mixer(MixerFocus::Channels));
                 }
                 self.node_text = Some((node, text));
             }
             Message::StepMixerChannels(node, delta) => self.step_channels(node, delta),
             // The confirmation holds the keyboard while open.
-            Message::FocusNext | Message::FocusPrevious | Message::FocusAdjust(_)
+            Message::FocusNext
+            | Message::FocusPrevious
+            | Message::FocusAdjust(_)
+            | Message::FocusSlide(_)
                 if self.confirming_delete.is_some() => {}
             Message::FocusPress if self.confirming_delete.is_some() => {
                 self.confirming_delete = None;
             }
             Message::FocusNext | Message::FocusPrevious => {
-                let Some((_, channels)) = self.dialog_mixer() else {
+                let forward = matches!(message, Message::FocusNext);
+                let next = if let Some((_, channels)) = self.dialog_mixer() {
+                    DialogFocus::Mixer(MixerFocus::moved(self.mixer_focus(), channels, forward))
+                } else if let Some((_, infos)) = self.dialog_effect() {
+                    let order = effect_panel::tab_order(infos);
+                    match effect_panel::moved(self.effect_focus(), &order, forward) {
+                        Some(i) => DialogFocus::Parameter(i),
+                        None => return,
+                    }
+                } else {
                     return;
                 };
-                let forward = matches!(message, Message::FocusNext);
-                let next = MixerFocus::moved(self.mixer_focus, channels, forward);
-                self.set_mixer_focus(Some(next));
+                self.set_focus(Some(next));
             }
-            Message::SetMixerFocus(focus) => {
-                if self.dialog_mixer().is_some() {
-                    self.set_mixer_focus(focus);
+            Message::SetFocus(focus) => {
+                let open = match focus {
+                    None => true,
+                    Some(DialogFocus::Mixer(_)) => self.dialog_mixer().is_some(),
+                    Some(DialogFocus::Parameter(_)) => self.dialog_effect().is_some(),
+                };
+                if open {
+                    self.set_focus(focus);
                 }
             }
-            Message::FocusAdjust(delta) => self.adjust_focus(delta),
+            Message::FocusSlide(delta) => {
+                let slider = self.dialog_effect().zip(self.effect_focus()).is_some_and(
+                    |((_, infos), index)| {
+                        infos
+                            .get(index)
+                            .is_some_and(|i| effect_panel::is_slider(&i.scale))
+                    },
+                );
+                if slider {
+                    self.adjust_parameter_focus(delta);
+                }
+            }
+            Message::FocusAdjust(delta) => {
+                if self.dialog_mixer().is_some() {
+                    self.adjust_focus(delta);
+                } else {
+                    self.adjust_parameter_focus(delta);
+                }
+            }
+            Message::FocusPress if self.dialog_effect().is_some() => self.press_parameter_focus(),
             Message::FocusPress => {
                 let Some((node, _)) = self.dialog_mixer() else {
                     return;
                 };
-                let (channel, mode) = match self.mixer_focus {
+                let (channel, mode) = match self.mixer_focus() {
                     Some(MixerFocus::Mute(ch)) => (ch, Mode::Mute),
                     Some(MixerFocus::Solo(ch)) => (ch, Mode::Solo),
                     _ => return,
@@ -1089,21 +1141,82 @@ impl App {
         }
     }
 
-    /// The mixer dialog control with the keyboard focus, if any.
-    pub fn mixer_focus(&self) -> Option<MixerFocus> {
-        self.mixer_focus
+    /// The selected node and its kind's parameters, if it is a built-in effect this build
+    /// knows: the effect whose dialog is open.
+    pub(crate) fn dialog_effect(&self) -> Option<(NodeId, &[ParameterInfo])> {
+        let Some(Selection::Node(id)) = self.selection else {
+            return None;
+        };
+        match &self.session.state().node(id)?.kind {
+            NodeKind::Effect { kind, .. } => self.effect_parameters(kind).map(|infos| (id, infos)),
+            _ => None,
+        }
     }
 
-    /// Moves the mixer dialog's keyboard focus to `focus`; leaving the "Channels" field records
-    /// what was typed in it.
-    fn set_mixer_focus(&mut self, focus: Option<MixerFocus>) {
-        if self.mixer_focus == Some(MixerFocus::Channels)
-            && focus != self.mixer_focus
+    /// The open dialog's control with the keyboard focus, if any.
+    pub fn focus(&self) -> Option<DialogFocus> {
+        self.focus
+    }
+
+    /// The mixer dialog control with the keyboard focus, if any.
+    pub fn mixer_focus(&self) -> Option<MixerFocus> {
+        match self.focus {
+            Some(DialogFocus::Mixer(focus)) => Some(focus),
+            _ => None,
+        }
+    }
+
+    /// The effect dialog control with the keyboard focus, if any, by index into its kind's
+    /// parameters.
+    pub fn effect_focus(&self) -> Option<usize> {
+        match self.focus {
+            Some(DialogFocus::Parameter(index)) => Some(index),
+            _ => None,
+        }
+    }
+
+    /// Moves the open dialog's keyboard focus to `focus`; leaving a mixer's "Channels" field
+    /// records what was typed in it.
+    fn set_focus(&mut self, focus: Option<DialogFocus>) {
+        let channels = Some(DialogFocus::Mixer(MixerFocus::Channels));
+        if self.focus == channels
+            && focus != self.focus
             && let Some((node, text)) = self.node_text.take()
         {
             self.commit_node_text(node, &text);
         }
-        self.mixer_focus = focus;
+        self.focus = focus;
+    }
+
+    /// Steps the focused effect control by `delta` presses, as one undo step
+    /// ([`effect_panel::stepped`]).
+    fn adjust_parameter_focus(&mut self, delta: i32) {
+        let (Some((node, infos)), Some(index)) = (self.dialog_effect(), self.effect_focus()) else {
+            return;
+        };
+        let Some(info) = infos.get(index) else {
+            return;
+        };
+        let current = self.parameter_value(node, &info.name);
+        let Some(value) = effect_panel::stepped(info, current, delta) else {
+            return;
+        };
+        let name = info.name.clone();
+        self.update(Message::SetParameter { node, name, value });
+    }
+
+    /// Flips the focused effect control if it is a toggle, as one undo step.
+    fn press_parameter_focus(&mut self) {
+        let (Some((node, infos)), Some(index)) = (self.dialog_effect(), self.effect_focus()) else {
+            return;
+        };
+        let Some(info) = infos.get(index).filter(|i| i.scale == Scale::Toggle) else {
+            return;
+        };
+        let on = self.parameter_value(node, &info.name) >= 0.5;
+        let name = info.name.clone();
+        let value = if on { 0.0 } else { 1.0 };
+        self.update(Message::SetParameter { node, name, value });
     }
 
     /// Sets mixer `node`'s channel `channel` to `mode`, or back to playing if it is already, as
@@ -1164,7 +1277,7 @@ impl App {
     /// Adjusts the focused mixer control by `delta` steps, each recorded as one undo step: the
     /// channel count by one, gain by [`GAIN_STEP_DB`], pan by [`PAN_STEP`] (up is left).
     fn adjust_focus(&mut self, delta: i32) {
-        let (Some((mixer, _)), Some(focus)) = (self.dialog_mixer(), self.mixer_focus) else {
+        let (Some((mixer, _)), Some(focus)) = (self.dialog_mixer(), self.mixer_focus()) else {
             return;
         };
         let (name, value) = match focus {

@@ -60,6 +60,12 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   the parameter's name; in a group's strip, its unlit background is the
   pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
   control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
+  Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
+  keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
+  1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a
+  choice by one option, each press one step; right and left step a focused slider the same way;
+  Space or Enter flips a focused toggle
+  ([ADR-0096](../adrs/0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
   strips in a horizontal scroll whose scrollbar has its own row below the strips. A strip shows,
