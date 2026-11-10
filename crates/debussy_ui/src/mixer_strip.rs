@@ -1,17 +1,18 @@
-//! A mixer's dialog body: a "Channels" field above narrow numbered strips, each with vertical
-//! gain and pan sliders, their values as hover tips, and mute above solo; and the keyboard focus
-//! that Tab moves through them (`docs/architecture/user-interface.md` "Layout").
+//! A mixer's dialog body: a "Channels" field above narrow numbered strips, each with mute above
+//! solo, then vertical gain and pan sliders with their values as hover tips; and the keyboard
+//! focus that Tab and presses move through them (`docs/architecture/user-interface.md` "Layout").
 
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
 use iced::widget::canvas::{Frame, Geometry, Path, Program, Stroke};
 use iced::widget::{
-    button, canvas, column, container, mouse_area, row, scrollable, stack, text, text_input,
-    tooltip, vertical_slider,
+    button, canvas, column, container, row, scrollable, stack, text, text_input, tooltip,
+    vertical_slider,
 };
 use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme, mouse};
 use project_model::NodeId;
 
 use crate::app::{App, Message};
+use crate::focus_target::focus_target;
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
 /// The gain slider's step, and an arrow key's change to it, in dB.
@@ -48,7 +49,7 @@ const PART_SPACING: f32 = 8.0;
 const LABEL_SPACING: f32 = 2.0;
 
 /// A mixer dialog control that can hold the keyboard focus. Tab visits them in this order: the
-/// "Channels" field, then each channel's gain, pan, mute and solo, from the first channel to the
+/// "Channels" field, then each channel's mute, solo, gain and pan, from the first channel to the
 /// last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MixerFocus {
@@ -73,10 +74,10 @@ impl MixerFocus {
         let at = |ch: usize, offset: usize| 1 + ch * Self::PER_CHANNEL + offset;
         match self {
             MixerFocus::Channels => 0,
-            MixerFocus::Gain(ch) => at(ch, 0),
-            MixerFocus::Pan(ch) => at(ch, 1),
-            MixerFocus::Mute(ch) => at(ch, 2),
-            MixerFocus::Solo(ch) => at(ch, 3),
+            MixerFocus::Mute(ch) => at(ch, 0),
+            MixerFocus::Solo(ch) => at(ch, 1),
+            MixerFocus::Gain(ch) => at(ch, 2),
+            MixerFocus::Pan(ch) => at(ch, 3),
         }
     }
 
@@ -87,16 +88,16 @@ impl MixerFocus {
         };
         let ch = i / Self::PER_CHANNEL;
         match i % Self::PER_CHANNEL {
-            0 => MixerFocus::Gain(ch),
-            1 => MixerFocus::Pan(ch),
-            2 => MixerFocus::Mute(ch),
-            _ => MixerFocus::Solo(ch),
+            0 => MixerFocus::Mute(ch),
+            1 => MixerFocus::Solo(ch),
+            2 => MixerFocus::Gain(ch),
+            _ => MixerFocus::Pan(ch),
         }
     }
 
     /// The control after `from` (`forward`) or before it, in a mixer of `channels` channels,
     /// wrapping at the ends. From no control, forward is the "Channels" field and back the last
-    /// solo button.
+    /// pan slider.
     pub(crate) fn moved(from: Option<Self>, channels: usize, forward: bool) -> Self {
         let count = 1 + channels * Self::PER_CHANNEL;
         let next = match (from, forward) {
@@ -170,13 +171,6 @@ fn tipped<'a>(control: Element<'a, Message>, tip: String) -> Element<'a, Message
     .into()
 }
 
-/// A slider `control` that records its value when the cursor leaves it: arrow keys move a
-/// hovered slider with no release to record it. A drag captures the cursor, so leaving
-/// mid-drag records nothing; the release does.
-fn recorded_on_exit<'a>(control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    mouse_area(control).on_exit(Message::Release).into()
-}
-
 /// `control` in a focus ring, drawn when `focused`.
 fn ringed<'a>(control: impl Into<Element<'a, Message>>, focused: bool) -> Element<'a, Message> {
     container(control)
@@ -203,7 +197,7 @@ fn label<'a>(s: String) -> Element<'a, Message> {
 }
 
 /// A full-width mute or solo button labelled `name`, lit when `selected`.
-fn mode_button<'a>(name: &'a str, message: Message, selected: bool) -> Element<'a, Message> {
+fn mode_button<'a>(name: &'static str, message: Message, selected: bool) -> Element<'a, Message> {
     button(text(name).size(BUTTON_TEXT).center().width(Fill))
         .on_press(message)
         .padding([4, 2])
@@ -240,18 +234,22 @@ impl App {
         let field = row![
             text("Channels").size(14),
             ringed(
-                row![
-                    text_input("1", &typed)
-                        .id(CHANNELS_INPUT)
-                        .on_input(move |t| Message::NodeText(id, t))
-                        .on_submit(Message::CommitNodeText)
-                        .width(Length::Fixed(CHANNELS_WIDTH)),
-                    column![
-                        spin("▲", up.then_some(Message::StepMixerChannels(id, 1))),
-                        spin("▼", down.then_some(Message::StepMixerChannels(id, -1))),
-                    ],
-                ]
-                .align_y(Alignment::Center),
+                focus_target(
+                    row![
+                        text_input("1", &typed)
+                            .id(CHANNELS_INPUT)
+                            .on_input(move |t| Message::NodeText(id, t))
+                            .on_submit(Message::CommitNodeText)
+                            .width(Length::Fixed(CHANNELS_WIDTH)),
+                        column![
+                            spin("▲", up.then_some(Message::StepMixerChannels(id, 1))),
+                            spin("▼", down.then_some(Message::StepMixerChannels(id, -1))),
+                        ],
+                    ]
+                    .align_y(Alignment::Center),
+                    Message::SetMixerFocus(Some(MixerFocus::Channels)),
+                    true,
+                ),
                 self.mixer_focus == Some(MixerFocus::Channels),
             ),
         ]
@@ -276,11 +274,17 @@ impl App {
         let gain = self.parameter_value(id, &gain_name);
         let pan = self.parameter_value(id, &pan_name);
         let mode = Mode::from_value(self.parameter_value(id, &mode_name));
-        let focus = self.mixer_focus;
-        let set_mode = |target: Mode| Message::SetParameter {
+        let set_mode = |mode: Mode| Message::ToggleMode {
             node: id,
-            name: mode_name.clone(),
-            value: toggled(mode, target).value(),
+            channel: ch,
+            mode,
+        };
+        // A press on a control focuses it; sliders leave the arrow keys to the focused control.
+        let target = |control: Element<'static, Message>, focus: MixerFocus| {
+            ringed(
+                focus_target(control, Message::SetMixerFocus(Some(focus)), false),
+                self.mixer_focus == Some(focus),
+            )
         };
         let unity = (0.0 - SILENCE_DB) / (MAX_GAIN_DB - SILENCE_DB);
         let gain_slider = stack![
@@ -316,9 +320,9 @@ impl App {
         ];
         let gain_part = column![
             label(format!("{MAX_GAIN_DB:+}dB")),
-            ringed(
-                tipped(recorded_on_exit(gain_slider), format!("{gain:.0} dB")),
-                focus == Some(MixerFocus::Gain(ch)),
+            target(
+                tipped(gain_slider.into(), format!("{gain:.0} dB")),
+                MixerFocus::Gain(ch),
             ),
             label(format!("{SILENCE_DB:+}dB")),
         ]
@@ -326,26 +330,26 @@ impl App {
         .align_x(Alignment::Center);
         let pan_part = column![
             label("L".to_owned()),
-            ringed(
-                tipped(recorded_on_exit(pan_slider), pan_label(pan)),
-                focus == Some(MixerFocus::Pan(ch)),
+            target(
+                tipped(pan_slider.into(), pan_label(pan)),
+                MixerFocus::Pan(ch)
             ),
             label("R".to_owned()),
         ]
         .spacing(LABEL_SPACING)
         .align_x(Alignment::Center);
         let buttons = column![
-            ringed(
+            target(
                 mode_button("Mute", set_mode(Mode::Mute), mode == Mode::Mute),
-                focus == Some(MixerFocus::Mute(ch)),
+                MixerFocus::Mute(ch),
             ),
-            ringed(
+            target(
                 mode_button("Solo", set_mode(Mode::Solo), mode == Mode::Solo),
-                focus == Some(MixerFocus::Solo(ch)),
+                MixerFocus::Solo(ch),
             ),
         ]
         .spacing(LABEL_SPACING);
-        column![text(ch + 1).size(13), gain_part, pan_part, buttons]
+        column![text(ch + 1).size(13), buttons, gain_part, pan_part]
             .spacing(PART_SPACING)
             .align_x(Alignment::Center)
             .width(Length::Fixed(STRIP_WIDTH))
@@ -392,14 +396,14 @@ mod tests {
             order,
             [
                 Channels,
-                Gain(0),
-                Pan(0),
                 Mute(0),
                 Solo(0),
-                Gain(1),
-                Pan(1),
+                Gain(0),
+                Pan(0),
                 Mute(1),
                 Solo(1),
+                Gain(1),
+                Pan(1),
                 Channels
             ]
         );
@@ -407,13 +411,13 @@ mod tests {
 
     #[test]
     fn test_moved_backwards_and_from_a_removed_channel() {
-        use MixerFocus::{Channels, Gain, Mute, Solo};
-        assert_eq!(MixerFocus::moved(None, 2, false), Solo(1));
-        assert_eq!(MixerFocus::moved(Some(Channels), 2, false), Solo(1));
-        assert_eq!(MixerFocus::moved(Some(Gain(1)), 2, false), Solo(0));
+        use MixerFocus::{Channels, Gain, Mute, Pan};
+        assert_eq!(MixerFocus::moved(None, 2, false), Pan(1));
+        assert_eq!(MixerFocus::moved(Some(Channels), 2, false), Pan(1));
+        assert_eq!(MixerFocus::moved(Some(Mute(1)), 2, false), Pan(0));
         // Focus on a channel since removed counts from the last control.
         assert_eq!(MixerFocus::moved(Some(Gain(5)), 1, true), Channels);
-        assert_eq!(MixerFocus::moved(Some(Gain(5)), 1, false), Mute(0));
+        assert_eq!(MixerFocus::moved(Some(Gain(5)), 1, false), Gain(0));
     }
 
     #[test]

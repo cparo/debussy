@@ -64,6 +64,8 @@ const CLICK_DIALOG_X: f32 = 370.0;
 const CLICK_DIALOG_WIDTH: f32 = 290.0;
 /// The click dialog's height, to open it above the bottom bar.
 const CLICK_DIALOG_HEIGHT: f32 = 390.0;
+/// The delete confirmation's width.
+const CONFIRM_WIDTH: f32 = 280.0;
 /// The height of one item in a dropdown menu, to open the device menu above the bottom bar.
 const MENU_ITEM_HEIGHT: f32 = 27.0;
 
@@ -657,8 +659,8 @@ impl App {
         let footer = row![
             Space::new().width(Fill),
             tool(
-                Face::Label("Delete node"),
-                Some(Message::DeleteNode(id)),
+                Face::Label("Delete"),
+                Some(Message::AskDeleteNode(id)),
                 false
             ),
         ];
@@ -683,13 +685,41 @@ impl App {
             NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
             NodeKind::Bus(_) => Space::new().into(),
         };
+        let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
+            .padding(12)
+            .width(Length::Fixed(size.width))
+            .height(Length::Fixed(size.height))
+            .style(theme::panel);
+        // A press on the dialog's background, not on a control, takes the keyboard focus away.
+        let dialog = mouse_area(dialog).on_press(Message::SetMixerFocus(None));
+        if self.confirming_delete != Some(id) {
+            return Some(dialog.into());
+        }
+        let title = crate::patch_board::title(&node.kind);
+        let confirm = container(
+            column![
+                text(format!("Delete the {title} node?")).size(14),
+                row![
+                    Space::new().width(Fill),
+                    // Cancel is the default: lit, and what Enter or Space does.
+                    tool(Face::Label("Cancel"), Some(Message::CancelDelete), true),
+                    tool(Face::Label("Delete"), Some(Message::DeleteNode(id)), false),
+                ]
+                .spacing(6),
+            ]
+            .spacing(14),
+        )
+        .padding(16)
+        .width(Length::Fixed(CONFIRM_WIDTH))
+        .style(theme::popup);
         Some(
-            container(column![header, scrollable(body).height(Fill), footer].spacing(12))
-                .padding(12)
-                .width(Length::Fixed(size.width))
-                .height(Length::Fixed(size.height))
-                .style(theme::panel)
-                .into(),
+            stack![
+                dialog,
+                // A press outside the confirmation cancels it.
+                mouse_area(container(opaque(confirm)).center(Fill).style(theme::scrim))
+                    .on_press(Message::CancelDelete),
+            ]
+            .into(),
         )
     }
 

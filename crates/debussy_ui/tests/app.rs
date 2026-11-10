@@ -1197,6 +1197,14 @@ fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Er
     app.update(Message::FocusAdjust(1));
     assert_eq!(channels(&app, mixer), Some(2));
     app.update(Message::FocusNext);
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(0)));
+    // Space or Enter on mute toggles it.
+    app.update(Message::FocusPress);
+    assert_eq!(mode(&app, mixer, 0), Mode::Mute);
+    app.update(Message::FocusPress);
+    assert_eq!(mode(&app, mixer, 0), Mode::Play);
+    app.update(Message::FocusNext);
+    app.update(Message::FocusNext);
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(0)));
     // Gain moves a whole dB a press, each an undo step.
     app.update(Message::FocusAdjust(1));
@@ -1208,25 +1216,11 @@ fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Er
     app.update(Message::FocusNext);
     app.update(Message::FocusAdjust(1));
     assert_eq!(app.parameter_value(mixer, "channel 1 pan"), -0.01);
-    // Space or Enter on mute toggles it.
+    // Past channel 1's pan comes channel 2's mute, and back again.
     app.update(Message::FocusNext);
-    assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(0)));
-    app.update(Message::FocusPress);
-    assert_eq!(
-        Mode::from_value(app.parameter_value(mixer, "channel 1 mode")),
-        Mode::Mute
-    );
-    app.update(Message::FocusPress);
-    assert_eq!(
-        Mode::from_value(app.parameter_value(mixer, "channel 1 mode")),
-        Mode::Play
-    );
-    // Past channel 1's solo comes channel 2's gain; back from the field wraps to the last solo.
-    app.update(Message::FocusNext);
-    app.update(Message::FocusNext);
-    assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(1)));
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(1)));
     app.update(Message::FocusPrevious);
-    assert_eq!(app.mixer_focus(), Some(MixerFocus::Solo(0)));
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Pan(0)));
     // Selecting elsewhere drops the focus.
     app.update(Message::Select(None));
     assert_eq!(app.mixer_focus(), None);
@@ -1248,23 +1242,76 @@ fn test_step_mixer_channels_stays_in_range() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Mixer `mixer`'s channel `channel` mode.
+fn mode(app: &App, mixer: NodeId, channel: usize) -> Mode {
+    Mode::from_value(app.parameter_value(mixer, &format!("channel {} mode", channel + 1)))
+}
+
 #[test]
-fn test_slide_on_another_parameter_records_the_last() -> Result<(), Box<dyn Error>> {
+fn test_solo_is_exclusive_within_a_mixer() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
-    // Arrow keys on a hovered slider slide it with no release.
-    app.update(Message::Slide {
+    set_channels(&mut app, mixer, "3");
+    let toggle = |channel, mode| Message::ToggleMode {
         node: mixer,
-        name: GAIN.to_owned(),
-        value: -4.0,
-    });
-    app.update(Message::Slide {
-        node: mixer,
-        name: "channel 1 pan".to_owned(),
-        value: 0.5,
-    });
-    app.update(Message::Release);
+        channel,
+        mode,
+    };
+    app.update(toggle(0, Mode::Solo));
+    app.update(toggle(2, Mode::Mute));
+    app.update(toggle(1, Mode::Solo));
+    assert_eq!(mode(&app, mixer, 0), Mode::Play);
+    assert_eq!(mode(&app, mixer, 1), Mode::Solo);
+    assert_eq!(mode(&app, mixer, 2), Mode::Mute, "mute is left alone");
+    // Moving the solo was one step.
     app.update(Message::Undo);
-    assert_eq!(app.parameter_value(mixer, GAIN), -4.0);
+    assert_eq!(mode(&app, mixer, 0), Mode::Solo);
+    assert_eq!(mode(&app, mixer, 1), Mode::Play);
+    // Pressing solo again clears it.
+    app.update(toggle(0, Mode::Solo));
+    assert_eq!(mode(&app, mixer, 0), Mode::Play);
+    Ok(())
+}
+
+#[test]
+fn test_delete_node_asks_first_and_cancel_is_default() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    app.update(Message::AskDeleteNode(mixer));
+    let _ = app.view();
+    // Enter or Space cancels; so do Escape and the Cancel button.
+    app.update(Message::FocusPress);
+    assert!(app.session().state().node(mixer).is_some());
+    for cancel in [Message::ClearRange, Message::CancelDelete] {
+        app.update(Message::AskDeleteNode(mixer));
+        // The confirmation holds the keyboard.
+        app.update(Message::FocusNext);
+        assert_eq!(app.mixer_focus(), None);
+        app.update(cancel);
+        assert!(app.session().state().node(mixer).is_some());
+    }
+    app.update(Message::AskDeleteNode(mixer));
+    app.update(Message::DeleteNode(mixer));
+    assert!(app.session().state().node(mixer).is_none());
+    Ok(())
+}
+
+#[test]
+fn test_pressing_controls_moves_focus_and_commits_the_field() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    app.update(Message::NodeText(mixer, "3".into()));
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Channels));
+    // Pressing a slider focuses it and records what was typed.
+    app.update(Message::SetMixerFocus(Some(MixerFocus::Gain(1))));
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(1)));
+    assert_eq!(channels(&app, mixer), Some(3));
+    app.update(Message::FocusAdjust(-1));
+    assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);
+    // A press on the background takes the focus away; arrows then do nothing.
+    app.update(Message::SetMixerFocus(None));
+    assert_eq!(app.mixer_focus(), None);
+    app.update(Message::FocusAdjust(-1));
+    assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);
     Ok(())
 }
 

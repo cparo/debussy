@@ -45,8 +45,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
   vertically together under one scrollbar at the window's right edge.
 - **Node dialogs** cover the whole track pane for the selected node: a header with its name and a
-  delete button, then a mixer's controls, a feedback delay's time in seconds, or a built-in effect's controls; a bus or an effect this
-  build does not know has only the header. An effect's controls are drawn from its parameters'
+  close × with no button face, then a mixer's controls, a feedback delay's time in seconds, or a
+  built-in effect's controls; a bus or an effect this build does not know has only the header.
+  A "Delete" button at the bottom right asks first: a confirmation with Cancel, the default
+  (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
   a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
@@ -54,15 +56,15 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   stopped-only parameter shows "Stop to change" in place of its control while playing.
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
-  strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; a vertical
-  gain slider between +12dB and -96dB labels, in whole-dB steps; a vertical pan slider between L
-  (top) and R (bottom) labels; then Mute above Solo. Each slider has a tic mark under its handle
-  at 0 dB or centre, and shows its value only as a hover tip; arrow keys on a hovered slider are
-  recorded as one step when the cursor leaves it. Tab and Shift-Tab move a keyboard focus, drawn
-  as an accent ring, from the field down each strip's gain, pan, mute and solo, strip by strip,
-  wrapping; the up and down arrows step the focused field or slider (1 channel, 1 dB, 1 % pan
-  with up to the left), each press one step, and Space or Enter presses a focused button. The
-  dialog's × has no button face, and "Delete node" sits at its bottom right
+  strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; Mute above
+  Solo; a vertical gain slider between +12dB and -96dB labels, in whole-dB steps; and a vertical
+  pan slider between L (top) and R (bottom) labels. Each slider has a tic mark under its handle at
+  0 dB or centre, and shows its value only as a hover tip. Soloing a channel unsolos the mixer's
+  others in the same step. A keyboard focus, drawn as an accent ring, goes to a control when it is
+  pressed, leaves on a press on the dialog's background, and moves with Tab and Shift-Tab from the
+  field down each strip's mute, solo, gain and pan, strip by strip, wrapping. The up and down
+  arrows step the focused field or slider (1 channel, 1 dB, 1 % pan with up to the left), each
+  press one step, never the hovered slider; Space or Enter presses a focused button
   ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform

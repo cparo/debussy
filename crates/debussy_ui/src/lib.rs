@@ -31,6 +31,7 @@ mod app;
 mod click;
 mod device;
 mod effect_panel;
+mod focus_target;
 mod grid;
 mod icon;
 mod menu;

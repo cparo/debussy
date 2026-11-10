@@ -365,6 +365,14 @@ pub fn flat(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// A translucent veil over a dialog behind a confirmation.
+pub fn scrim(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.35))),
+        ..container::Style::default()
+    }
+}
+
 /// A button with no face at all: its label in the text colour, in the accent while hovered or
 /// pressed; the dialog's × close button.
 pub fn bare(theme: &Theme, status: button::Status) -> button::Style {
