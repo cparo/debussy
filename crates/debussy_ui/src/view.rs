@@ -607,14 +607,15 @@ impl App {
             scrolling,
             pin(add).x(size.width - ADD_BUTTON - 24.0).y(12.0)
         ];
-        if let Some(dialog) = self.node_dialog((tracks_width - 32.0).clamp(0.0, 560.0)) {
-            layers = layers.push(pin(opaque(dialog)).x(16.0).y(16.0));
+        if let Some(dialog) = self.node_dialog(Size::new(tracks_width, viewport)) {
+            layers = layers.push(pin(opaque(dialog)));
         }
         layers.into()
     }
 
-    /// The selected node's dialog, `width` wide, over the track pane.
-    fn node_dialog(&self, width: f32) -> Option<Element<'_, Message>> {
+    /// The selected node's dialog, `size` big, covering the track pane; its body scrolls under a
+    /// fixed header.
+    fn node_dialog(&self, size: Size) -> Option<Element<'_, Message>> {
         let Some(Selection::Node(id)) = self.selection() else {
             return None;
         };
@@ -677,10 +678,11 @@ impl App {
             NodeKind::Bus(_) => Space::new().into(),
         };
         Some(
-            container(column![header, body].spacing(12))
+            container(column![header, scrollable(body).height(Fill)].spacing(12))
                 .padding(12)
-                .width(Length::Fixed(width))
-                .style(theme::popup)
+                .width(Length::Fixed(size.width))
+                .height(Length::Fixed(size.height))
+                .style(theme::panel)
                 .into(),
         )
     }

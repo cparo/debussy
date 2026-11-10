@@ -44,7 +44,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Divider, gutter and board:** a draggable divider (starting at 60 % tracks, 40 % board), the
   port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
   vertically together under one scrollbar at the window's right edge.
-- **Node dialogs** open over the track pane for the selected node: a header with its name and a
+- **Node dialogs** cover the whole track pane for the selected node: a header with its name and a
   delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
   a feedback delay's time in seconds, or a built-in effect's controls; a bus or an effect this
   build does not know has only the header. An effect's controls are drawn from its parameters'

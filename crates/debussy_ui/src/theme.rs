@@ -160,6 +160,17 @@ pub fn popup(theme: &Theme) -> container::Style {
     }
 }
 
+/// A dialog that fills a pane: chrome abutting the bars and divider, with no outline, rounding
+/// or shadow.
+pub fn panel(theme: &Theme) -> container::Style {
+    let t = tokens(tone_of(theme));
+    container::Style {
+        background: Some(Background::Color(t.chrome)),
+        text_color: Some(t.text),
+        ..container::Style::default()
+    }
+}
+
 /// Where a toolbar button sits: alone, or at one position in a [`strip`] of grouped buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
