@@ -4,6 +4,8 @@
 
 use iced::Color;
 
+use crate::stroke::Mask;
+
 /// Physical pixels in premultiplied RGBA, painted in logical coordinates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raster {
@@ -28,6 +30,22 @@ impl Raster {
         };
         let to_px = |v: f32| ((v * scale).round().max(1.0)) as usize;
         let (width, height) = (to_px(width), to_px(height));
+        Raster {
+            width,
+            height,
+            scale,
+            pixels: vec![[0.0; 4]; width * height],
+        }
+    }
+
+    /// A transparent raster of exactly `width` by `height` physical pixels, painted at `scale`
+    /// physical pixels per logical pixel (1 if `scale` is not a positive number).
+    pub fn with_physical_size(width: usize, height: usize, scale: f32) -> Raster {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
         Raster {
             width,
             height,
@@ -77,6 +95,25 @@ impl Raster {
                 px[2] = color.b * alpha + px[2] * keep;
                 px[3] = alpha + px[3] * keep;
             }
+        }
+    }
+
+    /// Paints `color` over each pixel at the fraction of its alpha that `mask` covers. Nothing
+    /// changes unless the mask is this raster's size.
+    pub fn paint(&mut self, mask: &Mask, color: Color) {
+        if (mask.width(), mask.height()) != (self.width, self.height) {
+            return;
+        }
+        for (px, &cover) in self.pixels.iter_mut().zip(mask.coverage()) {
+            let alpha = color.a * cover;
+            if alpha <= 0.0 {
+                continue;
+            }
+            let keep = 1.0 - alpha;
+            px[0] = color.r * alpha + px[0] * keep;
+            px[1] = color.g * alpha + px[1] * keep;
+            px[2] = color.b * alpha + px[2] * keep;
+            px[3] = alpha + px[3] * keep;
         }
     }
 
@@ -264,5 +301,17 @@ mod tests {
         raster.fill_rect(0.0, 0.0, 1.0, 1.0, Color::BLACK);
         raster.fill_rect(0.0, 0.0, 1.0, 1.0, Color::from_rgba(1.0, 1.0, 1.0, 0.5));
         assert_eq!(raster.into_rgba8(), vec![128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn test_paint_composites_the_mask() {
+        let mut raster = Raster::with_physical_size(2, 1, 1.0);
+        let mut mask = Mask::new(2, 1, 1.0);
+        mask.stroke_segment(0.0, 0.5, 0.5, 0.5, 1.0);
+        raster.paint(&mask, Color::WHITE);
+        assert_eq!(raster.clone().into_rgba8()[..4], [255, 255, 255, 255]);
+        assert_eq!(at(&raster, 1, 0)[3], 0.0);
+        raster.paint(&Mask::new(3, 1, 1.0), Color::BLACK);
+        assert_eq!(at(&raster, 0, 0), [1.0; 4]);
     }
 }

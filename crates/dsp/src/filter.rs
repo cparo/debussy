@@ -50,6 +50,17 @@ pub fn butterworth_q(order: usize, section: usize) -> Option<f32> {
     Some(1.0 / (2.0 * angle.sin()))
 }
 
+/// The bilinear transform's analog frequency for `frequency` at `sample_rate`, as a multiple
+/// of a filter's prewarped gain `g`: `tan(π·f/fs) / g`. `None` from the Nyquist frequency up,
+/// or for a rate or frequency that is not a positive finite number.
+fn analog_frequency(frequency: f32, sample_rate: f32, g: f32) -> Option<f64> {
+    let ratio = f64::from(frequency) / f64::from(sample_rate);
+    if !(0.0..0.5).contains(&ratio) {
+        return None;
+    }
+    Some((std::f64::consts::PI * ratio).tan() / f64::from(g))
+}
+
 /// The coefficients of a [`Svf`]: its prewarped gain `g`, damping `k = 1/Q`, and the mix of its
 /// outputs, `out = m0·input + m1·band + m2·low`. Copy them freely; they never allocate.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -152,6 +163,41 @@ impl SvfCoefficients {
         )
     }
 
+    /// The filter's gain (linear) at `frequency` (Hz), at `sample_rate`; `None` from the
+    /// Nyquist frequency up. Exact: the filter is the analog prototype
+    /// `(m0·(s² + k·s + 1) + m1·s + m2) / (s² + k·s + 1)` under the bilinear transform, with
+    /// `s = j·tan(π·f/fs) / g`.
+    pub fn magnitude(&self, frequency: f32, sample_rate: f32) -> Option<f32> {
+        let w = analog_frequency(frequency, sample_rate, self.g)?;
+        let (k, m0, m1, m2) = (
+            f64::from(self.k),
+            f64::from(self.m0),
+            f64::from(self.m1),
+            f64::from(self.m2),
+        );
+        let real = 1.0 - w * w;
+        let den = real.hypot(k * w);
+        let num = (m0 * real + m2).hypot((m0 * k + m1) * w);
+        // A gain of a few hundred dB either way still fits in `f32`.
+        #[allow(clippy::cast_possible_truncation)]
+        let gain = (num / den) as f32;
+        Some(gain)
+    }
+
+    /// The frequency (Hz) at which the filter's gain is zero, at `sample_rate`, if it has one
+    /// below the Nyquist frequency: the centre of a notch. The numerator of
+    /// [`magnitude`](Self::magnitude) is zero where `m0·k + m1 = 0` and `w² = 1 + m2/m0`.
+    pub fn zero_frequency(&self, sample_rate: f32) -> Option<f32> {
+        let imaginary = self.m0 * self.k + self.m1;
+        let squared = 1.0 + self.m2 / self.m0;
+        let real_root = squared.is_finite() && squared > 0.0;
+        if imaginary.abs() > 1e-6 * (self.m0.abs() + self.m1.abs()) || !real_root {
+            return None;
+        }
+        let frequency = (self.g * squared.sqrt()).atan() * sample_rate / PI;
+        (frequency > 0.0 && frequency < sample_rate / 2.0).then_some(frequency)
+    }
+
     /// The coefficients `t` of the way from `self` to `to` (0 is `self`, 1 is `to`), each of `g`,
     /// `k` and the mix interpolated linearly. Between two valid sets `g` and `k` stay above 0,
     /// so the filter stays stable through a morph.
@@ -241,6 +287,22 @@ impl OnePoleCoefficients {
             m1: -1.0,
         }
     }
+
+    /// The filter's gain (linear) at `frequency` (Hz), at `sample_rate`; `None` from the
+    /// Nyquist frequency up. Exact: the filter is the analog prototype `m0 + m1 / (1 + s)`
+    /// under the bilinear transform, with `s = j·tan(π·f/fs) / g` and `g = G / (1 − G)`.
+    pub fn magnitude(&self, frequency: f32, sample_rate: f32) -> Option<f32> {
+        let g = self.gain / (1.0 - self.gain);
+        let w = analog_frequency(frequency, sample_rate, g)?;
+        let (m0, m1) = (f64::from(self.m0), f64::from(self.m1));
+        // m0 + m1·(1 − j·w) / (1 + w²)
+        let d = 1.0 + w * w;
+        let gain = (m0 + m1 / d).hypot(-m1 * w / d);
+        // A gain of a few hundred dB either way still fits in `f32`.
+        #[allow(clippy::cast_possible_truncation)]
+        let gain = gain as f32;
+        Some(gain)
+    }
 }
 
 /// A trapezoidal one-pole filter: one state value. Never allocates.
@@ -326,5 +388,55 @@ mod tests {
         }
         low.reset();
         assert_eq!(low, OnePole::new());
+    }
+    #[test]
+    fn test_magnitude_matches_designed_gains() {
+        let db = |m: Option<f32>| m.map(|m| 20.0 * m.log10()).unwrap_or(f32::NAN);
+        let rate = 48_000.0;
+        let lp = SvfCoefficients::low_pass(1_000.0, std::f32::consts::FRAC_1_SQRT_2, rate);
+        assert!((db(lp.magnitude(1_000.0, rate)) + 3.0103).abs() < 1e-3);
+        assert!(db(lp.magnitude(20.0, rate)).abs() < 1e-3);
+        let hp = SvfCoefficients::high_pass(1_000.0, std::f32::consts::FRAC_1_SQRT_2, rate);
+        assert!((db(hp.magnitude(1_000.0, rate)) + 3.0103).abs() < 1e-3);
+        let bell = SvfCoefficients::bell(2_000.0, 2.0, 9.0, rate);
+        assert!((db(bell.magnitude(2_000.0, rate)) - 9.0).abs() < 1e-3);
+        let notch = SvfCoefficients::notch(500.0, 4.0, rate);
+        assert!(db(notch.magnitude(500.0, rate)) < -60.0);
+        let low = SvfCoefficients::low_shelf(500.0, 0.7, -12.0, rate);
+        assert!((db(low.magnitude(20.0, rate)) + 12.0).abs() < 0.05);
+        let high = SvfCoefficients::high_shelf(500.0, 0.7, 6.0, rate);
+        assert!((db(high.magnitude(20_000.0, rate)) - 6.0).abs() < 0.05);
+        assert!(db(SvfCoefficients::identity().magnitude(3_000.0, rate)).abs() < 1e-6);
+        let one = OnePoleCoefficients::low_pass(1_000.0, rate);
+        assert!((db(one.magnitude(1_000.0, rate)) + 3.0103).abs() < 1e-3);
+        let one = OnePoleCoefficients::high_pass(1_000.0, rate);
+        assert!((db(one.magnitude(1_000.0, rate)) + 3.0103).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_zero_frequency_finds_only_a_notchs_centre() {
+        let rate = 48_000.0;
+        let notch = SvfCoefficients::notch(3_000.0, 4.0, rate);
+        let centre = notch.zero_frequency(rate).unwrap_or(0.0);
+        assert!((centre - 3_000.0).abs() < 0.1, "{centre}");
+        assert!(notch.magnitude(centre, rate).is_some_and(|m| m < 1e-4));
+        assert_eq!(
+            SvfCoefficients::bell(1_000.0, 1.0, -12.0, rate).zero_frequency(rate),
+            None
+        );
+        assert_eq!(SvfCoefficients::identity().zero_frequency(rate), None);
+        let low_pass = SvfCoefficients::low_pass(1_000.0, 1.0, rate);
+        assert_eq!(low_pass.zero_frequency(rate), None);
+    }
+
+    #[test]
+    fn test_magnitude_stops_at_nyquist() {
+        let c = SvfCoefficients::identity();
+        assert!(c.magnitude(23_999.0, 48_000.0).is_some());
+        assert_eq!(c.magnitude(24_000.0, 48_000.0), None);
+        assert_eq!(c.magnitude(100.0, 0.0), None);
+        assert_eq!(c.magnitude(f32::NAN, 48_000.0), None);
+        let one = OnePoleCoefficients::low_pass(100.0, 48_000.0);
+        assert_eq!(one.magnitude(30_000.0, 48_000.0), None);
     }
 }

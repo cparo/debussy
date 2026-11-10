@@ -19,6 +19,15 @@ pub const SAGE: Color = Color::from_rgb8(0x84, 0xA0, 0x7C);
 /// both tones.
 pub const CHARCOAL: Color = Color::from_rgb8(0x2B, 0x2B, 0x2B);
 
+/// An equaliser display's grid lines, the same in both tones (the display is always charcoal).
+pub const GRID: Color = Color::from_rgb8(0x3C, 0x3C, 0x3C);
+
+/// An equaliser display's 0 dB line, a little brighter than the rest of the grid.
+pub const GRID_ZERO: Color = Color::from_rgb8(0x58, 0x58, 0x58);
+
+/// An equaliser display's axis labels, light grey in both tones.
+pub const LABEL: Color = Color::from_rgb8(0x9C, 0x9C, 0x9C);
+
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tone {

@@ -55,3 +55,11 @@ and no automation may drive it. A new order takes effect at once, from rest
 Turning a band on or off, or changing its type, moves its coefficients linearly to the new
 response over the parameter ramp time; a band that is off passes its input through and is not
 processed ([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)).
+
+## Frequency response
+
+`audio_effects::frequency_response` gives the steady-state magnitude response of an effect kind at
+given parameter values and sample rate: the stages it runs, designed by the same functions as
+processing, with each stage's gain the exact response of the bilinear-transformed filter. Ramps
+and band morphs are not included. Every kind in "High-pass and low-pass filters" and "Parametric
+equaliser" has one; a band that is off adds no stage ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)).

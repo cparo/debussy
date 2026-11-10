@@ -12,6 +12,9 @@
 //! - `view`: drawing the window.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
 //! - `effect_display`: [`EffectDisplay`], the picture above an effect's controls.
+//! - `response_display`: the equalisers' display, their frequency response.
+//! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
+//! - `typeface`: the `Typeface` seam and the in-house stroke font behind it.
 //! - `click`: the click, the tempo and the meter.
 //! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
@@ -42,17 +45,20 @@ mod patch_board;
 mod range_selection;
 mod raster;
 mod recording;
+mod response_display;
 mod services;
 mod shortcuts;
+mod stroke;
 mod theme;
 mod transport;
+mod typeface;
 mod view;
 mod waveform;
 
 use std::sync::Mutex;
 
 pub use app::{App, Message, NewNode};
-pub use effect_display::{DisplayParameter, EffectDisplay, Pixels};
+pub use effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};

@@ -7,7 +7,7 @@ use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::{App, Message};
-use crate::effect_display::{display_area, display_for};
+use crate::effect_display::display_area;
 use crate::theme;
 use crate::view::{Face, tool};
 
@@ -27,10 +27,11 @@ impl App {
             .map(|info| self.parameter_value(id, &info.name))
             .collect();
         let display = display_area(
-            display_for(kind),
+            kind,
             infos,
             &values,
             self.tone(),
+            self.sample_rate(),
             width,
             self.scale_factor(),
         );

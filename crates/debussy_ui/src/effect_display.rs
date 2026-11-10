@@ -7,6 +7,7 @@ use iced::{ContentFit, Element, Fill, Length};
 use signal_graph::ParameterInfo;
 
 use crate::app::Message;
+use crate::response_display::ResponseDisplay;
 use crate::theme::{self, Tone};
 
 /// The display area's height, in logical pixels; its width fills the dialog.
@@ -53,26 +54,49 @@ impl Pixels {
     pub fn height(&self) -> u32 {
         self.height
     }
+
+    /// The pixels, four bytes each, row by row from the top left.
+    pub fn rgba(&self) -> &[u8] {
+        &self.rgba
+    }
+}
+
+/// What a display draws for, besides the parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayContext<'a> {
+    /// The effect's kind (the `kind` of `NodeKind::Effect`), such as `"low-pass"`.
+    pub kind: &'a str,
+    /// The tone of the chrome around the display.
+    pub tone: Tone,
+    /// The project's sample rate, in Hz.
+    pub sample_rate: u32,
+    /// The picture's width in physical pixels.
+    pub width: u32,
+    /// The picture's height in physical pixels; [`DISPLAY_HEIGHT`] logical pixels at the
+    /// display's scale.
+    pub height: u32,
 }
 
 /// Draws the display of one kind of effect. It runs on the interface thread whenever the
 /// dialog is drawn, so it should be quick.
 pub trait EffectDisplay: Sync {
     /// The picture of an effect whose parameters stand at `parameters` (in the effect's own
-    /// order), for chrome of `tone`, `width` × `height` physical pixels; it is stretched to the
+    /// order), `context.width` × `context.height` physical pixels; it is stretched to the
     /// display area if its size differs. `None` leaves the area blank.
     fn draw(
         &self,
         parameters: &[DisplayParameter<'_>],
-        tone: Tone,
-        width: u32,
-        height: u32,
+        context: &DisplayContext<'_>,
     ) -> Option<Pixels>;
 }
 
 /// The displays, by effect kind (the `kind` of `NodeKind::Effect`). Register a new display
 /// here.
-const DISPLAYS: &[(&str, &dyn EffectDisplay)] = &[];
+const DISPLAYS: &[(&str, &dyn EffectDisplay)] = &[
+    ("high-pass", &ResponseDisplay),
+    ("low-pass", &ResponseDisplay),
+    ("parametric-eq", &ResponseDisplay),
+];
 
 /// The display registered for effects of `kind`, if any.
 pub(crate) fn display_for(kind: &str) -> Option<&'static dyn EffectDisplay> {
@@ -87,14 +111,15 @@ fn find(
     displays.iter().find(|(k, _)| *k == kind).map(|(_, d)| *d)
 }
 
-/// The display area for an effect of `kind` whose parameters `infos` stand at `values`, `width`
-/// logical pixels wide at `scale` physical pixels per logical pixel: the registered display's
-/// picture, or charcoal grey.
+/// The display area for an effect of `kind` whose parameters `infos` stand at `values`, in a
+/// project at `sample_rate`, `width` logical pixels wide at `scale` physical pixels per logical
+/// pixel: the picture of the display registered for `kind`, or charcoal grey.
 pub(crate) fn display_area<'a>(
-    display: Option<&dyn EffectDisplay>,
+    kind: &str,
     infos: &[ParameterInfo],
     values: &[f32],
     tone: Tone,
+    sample_rate: u32,
     width: f32,
     scale: f32,
 ) -> Element<'a, Message> {
@@ -107,14 +132,14 @@ pub(crate) fn display_area<'a>(
             unit: &info.unit,
         })
         .collect();
-    let picture = display.and_then(|d| {
-        d.draw(
-            &parameters,
-            tone,
-            physical(width, scale),
-            physical(DISPLAY_HEIGHT, scale),
-        )
-    });
+    let context = DisplayContext {
+        kind,
+        tone,
+        sample_rate,
+        width: physical(width, scale),
+        height: physical(DISPLAY_HEIGHT, scale),
+    };
+    let picture = display_for(kind).and_then(|d| d.draw(&parameters, &context));
     let body: Element<'a, Message> = match picture {
         Some(p) => image(image::Handle::from_rgba(p.width, p.height, p.rgba))
             .width(Fill)
@@ -149,11 +174,10 @@ mod tests {
         fn draw(
             &self,
             parameters: &[DisplayParameter<'_>],
-            tone: Tone,
-            width: u32,
-            height: u32,
+            context: &DisplayContext<'_>,
         ) -> Option<Pixels> {
-            let grey = match tone {
+            let (width, height) = (context.width, context.height);
+            let grey = match context.tone {
                 Tone::Light => 200,
                 Tone::Dark => 40,
             };
@@ -178,6 +202,9 @@ mod tests {
         assert!(find(TEST_DISPLAYS, "flat").is_some());
         assert!(find(TEST_DISPLAYS, "eq").is_none());
         assert!(display_for("").is_none());
+        for kind in ["high-pass", "low-pass", "parametric-eq"] {
+            assert!(display_for(kind).is_some(), "{kind}");
+        }
     }
 
     #[test]
@@ -188,14 +215,14 @@ mod tests {
             value: -3.0,
             unit: "dB",
         }];
-        let picture = display
-            .draw(
-                &parameters,
-                Tone::Light,
-                physical(100.0, 2.0),
-                physical(DISPLAY_HEIGHT, 2.0),
-            )
-            .ok_or("no picture")?;
+        let context = DisplayContext {
+            kind: "flat",
+            tone: Tone::Light,
+            sample_rate: 48_000,
+            width: physical(100.0, 2.0),
+            height: physical(DISPLAY_HEIGHT, 2.0),
+        };
+        let picture = display.draw(&parameters, &context).ok_or("no picture")?;
         assert_eq!((picture.width(), picture.height()), (200, 640));
         assert_eq!(picture.rgba.first(), Some(&200));
         Ok(())
@@ -211,8 +238,19 @@ mod tests {
     #[test]
     fn test_display_area_builds_with_and_without_a_display() {
         let infos = [ParameterInfo::new("gain", -24.0, 24.0, 0.0).with_unit("dB")];
-        let _blank = display_area(None, &infos, &[0.0], Tone::Dark, 300.0, 2.0);
-        let display = find(TEST_DISPLAYS, "flat");
-        let _drawn = display_area(display, &infos, &[0.0], Tone::Dark, 300.0, 2.0);
+        let _blank = display_area("unknown", &infos, &[0.0], Tone::Dark, 48_000, 300.0, 2.0);
+        let infos = [
+            ParameterInfo::new("cutoff", 20.0, 20_000.0, 80.0),
+            ParameterInfo::new("order", 1.0, 8.0, 2.0),
+        ];
+        let _drawn = display_area(
+            "high-pass",
+            &infos,
+            &[80.0, 2.0],
+            Tone::Dark,
+            48_000,
+            300.0,
+            2.0,
+        );
     }
 }

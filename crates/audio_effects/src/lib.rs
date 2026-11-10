@@ -12,6 +12,8 @@
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id.
+//! - `response`: [`FrequencyResponse`] and [`frequency_response`], the magnitude response an
+//!   equaliser's parameters ask for, for display.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -21,6 +23,7 @@ mod filters;
 mod mixer;
 mod parametric;
 mod registry;
+mod response;
 mod utility;
 
 pub use error::Error;
@@ -30,4 +33,5 @@ pub use parametric::{
     BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, band_parameter_name,
 };
 pub use registry::{EFFECTS, EffectKind, display_name, effect, parameter_infos};
+pub use response::{FrequencyResponse, frequency_response};
 pub use utility::{Bus, Pick, Place, Silence};
