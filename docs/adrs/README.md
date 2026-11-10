@@ -113,4 +113,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0087](0087-a-parameter-declares-its-unit-scale-and-group-so-a.md) | A parameter declares its unit, scale and group so a generic control can be drawn for it | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 | [ADR-0088](0088-equalisers-are-built-on-a-trapezoidal-state.md) | Equalisers are built on a trapezoidal state-variable filter, and a filter's order changes only while stopped | Accepted | [Filters](../architecture/effects.md#filters) |
 | [ADR-0089](0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md) | The mixer dialog shows narrow numbered strips with vertical gain and pan and a channel-count field | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0090](0090-the-interface-opens-in-the-dark-tone-and-the-light.md) | The interface opens in the dark tone and the light-tone logo is sage green | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0091](0091-effect-displays-are-registered-per-effect-kind-and.md) | Effect displays are registered per effect kind and draw RGBA pixels from parameter values and the tone | Accepted | [Effect displays](../architecture/user-interface.md#effect-displays) |
 

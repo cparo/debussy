@@ -11,6 +11,7 @@
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
+//! - `effect_display`: [`EffectDisplay`], the picture above an effect's controls.
 //! - `click`: the click, the tempo and the meter.
 //! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
@@ -30,6 +31,7 @@
 mod app;
 mod click;
 mod device;
+mod effect_display;
 mod effect_panel;
 mod focus_target;
 mod grid;
@@ -50,6 +52,7 @@ mod waveform;
 use std::sync::Mutex;
 
 pub use app::{App, Message, NewNode};
+pub use effect_display::{DisplayParameter, EffectDisplay, Pixels};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
@@ -65,8 +68,8 @@ pub use waveform::{
     Spectrum, spectrum_bands,
 };
 
-/// Opens the main window over `app` and runs until it closes. The chrome follows the system's
-/// appearance until the user toggles it.
+/// Opens the main window over `app` and runs until it closes. The chrome opens dark, whatever
+/// the system's appearance, until the user toggles it.
 ///
 /// # Errors
 ///
@@ -78,12 +81,9 @@ pub fn run(app: App) -> iced::Result {
         move || {
             (
                 Shell(initial.lock().ok().and_then(|mut a| a.take())),
-                iced::Task::batch([
-                    iced::system::theme().map(|mode| Message::SystemTone(tone(mode))),
-                    iced::window::latest()
-                        .and_then(iced::window::scale_factor)
-                        .map(Message::Rescaled),
-                ]),
+                iced::window::latest()
+                    .and_then(iced::window::scale_factor)
+                    .map(Message::Rescaled),
             )
         },
         Shell::update,
@@ -93,14 +93,6 @@ pub fn run(app: App) -> iced::Result {
     .theme(Shell::theme)
     .subscription(Shell::subscription)
     .run()
-}
-
-/// The chrome for the system's appearance; dark when it has none.
-fn tone(mode: iced::theme::Mode) -> Tone {
-    match mode {
-        iced::theme::Mode::Light => Tone::Light,
-        iced::theme::Mode::Dark | iced::theme::Mode::None => Tone::Dark,
-    }
 }
 
 /// The running window's state.
@@ -141,13 +133,12 @@ impl Shell {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        let appearance = iced::system::theme_changes().map(|mode| Message::SystemTone(tone(mode)));
         let rescaled = iced::window::events().filter_map(|(_, event)| match event {
             iced::window::Event::Rescaled(scale) => Some(Message::Rescaled(scale)),
             _ => None,
         });
         let keys = iced::keyboard::listen().filter_map(shortcuts::shortcut);
-        let mut subscriptions = vec![appearance, rescaled, keys];
+        let mut subscriptions = vec![rescaled, keys];
         if let Some(app) = &self.0 {
             if app.wants_ticks() {
                 subscriptions.push(iced::window::frames().map(|_| Message::Tick));

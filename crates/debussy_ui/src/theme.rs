@@ -12,6 +12,13 @@ pub const CURSOR: Color = Color::from_rgb(0.9, 0.2, 0.2);
 /// track's arm toggle while active.
 pub const RECORD: Color = Color::from_rgb8(0xBB, 0x00, 0x00);
 
+/// The logo in the light tone: sage green.
+pub const SAGE: Color = Color::from_rgb8(0x84, 0xA0, 0x7C);
+
+/// An effect dialog's display area while its effect has no display: charcoal grey, the same in
+/// both tones.
+pub const CHARCOAL: Color = Color::from_rgb8(0x2B, 0x2B, 0x2B);
+
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tone {
@@ -201,6 +208,22 @@ impl Place {
 pub fn accent_icon(theme: &Theme, _status: svg::Status) -> svg::Style {
     svg::Style {
         color: Some(tokens(tone_of(theme)).audio),
+    }
+}
+
+/// The logo: sage green in the light tone, the selected-button accent in the dark.
+pub fn logo(theme: &Theme, status: svg::Status) -> svg::Style {
+    match tone_of(theme) {
+        Tone::Light => svg::Style { color: Some(SAGE) },
+        Tone::Dark => accent_icon(theme, status),
+    }
+}
+
+/// An effect dialog's display area while its effect has no display.
+pub fn blank_display(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(CHARCOAL)),
+        ..container::Style::default()
     }
 }
 
@@ -431,6 +454,14 @@ mod tests {
     fn test_mix_clamps() {
         assert_eq!(mix(Color::BLACK, Color::WHITE, 2.0), Color::WHITE);
         assert_eq!(mix(Color::BLACK, Color::WHITE, -1.0), Color::BLACK);
+    }
+
+    #[test]
+    fn test_logo_is_sage_in_light_and_accent_in_dark() {
+        let light = logo(&theme(Tone::Light), svg::Status::Idle).color;
+        assert_eq!(light, Some(SAGE));
+        let dark = logo(&theme(Tone::Dark), svg::Status::Idle).color;
+        assert_eq!(dark, Some(DARK.audio));
     }
 
     #[test]

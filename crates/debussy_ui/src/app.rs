@@ -167,8 +167,6 @@ pub enum Message {
     SetGrid(bool),
     /// Switch between light and dark chrome.
     ToggleTone,
-    /// The system's appearance, at launch or when it changes.
-    SystemTone(Tone),
     /// The window's scale factor, at launch or when it changes: physical pixels per logical
     /// pixel.
     Rescaled(f32),
@@ -405,7 +403,8 @@ impl App {
             generation: 0,
             display: Display::default(),
             grid: false,
-            tone: Tone::default(),
+            // Dark at launch, whatever the system's appearance.
+            tone: Tone::Dark,
             scale_factor: 1.0,
             menu: None,
             renaming: None,
@@ -680,7 +679,6 @@ impl App {
             message,
             Message::Tick
                 | Message::Scrolled(_)
-                | Message::SystemTone(_)
                 | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::OpenMenu(_)
@@ -707,11 +705,7 @@ impl App {
         // Doing anything else while typing a tempo records it.
         if !matches!(
             message,
-            Message::Tick
-                | Message::Scrolled(_)
-                | Message::SystemTone(_)
-                | Message::Rescaled(_)
-                | Message::TempoText(_)
+            Message::Tick | Message::Scrolled(_) | Message::Rescaled(_) | Message::TempoText(_)
         ) {
             self.finish_tempo();
         }
@@ -720,7 +714,6 @@ impl App {
             message,
             Message::Tick
                 | Message::Scrolled(_)
-                | Message::SystemTone(_)
                 | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::FinishRename
@@ -845,7 +838,6 @@ impl App {
             }
             Message::SetGrid(grid) => self.grid = grid,
             Message::ToggleTone => self.set_tone(self.tone.toggled()),
-            Message::SystemTone(tone) => self.set_tone(tone),
             Message::Rescaled(scale) => {
                 if scale.is_finite() && scale > 0.0 {
                     self.scale_factor = scale;

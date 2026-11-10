@@ -45,6 +45,8 @@ const LOGO_HEIGHT: f32 = 44.0;
 static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
     svg::Handle::from_memory(include_bytes!("../assets/icons/debussy.svg").as_slice())
 });
+/// The padding inside a node's dialog.
+const DIALOG_PADDING: f32 = 12.0;
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
@@ -241,7 +243,7 @@ impl App {
         let logo = svg(LOGO.clone())
             .width(Length::Shrink)
             .height(LOGO_HEIGHT)
-            .style(theme::accent_icon);
+            .style(theme::logo);
         let bar = row![
             logo,
             gap(16.0),
@@ -682,11 +684,13 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
+            NodeKind::Effect { kind, .. } => {
+                self.effect_panel(id, kind, size.width - 2.0 * DIALOG_PADDING)
+            }
             NodeKind::Bus(_) => Space::new().into(),
         };
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
-            .padding(12)
+            .padding(DIALOG_PADDING)
             .width(Length::Fixed(size.width))
             .height(Length::Fixed(size.height))
             .style(theme::panel);

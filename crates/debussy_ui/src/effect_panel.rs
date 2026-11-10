@@ -7,6 +7,7 @@ use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::{App, Message};
+use crate::effect_display::{display_area, display_for};
 use crate::theme;
 use crate::view::{Face, tool};
 
@@ -14,13 +15,25 @@ use crate::view::{Face, tool};
 const CONTROL_WIDTH: f32 = 104.0;
 
 impl App {
-    /// The controls of effect node `id` of kind `kind`; empty for a kind this build does not
-    /// know. Ungrouped parameters come first, in a row; then one strip per group, scrolling
-    /// horizontally.
-    pub(crate) fn effect_panel(&self, id: NodeId, kind: &str) -> Element<'_, Message> {
+    /// The display and controls of effect node `id` of kind `kind`, `width` logical pixels
+    /// wide; empty for a kind this build does not know. The display comes first; then the
+    /// ungrouped parameters, in a row; then one strip per group, scrolling horizontally.
+    pub(crate) fn effect_panel(&self, id: NodeId, kind: &str, width: f32) -> Element<'_, Message> {
         let Some(infos) = self.effect_parameters(kind) else {
             return Space::new().into();
         };
+        let values: Vec<f32> = infos
+            .iter()
+            .map(|info| self.parameter_value(id, &info.name))
+            .collect();
+        let display = display_area(
+            display_for(kind),
+            infos,
+            &values,
+            self.tone(),
+            width,
+            self.scale_factor(),
+        );
         let ungrouped = row(infos
             .iter()
             .filter(|i| i.group.is_empty())
@@ -48,6 +61,7 @@ impl App {
         }))
         .spacing(8);
         column![
+            display,
             ungrouped,
             scrollable(strips).direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::default(),
