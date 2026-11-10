@@ -21,6 +21,8 @@ pub fn shortcut(event: Event) -> Option<Message> {
         Key::Named(Named::Tab) if modifiers.is_empty() => Some(Message::FocusNext),
         Key::Named(Named::ArrowUp) if modifiers.is_empty() => Some(Message::FocusAdjust(1)),
         Key::Named(Named::ArrowDown) if modifiers.is_empty() => Some(Message::FocusAdjust(-1)),
+        Key::Named(Named::ArrowRight) if modifiers.is_empty() => Some(Message::FocusSlide(1)),
+        Key::Named(Named::ArrowLeft) if modifiers.is_empty() => Some(Message::FocusSlide(-1)),
         Key::Named(Named::Space | Named::Enter) if modifiers.is_empty() => {
             Some(Message::FocusPress)
         }
@@ -106,6 +108,14 @@ mod tests {
         assert_eq!(
             shortcut(press(named(Named::ArrowDown), none)),
             Some(Message::FocusAdjust(-1))
+        );
+        assert_eq!(
+            shortcut(press(named(Named::ArrowRight), none)),
+            Some(Message::FocusSlide(1))
+        );
+        assert_eq!(
+            shortcut(press(named(Named::ArrowLeft), none)),
+            Some(Message::FocusSlide(-1))
         );
         for key in [Named::Space, Named::Enter] {
             assert_eq!(shortcut(press(named(key), none)), Some(Message::FocusPress));

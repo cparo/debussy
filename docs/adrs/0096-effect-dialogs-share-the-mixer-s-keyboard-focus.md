@@ -29,6 +29,9 @@ focus (ADR-0089), so an effect's controls could not be reached from the keyboard
     a linear slider by 1 % of its range, a logarithmic one by 1 % of its logarithm's range, an
     integer by one, a choice to the next or previous option; all clamped to the range. Arrows
     leave a toggle alone. A stopped-only parameter refuses the step while playing, as a drag.
+  - The right and left arrows step a focused slider (linear, logarithmic or integer) up and down
+    in the same steps, matching its horizontal travel; they leave choices and toggles alone,
+    and do nothing in mixer dialogs, whose sliders are vertical.
   - Space or Enter flips a focused toggle.
   - Sliders and toggles withhold keyboard and wheel events so the arrows reach the focused
     control, not the hovered one; pick lists keep theirs.

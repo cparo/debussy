@@ -63,7 +63,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
   keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
   1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a
-  choice by one option, each press one step; Space or Enter flips a focused toggle
+  choice by one option, each press one step; right and left step a focused slider the same way;
+  Space or Enter flips a focused toggle
   ([ADR-0096](../adrs/0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow

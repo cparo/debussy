@@ -260,6 +260,9 @@ pub enum Message {
     FocusPrevious,
     /// Adjust the focused control up (`1`) or down (`-1`) a step (the arrow keys).
     FocusAdjust(i32),
+    /// Step the focused effect slider up (`1`) or down (`-1`), as [`Message::FocusAdjust`] does;
+    /// other controls ignore it (the right and left arrows).
+    FocusSlide(i32),
     /// Press the focused button or toggle (Space or Enter); with a delete confirmation open,
     /// cancel it, its default.
     FocusPress,
@@ -712,6 +715,7 @@ impl App {
                 | Message::FocusNext
                 | Message::FocusPrevious
                 | Message::FocusAdjust(_)
+                | Message::FocusSlide(_)
                 | Message::FocusPress
                 | Message::SetFocus(_)
         ) {
@@ -999,7 +1003,10 @@ impl App {
             }
             Message::StepMixerChannels(node, delta) => self.step_channels(node, delta),
             // The confirmation holds the keyboard while open.
-            Message::FocusNext | Message::FocusPrevious | Message::FocusAdjust(_)
+            Message::FocusNext
+            | Message::FocusPrevious
+            | Message::FocusAdjust(_)
+            | Message::FocusSlide(_)
                 if self.confirming_delete.is_some() => {}
             Message::FocusPress if self.confirming_delete.is_some() => {
                 self.confirming_delete = None;
@@ -1027,6 +1034,18 @@ impl App {
                 };
                 if open {
                     self.set_focus(focus);
+                }
+            }
+            Message::FocusSlide(delta) => {
+                let slider = self.dialog_effect().zip(self.effect_focus()).is_some_and(
+                    |((_, infos), index)| {
+                        infos
+                            .get(index)
+                            .is_some_and(|i| effect_panel::is_slider(&i.scale))
+                    },
+                );
+                if slider {
+                    self.adjust_parameter_focus(delta);
                 }
             }
             Message::FocusAdjust(delta) => {

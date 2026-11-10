@@ -495,6 +495,11 @@ fn test_tab_moves_focus_through_effect_controls_and_arrows_adjust() -> Result<()
     assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
     app.update(Message::Undo);
     assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
+    // Right and left step a slider too.
+    app.update(Message::FocusSlide(1));
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
+    app.update(Message::FocusSlide(-1));
+    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
     // Pressing a slider does nothing.
     app.update(Message::FocusPress);
     assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
@@ -528,6 +533,9 @@ fn test_focus_adjust_steps_choices_and_integers() -> Result<(), Box<dyn Error>> 
         app.update(Message::FocusAdjust(1));
     }
     assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
+    // Right and left leave a choice alone.
+    app.update(Message::FocusSlide(-1));
+    assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
     // The high-pass order: an integer, from 2 by one a press, held at 1.
     app.update(Message::SetFocus(Some(DialogFocus::Parameter(2))));
     app.update(Message::FocusAdjust(1));
@@ -536,6 +544,9 @@ fn test_focus_adjust_steps_choices_and_integers() -> Result<(), Box<dyn Error>> 
         app.update(Message::FocusAdjust(-1));
     }
     assert_eq!(app.parameter_value(eq, "high-pass order"), 1.0);
+    // An integer is a slider: right steps it.
+    app.update(Message::FocusSlide(1));
+    assert_eq!(app.parameter_value(eq, "high-pass order"), 2.0);
     // A mixer's focus is not taken while an effect's dialog is open.
     app.update(Message::SetFocus(Some(DialogFocus::Mixer(
         MixerFocus::Channels,

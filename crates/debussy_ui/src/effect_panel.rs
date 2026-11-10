@@ -249,7 +249,7 @@ fn toggle_label(info: &ParameterInfo, on: bool) -> String {
 }
 
 /// Whether a parameter of `scale` is shown as a slider.
-fn is_slider(scale: &Scale) -> bool {
+pub(crate) fn is_slider(scale: &Scale) -> bool {
     matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
 }
 
