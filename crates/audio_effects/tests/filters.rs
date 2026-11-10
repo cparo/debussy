@@ -5,7 +5,9 @@ use std::error::Error as StdError;
 use std::f32::consts::TAU;
 
 use audio_buffers::Layout;
-use audio_effects::{BandControl, BandType, band_parameter_name, effect};
+use audio_effects::{
+    BandControl, BandType, PassControl, Response, band_parameter_name, effect, pass_parameter_name,
+};
 use realtime_guard::{GuardAllocator, assert_realtime};
 use signal_graph::{Config, Graph, NodeId, Runner};
 
@@ -217,9 +219,10 @@ fn test_click_check_catches_an_instant_order_change() -> TestResult {
 fn test_parametric_band_reaches_its_gain_at_the_centre() -> TestResult {
     let mut rig = Rig::new("parametric-eq")?;
     assert!(level_db(&rig.render(1_000.0, 4_800)?).abs() < 1e-4);
-    rig.set(&band_parameter_name(4, BandControl::Enabled), 1.0)?;
-    rig.set(&band_parameter_name(4, BandControl::Gain), 9.0)?;
-    rig.set(&band_parameter_name(4, BandControl::Q), 2.0)?;
+    rig.set(&band_parameter_name(1, BandControl::Enabled), 1.0)?;
+    rig.set(&band_parameter_name(1, BandControl::Frequency), 1_000.0)?;
+    rig.set(&band_parameter_name(1, BandControl::Gain), 9.0)?;
+    rig.set(&band_parameter_name(1, BandControl::Q), 2.0)?;
     rig.render(1_000.0, 9_600)?;
     let centre = level_db(&rig.render(1_000.0, 4_800)?);
     assert!((centre - 9.0).abs() < 0.05, "{centre}");
@@ -255,9 +258,47 @@ fn test_parametric_enable_and_type_change_do_not_click() -> TestResult {
 }
 
 #[test]
+fn test_parametric_high_pass_rejects_lows_and_toggles_without_clicking() -> TestResult {
+    let mut rig = Rig::new("parametric-eq")?;
+    let name = |control| pass_parameter_name(Response::HighPass, control);
+    rig.set(&name(PassControl::Cutoff), 1_000.0)?;
+    rig.set(&name(PassControl::Order), 4.0)?;
+    // Off: transparent, whatever the cutoff.
+    assert!(level_db(&rig.render(250.0, 4_800)?).abs() < 1e-4);
+    assert_no_click(&mut rig, 250.0, |rig| {
+        rig.set(&name(PassControl::Enabled), 1.0)
+    })?;
+    rig.render(250.0, 9_600)?;
+    // Two octaves below a 4-pole cutoff: about 48 dB down.
+    let low = level_db(&rig.render(250.0, 9_600)?);
+    assert!((-50.0..-45.0).contains(&low), "{low}");
+    rig.render(5_000.0, 4_800)?;
+    assert!(level_db(&rig.render(5_000.0, 4_800)?).abs() < 0.1);
+    assert_no_click(&mut rig, 250.0, |rig| {
+        rig.set(&name(PassControl::Enabled), 0.0)
+    })?;
+    // Off again: transparent.
+    assert!(level_db(&rig.render(250.0, 4_800)?).abs() < 1e-4);
+    Ok(())
+}
+
+#[test]
+fn test_parametric_low_pass_stage_follows_the_bands() -> TestResult {
+    let mut rig = Rig::new("parametric-eq")?;
+    let name = |control| pass_parameter_name(Response::LowPass, control);
+    rig.set(&name(PassControl::Cutoff), 1_000.0)?;
+    rig.set(&name(PassControl::Enabled), 1.0)?;
+    rig.render(4_000.0, 9_600)?;
+    // Two octaves above a 2-pole cutoff: about 24 dB down.
+    let high = level_db(&rig.render(4_000.0, 4_800)?);
+    assert!((-26.0..-22.0).contains(&high), "{high}");
+    Ok(())
+}
+
+#[test]
 fn test_replacing_a_node_keeps_its_values() -> TestResult {
     let mut rig = Rig::new("parametric-eq")?;
-    let gain = band_parameter_name(7, BandControl::Gain);
+    let gain = band_parameter_name(3, BandControl::Gain);
     rig.set(&gain, -6.5)?;
     rig.graph
         .replace_node(rig.node, effect("parametric-eq").ok_or("unknown kind")?)?;

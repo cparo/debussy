@@ -41,14 +41,17 @@ and no automation may drive it. A new order takes effect at once, from rest
 
 ## Parametric equaliser
 
-`parametric-eq` has eight bands in series. Band N (1 to 8) has five parameters, grouped as
-`band N`:
+`parametric-eq` is an optional high-pass stage, then four bands in series, then an optional
+low-pass stage ([ADR-0094](../adrs/0094-the-parametric-eq-has-four-bands-framed-by.md)). The
+parameters are listed, and shown, in that order.
+
+Band N (1 to 4) has five parameters, grouped as `band N`:
 
 | Name | Range | Default | Meaning |
 |---|---|---|---|
 | `band N enabled` | off (0) or on (1) | off | Whether the band acts |
 | `band N type` | bell (0), low shelf (1), high shelf (2), notch (3) | bell | The band's response |
-| `band N frequency` | 20 to 20 000, logarithmic | 50, 100, 200, 500, 1000, 2000, 5000, 10 000 | Centre or shelf mid-point in Hz |
+| `band N frequency` | 20 to 20 000, logarithmic | 100, 500, 2000, 8000 | Centre or shelf mid-point in Hz |
 | `band N gain` | −24 to +24 | 0 | Cut or boost in dB; a notch ignores it |
 | `band N q` | 0.1 to 18, logarithmic | 0.7071 | Width, or shelf slope |
 
@@ -56,10 +59,26 @@ Turning a band on or off, or changing its type, moves its coefficients linearly 
 response over the parameter ramp time; a band that is off passes its input through and is not
 processed ([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)).
 
+Each pass stage, grouped as `high-pass` or `low-pass`, has three parameters:
+
+| Name | Range | Default | Meaning |
+|---|---|---|---|
+| `high-pass enabled`, `low-pass enabled` | off (0) or on (1) | off | Whether the stage acts |
+| `high-pass cutoff`, `low-pass cutoff` | as `cutoff` in "High-pass and low-pass filters" | 80, 12 000 | Cutoff in Hz |
+| `high-pass order`, `low-pass order` | as `order` in "High-pass and low-pass filters" | 2 | Poles |
+
+A stage is the filter of "High-pass and low-pass filters", with the same design and the same
+stopped-only order. Turning it on or off crossfades its output with its input over the parameter
+ramp time; a stage that is off passes its input through and is not processed
+([ADR-0094](../adrs/0094-the-parametric-eq-has-four-bands-framed-by.md)). Saved values for bands
+5 to 8 match no parameter and are ignored.
+
 ## Frequency response
 
 `audio_effects::frequency_response` gives the steady-state magnitude response of an effect kind at
 given parameter values and sample rate: the stages it runs, designed by the same functions as
 processing, with each stage's gain the exact response of the bilinear-transformed filter. Ramps
 and band morphs are not included. Every kind in "High-pass and low-pass filters" and "Parametric
-equaliser" has one; a band that is off adds no stage ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)).
+equaliser" has one; a band that is off adds no stage ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)). The
+equaliser's response includes the stages of each enabled pass stage, and a pass stage that is off adds none
+([ADR-0094](../adrs/0094-the-parametric-eq-has-four-bands-framed-by.md)).

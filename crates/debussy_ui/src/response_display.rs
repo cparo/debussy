@@ -282,12 +282,15 @@ mod tests {
     }
 
     /// A parametric equaliser's parameters with band 1 a bell of `gain` dB at 1 kHz, Q 1.
+    /// The high-pass and low-pass stages are off.
     fn bell(gain: f32) -> Vec<f32> {
-        let mut values = vec![0.0; 40];
-        for band in values.chunks_mut(5) {
-            band.copy_from_slice(&[0.0, 0.0, 1_000.0, 0.0, 1.0]);
+        let off = [0.0, 1_000.0, 2.0];
+        let mut values = off.to_vec();
+        values.extend_from_slice(&[1.0, 0.0, 1_000.0, gain, 1.0]);
+        for _ in 1..audio_effects::BANDS {
+            values.extend_from_slice(&[0.0, 0.0, 1_000.0, 0.0, 1.0]);
         }
-        values[..5].copy_from_slice(&[1.0, 0.0, 1_000.0, gain, 1.0]);
+        values.extend_from_slice(&off);
         values
     }
 
@@ -405,7 +408,8 @@ mod tests {
     #[test]
     fn test_draw_notch_reaches_the_bottom() -> Result<(), Box<dyn std::error::Error>> {
         let mut values = bell(0.0);
-        values[..5].copy_from_slice(&[1.0, 3.0, 3_000.0, 0.0, 6.0]);
+        // Band 1 follows the high-pass stage's three values.
+        values[3..8].copy_from_slice(&[1.0, 3.0, 3_000.0, 0.0, 6.0]);
         let pixels = draw(&values, Tone::Dark).ok_or("no picture")?;
         let lowest = accent_pixels(&pixels)
             .iter()

@@ -7,8 +7,8 @@
 //!   (`docs/architecture/signal-graph.md` "Mixer").
 //! - `filters`: [`Butterworth`], the high-pass and low-pass filters
 //!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
-//! - `parametric`: [`ParametricEq`], the 8-band equaliser
-//!   (`docs/architecture/effects.md` "Parametric equaliser").
+//! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
+//!   stages (`docs/architecture/effects.md` "Parametric equaliser").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id.
@@ -30,7 +30,8 @@ pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};
 pub use parametric::{
-    BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, band_parameter_name,
+    BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, PassControl, band_parameter_name,
+    pass_parameter_name,
 };
 pub use registry::{EFFECTS, EffectKind, display_name, effect, parameter_infos};
 pub use response::{FrequencyResponse, frequency_response};
