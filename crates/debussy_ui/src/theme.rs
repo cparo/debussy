@@ -295,6 +295,31 @@ pub fn tool(selected: bool, place: Place) -> impl Fn(&Theme, button::Status) -> 
     tool_style(selected, place, true)
 }
 
+/// The background `iced` gives a pick list: the theme's weak background colour.
+pub fn pick_list_background(theme: &Theme) -> Color {
+    theme.extended_palette().background.weak.color
+}
+
+/// A toggle in a parameter group's strip: as [`accent_style`] for a lone label button, but
+/// unlit on the pick lists' background ([`pick_list_background`]), so it reads as a button on
+/// the strip while off.
+pub fn group_toggle(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let mut style = styled(theme, status, selected, Place::Alone, true, Accent::Audio);
+        if !selected {
+            let (_, ink) = tool_colours(tokens(tone_of(theme)), false, Accent::Audio);
+            let face = pick_list_background(theme);
+            let background = match status {
+                button::Status::Hovered => mix(face, ink, 0.08),
+                button::Status::Pressed => mix(face, ink, 0.18),
+                _ => face,
+            };
+            style.background = Some(Background::Color(background));
+        }
+        style
+    }
+}
+
 /// A toolbar button lit with `accent` when `selected`; otherwise as [`tool_style`].
 pub fn accent_style(
     selected: bool,
@@ -545,6 +570,22 @@ mod tests {
         assert_eq!(style(Place::Last).radius, border::right(5.0));
         for place in [Place::First, Place::Middle, Place::Last] {
             assert_eq!(style(place).width, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_group_toggle_unlit_matches_the_pick_list_background() {
+        for tone in [Tone::Light, Tone::Dark] {
+            let t = theme(tone);
+            let off = group_toggle(false)(&t, button::Status::Active).background;
+            assert_eq!(off, Some(Background::Color(pick_list_background(&t))));
+            let default =
+                iced::widget::pick_list::default(&t, iced::widget::pick_list::Status::Active);
+            assert_eq!(off, Some(default.background));
+            let on = group_toggle(true)(&t, button::Status::Active).background;
+            let lit =
+                accent_style(true, Place::Alone, true, Accent::Audio)(&t, button::Status::Active);
+            assert_eq!(on, lit.background);
         }
     }
 }

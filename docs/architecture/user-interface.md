@@ -55,7 +55,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   a slider over its logarithm, an integer one a slider in whole steps, and a choice a pick list,
   each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz
   from 1000 up as kilohertz. A toggle is one button showing the parameter's name, lit while on
-  and unlit while off, with no separate label. A stopped-only parameter shows "Stop to change" in place of its
+  and unlit while off, with no separate label; in a group's strip, its unlit background is the
+  pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
   control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow

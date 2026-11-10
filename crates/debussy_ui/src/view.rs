@@ -90,23 +90,29 @@ pub(crate) fn tool<'a>(
 }
 
 /// A text button labelled `label` (owned, unlike [`Face::Label`]) that sends `message`, lit
-/// when `selected`, styled as [`tool`]'s labels and filling its width.
+/// when `selected`, styled as [`tool`]'s labels and filling its width. `in_group` gives it,
+/// while unlit, the pick lists' background ([`theme::group_toggle`]).
 pub(crate) fn toggle_button<'a>(
     label: String,
     message: Message,
     selected: bool,
+    in_group: bool,
 ) -> Element<'a, Message> {
-    button(text(label).size(TOOL_TEXT).center().width(Length::Fill))
+    let face = button(text(label).size(TOOL_TEXT).center().width(Length::Fill))
         .on_press(message)
         .padding([8.0, 12.0])
-        .width(Length::Fill)
-        .style(theme::accent_style(
+        .width(Length::Fill);
+    if in_group {
+        face.style(theme::group_toggle(selected)).into()
+    } else {
+        face.style(theme::accent_style(
             selected,
             Place::Alone,
             true,
             Accent::Audio,
         ))
         .into()
+    }
 }
 
 /// A toolbar button styled for `place`.

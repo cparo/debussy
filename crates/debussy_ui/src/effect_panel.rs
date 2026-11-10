@@ -95,6 +95,7 @@ impl App {
                 label(info),
                 set(if on { 0.0 } else { 1.0 }),
                 on,
+                !info.group.is_empty(),
             ))
             .width(Length::Fixed(CONTROL_WIDTH))
             .into();
