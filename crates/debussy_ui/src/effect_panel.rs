@@ -1,7 +1,7 @@
 //! A built-in effect's dialog body: one control per parameter, chosen by its scale and grouped
 //! into strips (`docs/architecture/user-interface.md` "Layout").
 
-use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text};
+use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
 use iced::{Element, Length};
 use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
@@ -9,7 +9,11 @@ use signal_graph::{ParameterInfo, Scale};
 use crate::app::{App, Message};
 use crate::effect_display::display_area;
 use crate::theme;
-use crate::view::{Face, tool};
+use crate::view::toggle_button;
+
+/// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
+/// horizontal scrollbar, in logical pixels.
+pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
@@ -64,15 +68,19 @@ impl App {
         column![
             display,
             ungrouped,
+            // Embedded, so the scrollbar takes its own row below the strips instead of
+            // covering their lowest controls.
             scrollable(strips).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
+                scrollable::Scrollbar::default().spacing(STRIP_SCROLLBAR_GAP),
             )),
         ]
         .spacing(10)
         .into()
     }
 
-    /// A labelled control for parameter `info` of node `id`.
+    /// The control for parameter `info` of node `id`. A toggle is one button named for the
+    /// parameter, lit while on; any other is labelled with its name, and a slider shows its value
+    /// as a tooltip.
     fn control<'a>(&'a self, id: NodeId, info: &'a ParameterInfo) -> Element<'a, Message> {
         let value = self.parameter_value(id, &info.name);
         let (min, max) = (info.min, info.max);
@@ -87,6 +95,17 @@ impl App {
             value,
         };
         let frozen = info.stopped_only && self.engine().is_playing();
+        if !frozen && info.scale == Scale::Toggle {
+            let on = value >= 0.5;
+            return container(toggle_button(
+                toggle_label(info, on),
+                set(if on { 0.0 } else { 1.0 }),
+                on,
+                !info.group.is_empty(),
+            ))
+            .width(Length::Fixed(CONTROL_WIDTH))
+            .into();
+        }
         let input: Element<'a, Message> = match &info.scale {
             // Shown, not offered, until playback stops (ADR-0088).
             _ if frozen => text("Stop to change").size(11).into(),
@@ -115,21 +134,41 @@ impl App {
                 .text_size(12)
                 .into()
             }
-            Scale::Toggle => {
-                let on = value >= 0.5;
-                tool(
-                    Face::Label(if on { "On" } else { "Off" }),
-                    Some(set(if on { 0.0 } else { 1.0 })),
-                    on,
-                )
-            }
+            // A toggle is a button unless frozen.
+            Scale::Toggle => Space::new().into(),
         };
-        let mut control = column![text(label(info)).size(12), input].spacing(4);
-        if !matches!(info.scale, Scale::Choice(_) | Scale::Toggle) {
-            control = control.push(text(format_value(info, value)).size(12));
-        }
-        control.width(Length::Fixed(CONTROL_WIDTH)).into()
+        let input = if !frozen && is_slider(&info.scale) {
+            tooltip(
+                input,
+                container(text(format_value(info, value)).size(12))
+                    .padding([4, 8])
+                    .style(theme::popup),
+                tooltip::Position::FollowCursor,
+            )
+            .into()
+        } else {
+            input
+        };
+        column![text(label(info)).size(12), input]
+            .spacing(4)
+            .width(Length::Fixed(CONTROL_WIDTH))
+            .into()
     }
+}
+
+/// The text on toggle `info`'s button while it is `on`: its state's label if it names its
+/// states, else its [`label`].
+fn toggle_label(info: &ParameterInfo, on: bool) -> String {
+    match &info.state_labels {
+        Some((on_label, _)) if on => on_label.clone(),
+        Some((_, off_label)) => off_label.clone(),
+        None => label(info),
+    }
+}
+
+/// Whether a parameter of `scale` is shown as a slider.
+fn is_slider(scale: &Scale) -> bool {
+    matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
 }
 
 /// `text` with its first letter in capitals.
@@ -196,5 +235,24 @@ mod tests {
         assert_eq!(format_value(&db, -3.25), "-3.25 dB");
         let order = ParameterInfo::new("order", 1.0, 8.0, 2.0).with_scale(Scale::Integer);
         assert_eq!(format_value(&order, 4.0), "4");
+    }
+
+    #[test]
+    fn test_toggle_label_names_each_state_or_falls_back_to_the_name() {
+        let plain = ParameterInfo::new("band 1 enabled", 0.0, 1.0, 0.0)
+            .with_scale(Scale::Toggle)
+            .with_group("band 1");
+        assert_eq!(toggle_label(&plain, true), "Enabled");
+        assert_eq!(toggle_label(&plain, false), "Enabled");
+        let named = plain.with_state_labels("Enabled", "Disabled");
+        assert_eq!(toggle_label(&named, true), "Enabled");
+        assert_eq!(toggle_label(&named, false), "Disabled");
+    }
+
+    #[test]
+    fn test_is_slider_covers_the_numeric_scales() {
+        assert!(is_slider(&Scale::Linear) && is_slider(&Scale::Logarithmic));
+        assert!(is_slider(&Scale::Integer));
+        assert!(!is_slider(&Scale::Toggle) && !is_slider(&Scale::Choice(Vec::new())));
     }
 }

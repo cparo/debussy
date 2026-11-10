@@ -51,14 +51,19 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
   [display](#effect-displays): ungrouped parameters in a row,
-  then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
-  a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
-  toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
-  stopped-only parameter shows "Stop to change" in place of its control while playing.
+  then one strip per group in a horizontal scroll whose scrollbar has its own row below the
+  strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
+  integer one a slider in whole steps, and a choice a pick list,
+  each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz
+  from 1000 up as kilohertz. A toggle is one button, lit while on and unlit while off, with no
+  separate label; it shows the name of its current state if the parameter names its states, else
+  the parameter's name; in a group's strip, its unlit background is the
+  pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
+  control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
-  strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; Mute above
-  Solo; a vertical gain slider between +12dB and -96dB labels, in whole-dB steps; and a vertical
+  strips in a horizontal scroll whose scrollbar has its own row below the strips. A strip shows,
+  8 pixels apart: its channel number; Mute above Solo; a vertical gain slider between +12dB and -96dB labels, in whole-dB steps; and a vertical
   pan slider between L (top) and R (bottom) labels. Each slider has a tic mark under its handle at
   0 dB or centre, and shows its value only as a hover tip. Soloing a channel unsolos the mixer's
   others in the same step. A keyboard focus, drawn as an accent ring, goes to a control when it is
