@@ -1,6 +1,6 @@
 //! Anti-aliased strokes: line segments drawn as coverage into a [`Mask`], which a
 //! [`Raster`](crate::raster::Raster) then paints in one colour
-//! (`docs/architecture/user-interface.md` "Equaliser displays").
+//! (`docs/architecture/effect-displays.md` "Equaliser displays").
 
 /// How much of each physical pixel is covered, from 0 to 1, drawn in logical coordinates.
 #[derive(Debug, Clone, PartialEq)]

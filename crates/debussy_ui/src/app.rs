@@ -29,7 +29,7 @@ use crate::theme::Tone;
 use crate::transport::{
     DEFAULT_ZOOM, MAX_SAMPLES_PER_COLUMN, MAX_ZOOM, level_below, samples_per_column, zoomed_start,
 };
-use crate::waveform::{Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, lanes};
+use crate::waveform::{Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, channels, lanes};
 
 /// The track pane's share of the window's width at launch.
 const DEFAULT_SPLIT: f32 = 0.6;
@@ -309,6 +309,9 @@ pub struct App {
     pub(crate) lanes: Vec<(TrackId, Vec<Lane>)>,
     /// Changes whenever the lanes' contents or the tone change.
     pub(crate) generation: u64,
+    /// Whether the lanes were left out of date while a node dialog covered them, to be
+    /// recomputed when it closes.
+    lanes_stale: bool,
     pub(crate) display: Display,
     /// Whether the bars and beats grid is drawn over the lanes; not saved.
     pub(crate) grid: bool,
@@ -400,6 +403,7 @@ impl App {
             following: false,
             return_point: 0,
             lanes: Vec::new(),
+            lanes_stale: false,
             generation: 0,
             display: Display::default(),
             grid: false,
@@ -642,6 +646,9 @@ impl App {
     /// (`docs/architecture/project.md` "Saving").
     pub fn update(&mut self, message: Message) {
         self.handle(message);
+        if self.lanes_stale && !self.node_dialog_open() {
+            self.refresh_lanes();
+        }
         // Any change of tempo, by an edit, undo or a restored version, reaches the click.
         self.sync_click();
         self.autosave();
@@ -1568,8 +1575,15 @@ impl App {
         }
     }
 
-    /// Recomputes every track's lanes for the visible stretch.
+    /// Recomputes every track's lanes for the visible stretch. While a node dialog covers them
+    /// and the tracks and their channels are unchanged, it only marks them out of date, to be
+    /// recomputed when the dialog closes (`docs/architecture/user-interface.md` "Layout").
     pub(crate) fn refresh_lanes(&mut self) {
+        if self.node_dialog_open() && self.lanes_fit_tracks() {
+            self.lanes_stale = true;
+            return;
+        }
+        self.lanes_stale = false;
         let (start, spc, display) = (self.start, self.samples_per_column(), self.display);
         let services = self.services.as_mut();
         self.lanes = self
@@ -1580,6 +1594,22 @@ impl App {
             .map(|track| (track.id, lanes(track, start, spc, display, services)))
             .collect();
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Whether a node's dialog is open over the track pane.
+    pub(crate) fn node_dialog_open(&self) -> bool {
+        matches!(self.selection, Some(Selection::Node(id)) if self.session.state().node(id).is_some())
+    }
+
+    /// Whether the lanes are one per channel of each track, in track order, as the patch
+    /// board's ports need.
+    fn lanes_fit_tracks(&self) -> bool {
+        let tracks = &self.session.state().tracks;
+        tracks.len() == self.lanes.len()
+            && tracks
+                .iter()
+                .zip(&self.lanes)
+                .all(|(track, (id, lanes))| track.id == *id && lanes.len() == channels(track))
     }
 
     /// Where the playhead falls in the visible stretch, as a fraction of its width.

@@ -718,6 +718,26 @@ fn test_fine_zooms_carry_the_trace_with_clip_gain() -> Result<(), Box<dyn Error>
 }
 
 #[test]
+fn test_lanes_wait_behind_a_node_dialog_until_it_closes() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, mixer) = app()?;
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    // Zoomed to the trace with the dialog open: the lane is not recomputed, nor audio read.
+    for _ in 0..9 {
+        app.update(Message::ZoomIn);
+    }
+    assert!(app.lanes()[0].1[0].trace.is_empty());
+    assert!(calls.borrow().samples.is_empty());
+    // Closing the dialog brings the lanes up to date.
+    app.update(Message::Select(None));
+    assert!(!app.lanes()[0].1[0].trace.is_empty());
+    // A new track gets its lanes at once even behind a dialog, for the patch board's ports.
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    app.update(Message::AddTrack(Layout::Stereo));
+    assert_eq!(app.lane_centres()[1].1.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn test_seek_out_of_view_brings_it_into_view() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let far = app.view_span() * 10;

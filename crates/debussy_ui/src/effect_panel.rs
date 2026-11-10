@@ -19,10 +19,9 @@ pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 const CONTROL_WIDTH: f32 = 104.0;
 
 impl App {
-    /// The display and controls of effect node `id` of kind `kind`, `width` logical pixels
-    /// wide; empty for a kind this build does not know. The display comes first; then the
+    /// The display and controls of effect node `id` of kind `kind`; empty for a kind this build does not know. The display comes first; then the
     /// ungrouped parameters, in a row; then one strip per group, scrolling horizontally.
-    pub(crate) fn effect_panel(&self, id: NodeId, kind: &str, width: f32) -> Element<'_, Message> {
+    pub(crate) fn effect_panel(&self, id: NodeId, kind: &str) -> Element<'_, Message> {
         let Some(infos) = self.effect_parameters(kind) else {
             return Space::new().into();
         };
@@ -33,10 +32,9 @@ impl App {
         let display = display_area(
             kind,
             infos,
-            &values,
+            values,
             self.tone(),
             self.sample_rate(),
-            width,
             self.scale_factor(),
         );
         let ungrouped = row(infos
