@@ -1,5 +1,7 @@
 # Debussy - A Digital Audio Workstation
 
+![Screenshot](docs/images/readme-screenshot.png)
+
 ## Important Documentation
 
 * [Instructions for Agents](CLAUDE.md)
