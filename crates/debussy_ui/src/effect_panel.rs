@@ -92,7 +92,7 @@ impl App {
         if !frozen && info.scale == Scale::Toggle {
             let on = value >= 0.5;
             return container(toggle_button(
-                label(info),
+                toggle_label(info, on),
                 set(if on { 0.0 } else { 1.0 }),
                 on,
                 !info.group.is_empty(),
@@ -147,6 +147,16 @@ impl App {
             .spacing(4)
             .width(Length::Fixed(CONTROL_WIDTH))
             .into()
+    }
+}
+
+/// The text on toggle `info`'s button while it is `on`: its state's label if it names its
+/// states, else its [`label`].
+fn toggle_label(info: &ParameterInfo, on: bool) -> String {
+    match &info.state_labels {
+        Some((on_label, _)) if on => on_label.clone(),
+        Some((_, off_label)) => off_label.clone(),
+        None => label(info),
     }
 }
 
@@ -219,6 +229,18 @@ mod tests {
         assert_eq!(format_value(&db, -3.25), "-3.25 dB");
         let order = ParameterInfo::new("order", 1.0, 8.0, 2.0).with_scale(Scale::Integer);
         assert_eq!(format_value(&order, 4.0), "4");
+    }
+
+    #[test]
+    fn test_toggle_label_names_each_state_or_falls_back_to_the_name() {
+        let plain = ParameterInfo::new("band 1 enabled", 0.0, 1.0, 0.0)
+            .with_scale(Scale::Toggle)
+            .with_group("band 1");
+        assert_eq!(toggle_label(&plain, true), "Enabled");
+        assert_eq!(toggle_label(&plain, false), "Enabled");
+        let named = plain.with_state_labels("Enabled", "Disabled");
+        assert_eq!(toggle_label(&named, true), "Enabled");
+        assert_eq!(toggle_label(&named, false), "Disabled");
     }
 
     #[test]

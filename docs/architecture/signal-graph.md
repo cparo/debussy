@@ -79,7 +79,8 @@ third-party plugin wrapper would implement. Third-party plugins are not hosted (
 Each parameter declares, besides its name, range and default, a unit (possibly empty), a scale
 (linear, logarithmic, integer, choice of named options by index, or toggle) and a group (possibly
 empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
-stopped-only: it changes only while playback is stopped or paused, and no automation drives it. The
+stopped-only: it changes only while playback is stopped or paused, and no automation drives it. A
+toggle may name its on and off states, for display only. The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).

@@ -162,7 +162,9 @@ impl Band {
         let types = BandType::NAMES.map(String::from).to_vec();
         Ok(Band {
             enabled: Parameter::new(
-                info(BandControl::Enabled, 0.0, 1.0, 0.0).with_scale(Scale::Toggle),
+                info(BandControl::Enabled, 0.0, 1.0, 0.0)
+                    .with_scale(Scale::Toggle)
+                    .with_state_labels("Enabled", "Disabled"),
             )?,
             kind: Parameter::new(
                 info(BandControl::Type, 0.0, 3.0, 0.0).with_scale(Scale::Choice(types)),
@@ -405,6 +407,10 @@ mod tests {
         );
         assert!(infos.iter().all(|i| !i.stopped_only));
         assert_eq!(infos[0].scale, Scale::Toggle);
+        assert_eq!(
+            infos[0].state_labels,
+            Some(("Enabled".to_owned(), "Disabled".to_owned()))
+        );
         assert_eq!(infos[0].default, 0.0);
         assert!(matches!(&infos[1].scale, Scale::Choice(o) if o.len() == 4 && o[3] == "notch"));
         let defaults: Vec<f32> = infos.iter().skip(2).step_by(5).map(|i| i.default).collect();

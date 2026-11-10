@@ -19,6 +19,9 @@ the same way, so this is the pattern for them, not a one-off fix.
   as a tooltip while the slider is hovered, which includes while it is dragged.
 - A toggle is a single button labelled with the parameter's name (such as "Enabled"). It is lit
   while on and unlit while off, and clicking it flips the value. It has no separate name label.
+- A toggle may name its states (`ParameterInfo::with_state_labels`, such as "Enabled" and
+  "Disabled"). Its button then shows the current state's name; without names it shows the
+  parameter's name in both states. The names are display metadata and are not saved.
 - A choice stays a labelled pick list, whatever its number of options.
 - These are rules of the generic control builder (`effect_panel.rs`), so they apply to every
   built-in effect, not only the equaliser.

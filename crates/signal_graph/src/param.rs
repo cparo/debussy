@@ -55,6 +55,10 @@ pub struct ParameterInfo {
     /// change while playing and no automation may drive it, so a node may apply a change at once,
     /// without a ramp.
     pub stopped_only: bool,
+    /// For a [`Scale::Toggle`], the names of its states as `(on, off)`, such as
+    /// `("Enabled", "Disabled")`, shown in place of the parameter's name; `None` to show the name
+    /// in both states. Display only: not saved, and ignored for other scales.
+    pub state_labels: Option<(String, String)>,
 }
 
 impl ParameterInfo {
@@ -70,6 +74,7 @@ impl ParameterInfo {
             scale: Scale::Linear,
             group: String::new(),
             stopped_only: false,
+            state_labels: None,
         }
     }
 
@@ -95,6 +100,16 @@ impl ParameterInfo {
     #[must_use]
     pub fn with_scale(self, scale: Scale) -> Self {
         ParameterInfo { scale, ..self }
+    }
+
+    /// This, with its toggle states named `on` and `off` (see
+    /// [`state_labels`](Self::state_labels)).
+    #[must_use]
+    pub fn with_state_labels(self, on: impl Into<String>, off: impl Into<String>) -> Self {
+        ParameterInfo {
+            state_labels: Some((on.into(), off.into())),
+            ..self
+        }
     }
 
     /// This, in group `group`.
@@ -354,6 +369,14 @@ mod tests {
         assert_eq!(info.scale, Scale::Linear);
         assert!(!info.stopped_only);
         assert!(info.clone().stopped_only().stopped_only);
+        assert_eq!(info.state_labels, None);
+        let toggle = ParameterInfo::new("enabled", 0.0, 1.0, 0.0)
+            .with_scale(Scale::Toggle)
+            .with_state_labels("Enabled", "Disabled");
+        assert_eq!(
+            toggle.state_labels,
+            Some(("Enabled".to_owned(), "Disabled".to_owned()))
+        );
         assert_eq!(info.constrain(30.0), Some(24.0));
         assert_eq!(info.constrain(f32::NAN), None);
     }
