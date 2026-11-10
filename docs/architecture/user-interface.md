@@ -45,14 +45,20 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
   vertically together under one scrollbar at the window's right edge.
 - **Node dialogs** cover the whole track pane for the selected node: a header with its name and a
-  delete button, then a mixer's channel strips (gain, pan, mute, solo) with add and remove channel,
-  a feedback delay's time in seconds, or a built-in effect's controls; a bus or an effect this
+  delete button, then a mixer's controls, a feedback delay's time in seconds, or a built-in effect's controls; a bus or an effect this
   build does not know has only the header. An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
   a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
   toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
   stopped-only parameter shows "Stop to change" in place of its control while playing.
+- **Mixer dialogs** have a "Channels" field, clamped on commit from one past the highest connected
+  input (at least 1) to 128 and applied as one step, above narrow strips in a horizontal scroll.
+  A strip shows its channel number; a vertical gain slider between +12dB and -96dB labels; a
+  vertical pan slider between L (top) and R (bottom) labels; then mute above solo. Each slider has
+  a tic mark under its handle at 0 dB or centre, and shows its value only as a hover tip. Releasing
+  the gain slider rounds it to the nearest whole dB
+  ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform
   summaries"), or spectrograms: one spectrum per two waveform columns, computed on demand
@@ -104,7 +110,9 @@ The patch board draws the routing; it pans horizontally with its own scrollbar w
 its pane, is never narrower than its pane, and does not zoom.
 
 - The gutter is drawn in the board's colour and holds one port per lane, centred vertically on
-  the lane with its left edge 4 pixels from the divider.
+  the lane with its left edge 4 pixels from the divider. A port's hover tip names its track, with
+  " L" or " R" for one side of a stereo port
+  ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
 - Every wire is mono and in the audio colour ("Layout"). A stereo port is drawn as two circles, left above right; a
   connection that names a side joins that circle, and a whole-port connection is drawn as a wire
   per side.

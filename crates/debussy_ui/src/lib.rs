@@ -34,6 +34,7 @@ mod effect_panel;
 mod grid;
 mod icon;
 mod menu;
+mod mixer_strip;
 mod patch_board;
 mod range_selection;
 mod raster;

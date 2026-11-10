@@ -1035,7 +1035,7 @@ fn test_wires_connect_free_inputs_and_delete_as_steps() -> Result<(), Box<dyn Er
     app.update(Message::StartWire(out));
     app.update(Message::FinishWire(Some(input(mixer, 0))));
     assert!(!app.session().can_undo());
-    app.update(Message::AddMixerChannel(mixer));
+    set_channels(&mut app, mixer, "2");
     app.update(Message::StartWire(out));
     app.update(Message::FinishWire(Some(input(mixer, 1))));
     let state = app.session().state();
@@ -1092,7 +1092,7 @@ fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error
     app.update(Message::Drop);
     assert_eq!(app.session().state().output_y, Some(200.0));
     // Delete is ignored while typing.
-    app.update(Message::DelayText(bus, "1".into()));
+    app.update(Message::NodeText(bus, "1".into()));
     app.update(Message::DeleteSelection);
     assert!(app.session().state().node(bus).is_some());
     app.update(Message::Select(Some(debussy_ui::Selection::Node(bus))));
@@ -1113,29 +1113,93 @@ fn test_node_dialogs_edit_mixers_and_delays() -> Result<(), Box<dyn Error>> {
     app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
     let _ = app.view();
     // Channel 1 holds the vocal, so it cannot be removed; a new channel 2 can.
-    assert_eq!(app.removable_channel(mixer), None);
-    app.update(Message::AddMixerChannel(mixer));
-    assert_eq!(app.removable_channel(mixer), Some(1));
-    app.update(Message::RemoveMixerChannel(mixer));
-    assert!(matches!(
-        app.session().state().node(mixer).map(|n| &n.kind),
-        Some(NodeKind::Mixer { channels: 1, .. })
-    ));
+    assert_eq!(app.channel_range(mixer), Some(1..=128));
+    set_channels(&mut app, mixer, "2");
+    assert_eq!(channels(&app, mixer), Some(2));
+    set_channels(&mut app, mixer, "1");
+    assert_eq!(channels(&app, mixer), Some(1));
     app.update(Message::AddNode(debussy_ui::NewNode::FeedbackDelay));
     let delay = app.session().state().nodes.last().ok_or("no node")?.id;
     let _ = app.view();
-    app.update(Message::DelayText(delay, "0.5".into()));
-    app.update(Message::CommitDelay);
+    app.update(Message::NodeText(delay, "0.5".into()));
+    app.update(Message::CommitNodeText);
     assert!(matches!(
         app.session().state().node(delay).map(|n| &n.kind),
         Some(NodeKind::FeedbackDelay { seconds, .. }) if *seconds == 0.5
     ));
-    app.update(Message::DelayText(delay, "soon".into()));
-    app.update(Message::CommitDelay);
+    app.update(Message::NodeText(delay, "soon".into()));
+    app.update(Message::CommitNodeText);
     assert!(app.status().is_some());
     app.update(Message::DeleteNode(delay));
     assert!(app.session().state().node(delay).is_none());
     assert_eq!(app.selection(), None);
+    Ok(())
+}
+
+/// Types `text` into mixer `mixer`'s "Channels" field and commits it.
+fn set_channels(app: &mut App, mixer: NodeId, text: &str) {
+    app.update(Message::NodeText(mixer, text.into()));
+    app.update(Message::CommitNodeText);
+}
+
+/// Mixer `mixer`'s channel count, if it is a mixer.
+fn channels(app: &App, mixer: NodeId) -> Option<usize> {
+    match app.session().state().node(mixer).map(|n| &n.kind) {
+        Some(NodeKind::Mixer { channels, .. }) => Some(*channels),
+        _ => None,
+    }
+}
+
+#[test]
+fn test_commit_node_text_clamps_mixer_channels() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
+    let _ = app.view();
+    // Above the maximum: clamped to 128, one undo step.
+    set_channels(&mut app, mixer, "500");
+    assert_eq!(channels(&app, mixer), Some(128));
+    app.update(Message::Undo);
+    assert_eq!(channels(&app, mixer), Some(1));
+    assert!(!app.session().can_undo(), "the change was one step");
+    // Wire the vocal to channel 4 too; a count below 4 is then clamped to 4.
+    set_channels(&mut app, mixer, "4");
+    let vocal = app.session().state().tracks[0].id;
+    app.update(Message::StartWire(debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Track(vocal),
+        output: true,
+        port: 0,
+        side: None,
+    }));
+    app.update(Message::FinishWire(Some(input(mixer, 3))));
+    assert_eq!(app.channel_range(mixer), Some(4..=128));
+    set_channels(&mut app, mixer, "0");
+    assert_eq!(channels(&app, mixer), Some(4));
+    // Not a number: a notice, and nothing changes.
+    set_channels(&mut app, mixer, "lots");
+    assert!(
+        app.status()
+            .is_some_and(|s| s.contains("not a channel count"))
+    );
+    assert_eq!(channels(&app, mixer), Some(4));
+    Ok(())
+}
+
+#[test]
+fn test_release_snapped_rounds_gain() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    for (slid, kept) in [(-3.4, -3.0), (-96.0, -96.0), (11.6, 12.0)] {
+        app.update(Message::Slide {
+            node: mixer,
+            name: GAIN.to_owned(),
+            value: slid,
+        });
+        app.update(Message::ReleaseSnapped { step: 1.0 });
+        assert_eq!(app.parameter_value(mixer, GAIN), kept);
+        assert_eq!(
+            app.bridge().parameter(mixer, GAIN).map(|p| p.get()),
+            Some(kept)
+        );
+    }
     Ok(())
 }
 

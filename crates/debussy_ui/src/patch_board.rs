@@ -26,7 +26,7 @@ const COLUMN_GAP: f32 = 96.0;
 /// The space left of the first column and above the first node.
 const MARGIN: f32 = 64.0;
 /// A port circle's radius.
-const PIN_RADIUS: f32 = 10.0;
+pub(crate) const PIN_RADIUS: f32 = 10.0;
 /// How far a gutter pin's outer edge, its stroke included, sits from the divider.
 const GUTTER_PIN_INSET: f32 = 4.0;
 /// The L and R output circles' radius.
@@ -649,7 +649,7 @@ pub struct GutterView(pub Vec<(Pin, f32)>);
 
 /// The x of a gutter pin's centre: its outer edge, stroke included, sits [`GUTTER_PIN_INSET`] from
 /// the divider.
-fn gutter_pin_x() -> f32 {
+pub(crate) fn gutter_pin_x() -> f32 {
     GUTTER_PIN_INSET + WIRE_WIDTH / 2.0 + PIN_RADIUS
 }
 

@@ -6,6 +6,7 @@
 //! the running graph's parameter; releasing it records one undo step.
 
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
 
 use audio_buffers::Layout;
 use audio_engine::Engine;
@@ -215,14 +216,11 @@ pub enum Message {
     AddNode(NewNode),
     /// Delete a node and its connections.
     DeleteNode(NodeId),
-    /// Add a channel to a mixer.
-    AddMixerChannel(NodeId),
-    /// Remove a mixer's last channel, if nothing is connected to it.
-    RemoveMixerChannel(NodeId),
-    /// The feedback delay time being typed, in seconds.
-    DelayText(NodeId, String),
-    /// Record the typed delay time as one step.
-    CommitDelay,
+    /// The text being typed in a node dialog's field: a feedback delay's time in seconds, or a
+    /// mixer's channel count.
+    NodeText(NodeId, String),
+    /// Record the typed field as one step.
+    CommitNodeText,
     /// Export the mix, through a file dialog; the mono mix if `true`.
     Export(bool),
     /// Use this audio device for input and output.
@@ -240,6 +238,12 @@ pub enum Message {
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
+    /// As [`Message::Release`], but the value is first rounded to the nearest multiple of
+    /// `step` and kept in the parameter's range.
+    ReleaseSnapped {
+        /// The step to round to.
+        step: f32,
+    },
     /// A button or choice set a parameter: applied and recorded as one undo step.
     SetParameter {
         /// The mixer or effect node.
@@ -308,8 +312,8 @@ pub struct App {
     pub(crate) wiring: Option<Pin>,
     /// A node or the outputs being dragged.
     pub(crate) moving: Option<Moving>,
-    /// A feedback delay's time being typed.
-    pub(crate) delay_text: Option<(NodeId, String)>,
+    /// A node dialog's field being typed: a feedback delay's time, or a mixer's channel count.
+    pub(crate) node_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
     pub(crate) loaded: Option<Vec<Track>>,
     pub(crate) live: Option<Live>,
@@ -384,7 +388,7 @@ impl App {
             clipboard: None,
             wiring: None,
             moving: None,
-            delay_text: None,
+            node_text: None,
             loaded: None,
             live: None,
             devices: (Vec::new(), None),
@@ -574,19 +578,22 @@ impl App {
             .filter(|&id| self.session.state().track(id).is_some()))
     }
 
-    /// The number of channels `node` would keep after removing its last one, if it is a mixer
-    /// of more than one channel with nothing connected to its last.
-    pub fn removable_channel(&self, node: NodeId) -> Option<usize> {
+    /// The channel counts mixer `node` may be given: from one past its highest connected input
+    /// (at least 1) to [`audio_effects::MAX_CHANNELS`]; `None` if it is not a mixer.
+    pub fn channel_range(&self, node: NodeId) -> Option<RangeInclusive<usize>> {
         let state = self.session.state();
-        let NodeKind::Mixer { channels, .. } = state.node(node)?.kind else {
+        let NodeKind::Mixer { .. } = state.node(node)?.kind else {
             return None;
         };
-        let last = channels.checked_sub(1).filter(|&n| n >= 1)?;
-        let used = state
+        let min = state
             .connections
             .iter()
-            .any(|c| c.to == Endpoint::Node(node) && c.input == last);
-        (!used).then_some(last)
+            .filter(|c| c.to == Endpoint::Node(node))
+            .map(|c| c.input + 1)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        Some(min..=audio_effects::MAX_CHANNELS)
     }
 
     /// The open menu, if any.
@@ -648,7 +655,7 @@ impl App {
                 | Message::RefreshDevices
                 | Message::DragNode(..)
                 | Message::DragOutput(_)
-                | Message::DelayText(..)
+                | Message::NodeText(..)
                 | Message::LaneDrag { .. }
                 | Message::LaneRelease
                 | Message::TempoText(_)
@@ -874,8 +881,8 @@ impl App {
                 self.wiring = None;
             }
             Message::Select(selection) => {
-                // A click on the board leaves any delay time being typed.
-                self.delay_text = None;
+                // A click on the board leaves any field being typed.
+                self.node_text = None;
                 self.selection = selection;
             }
             Message::DragNode(node, position) => {
@@ -896,7 +903,7 @@ impl App {
             }
             Message::DeleteSelection => {
                 // Delete and Backspace edit the text being typed instead.
-                if self.renaming.is_some() || self.delay_text.is_some() {
+                if self.renaming.is_some() || self.node_text.is_some() {
                     return;
                 }
                 let result = match self.selection.take() {
@@ -926,32 +933,10 @@ impl App {
                     self.selection = None;
                 }
             }
-            Message::AddMixerChannel(node) => {
-                let result = self
-                    .bridge
-                    .edit(&mut self.session, |s| s.add_mixer_channels(node, 1));
-                self.report(result.map_err(|e| e.to_string()));
-            }
-            Message::RemoveMixerChannel(node) => {
-                if let Some(channels) = self.removable_channel(node) {
-                    let result = self.bridge.edit(&mut self.session, |s| {
-                        s.apply(Edit::SetMixerChannels { node, channels })
-                    });
-                    self.report(result.map_err(|e| e.to_string()));
-                }
-            }
-            Message::DelayText(node, text) => self.delay_text = Some((node, text)),
-            Message::CommitDelay => {
-                if let Some((node, text)) = self.delay_text.take() {
-                    match text.trim().parse::<f64>() {
-                        Ok(seconds) => {
-                            let result = self.bridge.edit(&mut self.session, |s| {
-                                s.apply(Edit::SetDelay { node, seconds })
-                            });
-                            self.report(result.map_err(|e| e.to_string()));
-                        }
-                        Err(_) => self.status = Some(format!("{text:?} is not a time in seconds")),
-                    }
+            Message::NodeText(node, text) => self.node_text = Some((node, text)),
+            Message::CommitNodeText => {
+                if let Some((node, text)) = self.node_text.take() {
+                    self.commit_node_text(node, &text);
                 }
             }
             Message::Export(mono) => match self.services.export(self.session.state(), mono) {
@@ -993,6 +978,23 @@ impl App {
                     self.report(result.map_err(|e| e.to_string()));
                 }
             }
+            Message::ReleaseSnapped { step } => {
+                if let Some(live) = self.live.take() {
+                    let mut value = live.value;
+                    if step > 0.0 {
+                        value = (value / step).round() * step;
+                    }
+                    if let Some(parameter) = self.bridge.parameter(live.node, &live.name) {
+                        let info = parameter.info();
+                        value = value.clamp(info.min, info.max);
+                        parameter.set(value);
+                    }
+                    let result = self.bridge.edit(&mut self.session, |s| {
+                        s.set_parameter(live.node, &live.name, Some(value))
+                    });
+                    self.report(result.map_err(|e| e.to_string()));
+                }
+            }
             Message::SetParameter { node, name, value } => {
                 let result = self.bridge.edit(&mut self.session, |s| {
                     s.set_parameter(node, &name, Some(value))
@@ -1000,6 +1002,41 @@ impl App {
                 self.report(result.map_err(|e| e.to_string()));
             }
         }
+    }
+
+    /// Records `text`, typed in node `node`'s dialog field, as one step: a feedback delay's time,
+    /// or a mixer's channel count clamped into [`App::channel_range`].
+    fn commit_node_text(&mut self, node: NodeId, text: &str) {
+        let kind = self.session.state().node(node).map(|n| &n.kind);
+        let edit = match kind {
+            Some(NodeKind::FeedbackDelay { .. }) => match text.trim().parse::<f64>() {
+                Ok(seconds) => Edit::SetDelay { node, seconds },
+                Err(_) => {
+                    self.status = Some(format!("{text:?} is not a time in seconds"));
+                    return;
+                }
+            },
+            Some(&NodeKind::Mixer { channels, .. }) => {
+                let Ok(typed) = text.trim().parse::<usize>() else {
+                    self.status = Some(format!("{text:?} is not a channel count"));
+                    return;
+                };
+                let Some(range) = self.channel_range(node) else {
+                    return;
+                };
+                let wanted = typed.clamp(*range.start(), *range.end());
+                if wanted == channels {
+                    return;
+                }
+                Edit::SetMixerChannels {
+                    node,
+                    channels: wanted,
+                }
+            }
+            _ => return,
+        };
+        let result = self.bridge.edit(&mut self.session, |s| s.apply(edit));
+        self.report(result.map_err(|e| e.to_string()));
     }
 
     /// The parameters of built-in effect kind `kind`, or `None` for a kind this build does not
@@ -1181,7 +1218,7 @@ impl App {
 
     fn delete_range(&mut self) {
         // Delete and Backspace edit the text being typed instead.
-        if self.renaming.is_some() || self.delay_text.is_some() {
+        if self.renaming.is_some() || self.node_text.is_some() {
             return;
         }
         let Some((tracks, range)) = self.selected_range() else {
