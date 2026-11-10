@@ -12,6 +12,7 @@ use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, 
 use project_model::NodeId;
 
 use crate::app::{App, Message};
+use crate::effect_panel::STRIP_SCROLLBAR_GAP;
 use crate::focus_target::focus_target;
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
@@ -258,8 +259,10 @@ impl App {
         let strips = row((0..channels).map(|ch| self.strip(id, ch))).spacing(4);
         column![
             field,
+            // Embedded, so the scrollbar takes its own row below the strips instead of
+            // covering their lowest controls.
             scrollable(strips).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
+                scrollable::Scrollbar::default().spacing(STRIP_SCROLLBAR_GAP),
             )),
         ]
         .spacing(10)

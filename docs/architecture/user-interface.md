@@ -62,8 +62,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
-  strips in a horizontal scroll. A strip shows, 8 pixels apart: its channel number; Mute above
-  Solo; a vertical gain slider between +12dB and -96dB labels, in whole-dB steps; and a vertical
+  strips in a horizontal scroll whose scrollbar has its own row below the strips. A strip shows,
+  8 pixels apart: its channel number; Mute above Solo; a vertical gain slider between +12dB and -96dB labels, in whole-dB steps; and a vertical
   pan slider between L (top) and R (bottom) labels. Each slider has a tic mark under its handle at
   0 dB or centre, and shows its value only as a hover tip. Soloing a channel unsolos the mixer's
   others in the same step. A keyboard focus, drawn as an accent ring, goes to a control when it is

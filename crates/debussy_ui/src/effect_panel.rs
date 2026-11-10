@@ -11,8 +11,9 @@ use crate::effect_display::display_area;
 use crate::theme;
 use crate::view::toggle_button;
 
-/// The gap between the group strips and their horizontal scrollbar, in logical pixels.
-const STRIP_SCROLLBAR_GAP: f32 = 4.0;
+/// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
+/// horizontal scrollbar, in logical pixels.
+pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
