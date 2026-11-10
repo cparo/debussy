@@ -719,7 +719,7 @@ impl App {
             .height(Length::Fixed(size.height))
             .style(theme::panel);
         // A press on the dialog's background, not on a control, takes the keyboard focus away.
-        let dialog = mouse_area(dialog).on_press(Message::SetMixerFocus(None));
+        let dialog = mouse_area(dialog).on_press(Message::SetFocus(None));
         if self.confirming_delete != Some(id) {
             return Some(dialog.into());
         }
