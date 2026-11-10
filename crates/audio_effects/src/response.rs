@@ -12,6 +12,9 @@ const FILTER_PARAMETERS: usize = 2;
 /// The parameters of each parametric band: enabled, type, frequency, gain and Q.
 const BAND_PARAMETERS: usize = 5;
 
+/// The parameters of each of a parametric equaliser's pass stages: enabled, cutoff and order.
+const PASS_PARAMETERS: usize = 3;
+
 /// One stage of an effect's filter chain.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Stage {
@@ -84,6 +87,12 @@ pub fn frequency_response(
 /// The stages of a Butterworth filter at cutoff and order `values`.
 fn filter_stages(response: Response, values: &[f32], sample_rate: f32) -> Option<Vec<Stage>> {
     let &[cutoff, order] = <&[f32; FILTER_PARAMETERS]>::try_from(values).ok()?;
+    Some(butterworth_stages(response, cutoff, order, sample_rate))
+}
+
+/// The stages of a Butterworth filter passing `response`'s side of `cutoff` (Hz), with an
+/// `order` parameter value.
+fn butterworth_stages(response: Response, cutoff: f32, order: f32, sample_rate: f32) -> Vec<Stage> {
     let order = filters::order_from_value(order);
     let (sections, one_pole) = filters::design(response, order, cutoff, sample_rate);
     let mut stages: Vec<Stage> = sections[..order / 2]
@@ -93,19 +102,31 @@ fn filter_stages(response: Response, values: &[f32], sample_rate: f32) -> Option
     if order % 2 == 1 {
         stages.push(Stage::OnePole(one_pole));
     }
-    Some(stages)
+    stages
 }
 
-/// The stages of a parametric equaliser at `values`: one per enabled band.
+/// The stages of a parametric equaliser's pass stage at enabled, cutoff and order `values`: none
+/// when it is off.
+fn pass_stages(response: Response, values: &[f32], sample_rate: f32) -> Option<Vec<Stage>> {
+    let &[enabled, cutoff, order] = <&[f32; PASS_PARAMETERS]>::try_from(values).ok()?;
+    Some(if parametric::is_on(enabled) {
+        butterworth_stages(response, cutoff, order, sample_rate)
+    } else {
+        Vec::new()
+    })
+}
+
+/// The stages of a parametric equaliser at `values`: those of an enabled high-pass, one per
+/// enabled band, and those of an enabled low-pass.
 fn parametric_stages(values: &[f32], sample_rate: f32) -> Option<Vec<Stage>> {
-    if values.len() != BANDS * BAND_PARAMETERS {
+    if values.len() != 2 * PASS_PARAMETERS + BANDS * BAND_PARAMETERS {
         return None;
     }
-    let stages = values
-        .as_chunks::<BAND_PARAMETERS>()
-        .0
-        .iter()
-        .filter_map(|&[enabled, kind, frequency, gain, q]| {
+    let (high_pass, rest) = values.split_at(PASS_PARAMETERS);
+    let (bands, low_pass) = rest.split_at(BANDS * BAND_PARAMETERS);
+    let mut stages = pass_stages(Response::HighPass, high_pass, sample_rate)?;
+    stages.extend(bands.as_chunks::<BAND_PARAMETERS>().0.iter().filter_map(
+        |&[enabled, kind, frequency, gain, q]| {
             let band_type = parametric::wanted(enabled, kind)?;
             Some(Stage::Svf(band_type.design(
                 frequency,
@@ -113,8 +134,9 @@ fn parametric_stages(values: &[f32], sample_rate: f32) -> Option<Vec<Stage>> {
                 gain,
                 sample_rate,
             )))
-        })
-        .collect();
+        },
+    ));
+    stages.extend(pass_stages(Response::LowPass, low_pass, sample_rate)?);
     Some(stages)
 }
 
@@ -158,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_frequency_response_flat_when_every_band_is_off()
+    fn test_frequency_response_flat_when_every_band_and_stage_is_off()
     -> Result<(), Box<dyn std::error::Error>> {
         let response = frequency_response("parametric-eq", &defaults("parametric-eq")?, RATE)
             .ok_or("no response")?;
@@ -173,14 +195,14 @@ mod tests {
         let mut values = defaults("parametric-eq")?;
         // Bands 1 and 2 as bells at 1 kHz, +6 and +3 dB.
         for (band, gain) in [(0, 6.0), (1, 3.0)] {
-            let base = band * BAND_PARAMETERS;
+            let base = PASS_PARAMETERS + band * BAND_PARAMETERS;
             values[base..base + 4].copy_from_slice(&[1.0, 0.0, 1_000.0, gain]);
         }
         let response = frequency_response("parametric-eq", &values, RATE).ok_or("no response")?;
         let centre = response.magnitude_db(1_000.0).ok_or("above Nyquist")?;
         assert!((centre - 9.0).abs() < 1e-3, "{centre}");
         // A notch on band 3 drives the centre far down.
-        values[10..14].copy_from_slice(&[1.0, 3.0, 1_000.0, 0.0]);
+        values[13..17].copy_from_slice(&[1.0, 3.0, 1_000.0, 0.0]);
         let response = frequency_response("parametric-eq", &values, RATE).ok_or("no response")?;
         assert!(response.magnitude_db(1_000.0).is_some_and(|db| db < -60.0));
         let zeros: Vec<f32> = response.zeros().collect();
@@ -192,10 +214,38 @@ mod tests {
     }
 
     #[test]
+    fn test_frequency_response_includes_enabled_pass_stages()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut values = defaults("parametric-eq")?;
+        let low_pass = values.len() - PASS_PARAMETERS;
+        // The high-pass at 200 Hz, order 4.
+        values[..PASS_PARAMETERS].copy_from_slice(&[1.0, 200.0, 4.0]);
+        let response = frequency_response("parametric-eq", &values, RATE).ok_or("no response")?;
+        let at = response.magnitude_db(200.0).ok_or("above Nyquist")?;
+        assert!((at + 3.0103).abs() < 0.01, "{at}");
+        assert!(
+            response
+                .magnitude_db(5_000.0)
+                .is_some_and(|db| db.abs() < 0.01)
+        );
+        // A +6 dB bell on band 1 at 200 Hz adds to the high-pass's -3 dB.
+        values[PASS_PARAMETERS..PASS_PARAMETERS + 4].copy_from_slice(&[1.0, 0.0, 200.0, 6.0]);
+        let response = frequency_response("parametric-eq", &values, RATE).ok_or("no response")?;
+        let at = response.magnitude_db(200.0).ok_or("above Nyquist")?;
+        assert!((at - (6.0 - 3.0103)).abs() < 0.01, "{at}");
+        // The low-pass at its default 12 kHz, order 2.
+        values[low_pass] = 1.0;
+        let response = frequency_response("parametric-eq", &values, RATE).ok_or("no response")?;
+        let at = response.magnitude_db(12_000.0).ok_or("above Nyquist")?;
+        assert!((at + 3.0103).abs() < 0.01, "{at}");
+        Ok(())
+    }
+
+    #[test]
     fn test_frequency_response_refuses_unknown_kinds_and_lengths() {
         assert!(frequency_response("eq", &[1_000.0, 2.0], RATE).is_none());
         assert!(frequency_response("low-pass", &[1_000.0], RATE).is_none());
-        assert!(frequency_response("parametric-eq", &[0.0; 39], RATE).is_none());
+        assert!(frequency_response("parametric-eq", &[0.0; 25], RATE).is_none());
         let response = frequency_response("low-pass", &[1_000.0, 2.0], RATE);
         assert!(response.is_some_and(|r| r.magnitude_db(30_000.0).is_none()));
     }

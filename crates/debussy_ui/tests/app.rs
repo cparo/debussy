@@ -445,8 +445,9 @@ fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<d
     let node = state.node(eq).ok_or("no node")?;
     assert!(matches!(&node.kind, NodeKind::Effect { kind, .. } if kind == "parametric-eq"));
     // Unset values show the effect's defaults.
-    assert_eq!(app.parameter_value(eq, "band 1 frequency"), 50.0);
-    assert_eq!(app.parameter_value(eq, "band 8 frequency"), 10_000.0);
+    assert_eq!(app.parameter_value(eq, "band 1 frequency"), 100.0);
+    assert_eq!(app.parameter_value(eq, "band 4 frequency"), 8_000.0);
+    assert_eq!(app.parameter_value(eq, "high-pass cutoff"), 80.0);
     app.update(Message::Slide {
         node: eq,
         name: "band 2 gain".to_owned(),

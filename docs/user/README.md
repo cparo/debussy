@@ -93,10 +93,11 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   **Low-pass filter** removes what is above it (default 12 kHz), such as hiss. **Order** sets how
   steeply: each step adds 6 dB per octave, from 1 (gentle) to 8 (48 dB per octave). Order can only
   be changed while stopped or paused.
-- **Parametric EQ** has eight bands, each off until you turn it **On**. Pick its **Type**: **bell**
+- **Parametric EQ** has four bands, each off until you turn it **On**. Pick its **Type**: **bell**
   boosts or cuts around its **Frequency**, **low shelf** and **high shelf** everything below or
   above it, and **notch** removes a narrow range. **Gain** is the boost or cut in dB (±24), and
-  **Q** sets the width: higher is narrower.
+  **Q** sets the width: higher is narrower. An optional **High-pass** before the bands and
+  **Low-pass** after them work like the filters above; each is off until you turn it on.
 
 Effect settings are saved with the project.
 

@@ -43,13 +43,15 @@ impl Response {
 
 /// One channel's filter state: a two-pole section per pole pair and a one-pole for an odd order.
 #[derive(Debug, Clone, Copy, Default)]
-struct Cascade {
+struct Channel {
     sections: [Svf; SECTIONS],
     one_pole: OnePole,
 }
 
-/// The state that exists once the filter is prepared.
-struct Running {
+/// A prepared stereo Butterworth cascade: the ramped cutoff, the order, the coefficients for them
+/// and each channel's state. Shared by [`Butterworth`] and the parametric equaliser's high-pass
+/// and low-pass stages. Never allocates.
+pub(crate) struct Cascade {
     sample_rate: f32,
     /// The cutoff in log2(Hz), as ramped.
     cutoff: Ramp,
@@ -58,7 +60,25 @@ struct Running {
     sections: [SvfCoefficients; SECTIONS],
     one_pole: OnePoleCoefficients,
     /// Left and right.
-    channels: [Cascade; 2],
+    channels: [Channel; 2],
+}
+
+/// The `cutoff` parameter of a filter passing `response`'s side, named `name`: 20 Hz to 20 kHz,
+/// logarithmic, starting at the response's default.
+pub(crate) fn cutoff_info(name: impl Into<String>, response: Response) -> ParameterInfo {
+    ParameterInfo::new(name, MIN_CUTOFF, MAX_CUTOFF, response.default_cutoff())
+        .with_unit("Hz")
+        .with_scale(Scale::Logarithmic)
+}
+
+/// The `order` parameter of a filter, named `name`: 1 to [`MAX_ORDER`] poles, whole numbers,
+/// changeable only while stopped, starting at 2.
+pub(crate) fn order_info(name: impl Into<String>) -> ParameterInfo {
+    #[allow(clippy::cast_precision_loss)] // a small order
+    let max = MAX_ORDER as f32;
+    ParameterInfo::new(name, 1.0, max, DEFAULT_ORDER)
+        .with_scale(Scale::Integer)
+        .stopped_only()
 }
 
 /// A Butterworth filter: maximally flat, with no ripple, falling 6 dB per octave per pole beyond
@@ -71,7 +91,7 @@ pub struct Butterworth {
     response: Response,
     cutoff: Parameter,
     order: Parameter,
-    running: Option<Running>,
+    running: Option<Cascade>,
 }
 
 impl Butterworth {
@@ -82,28 +102,12 @@ impl Butterworth {
     /// [`Error::Parameter`] if a parameter cannot be made, which does not happen for the fixed
     /// ranges here.
     pub fn new(response: Response) -> Result<Self, Error> {
-        let cutoff = Parameter::new(
-            ParameterInfo::new("cutoff", MIN_CUTOFF, MAX_CUTOFF, response.default_cutoff())
-                .with_unit("Hz")
-                .with_scale(Scale::Logarithmic),
-        )?;
-        #[allow(clippy::cast_precision_loss)] // a small order
-        let order = Parameter::new(
-            ParameterInfo::new("order", 1.0, MAX_ORDER as f32, DEFAULT_ORDER)
-                .with_scale(Scale::Integer)
-                .stopped_only(),
-        )?;
         Ok(Butterworth {
             response,
-            cutoff,
-            order,
+            cutoff: Parameter::new(cutoff_info("cutoff", response))?,
+            order: Parameter::new(order_info("order"))?,
             running: None,
         })
-    }
-
-    /// The order the parameter holds, from 1 to [`MAX_ORDER`].
-    fn order(&self) -> usize {
-        order_from_value(self.order.get())
     }
 }
 
@@ -144,17 +148,59 @@ pub(crate) fn order_from_value(value: f32) -> usize {
     order.clamp(1, MAX_ORDER)
 }
 
-impl Running {
+impl Cascade {
+    /// A cascade passing `response`'s side of `cutoff` (Hz) with an `order` parameter value, at
+    /// rest, at `sample_rate`.
+    pub(crate) fn new(response: Response, cutoff: f32, order: f32, sample_rate: u32) -> Self {
+        // Sample rates are exact in `f32` well past any audio rate.
+        #[allow(clippy::cast_precision_loss)]
+        let mut cascade = Cascade {
+            sample_rate: sample_rate as f32,
+            cutoff: Ramp::new(cutoff.log2(), sample_rate),
+            order: order_from_value(order),
+            sections: [SvfCoefficients::identity(); SECTIONS],
+            one_pole: OnePoleCoefficients::low_pass_prewarped(1.0),
+            channels: [Channel::default(); 2],
+        };
+        cascade.design(response, cutoff);
+        cascade
+    }
+
+    /// Takes new parameter values, once per block: a cutoff (Hz) to ramp to and an `order`
+    /// parameter value. A changed order takes effect at once, from rest.
+    pub(crate) fn set(&mut self, response: Response, cutoff: f32, order: f32) {
+        let order = order_from_value(order);
+        if order != self.order {
+            self.order = order;
+            self.reset();
+            self.design(response, self.cutoff.current().exp2());
+        }
+        self.cutoff.set_target(cutoff.log2());
+    }
+
+    /// Steps the cutoff ramp one sample, redesigning while it moves.
+    pub(crate) fn tick(&mut self, response: Response) {
+        if self.cutoff.is_ramping() {
+            let cutoff = self.cutoff.next_value().exp2();
+            self.design(response, cutoff);
+        }
+    }
+
+    /// Clears both channels' state, so the cascade next runs from silence.
+    pub(crate) fn reset(&mut self) {
+        self.channels = [Channel::default(); 2];
+    }
+
     /// Sets the coefficients for `cutoff` (Hz) at the current order.
     fn design(&mut self, response: Response, cutoff: f32) {
         (self.sections, self.one_pole) = design(response, self.order, cutoff, self.sample_rate);
     }
 
     /// Filters one sample of channel `channel`.
-    fn process(&mut self, channel: usize, input: f32) -> f32 {
-        let cascade = &mut self.channels[channel];
+    pub(crate) fn process(&mut self, channel: usize, input: f32) -> f32 {
+        let state = &mut self.channels[channel];
         let mut sample = input;
-        for (svf, coefficients) in cascade
+        for (svf, coefficients) in state
             .sections
             .iter_mut()
             .zip(&self.sections)
@@ -163,7 +209,7 @@ impl Running {
             sample = svf.process(sample, coefficients);
         }
         if self.order % 2 == 1 {
-            sample = cascade.one_pole.process(sample, &self.one_pole);
+            sample = state.one_pole.process(sample, &self.one_pole);
         }
         sample
     }
@@ -183,24 +229,15 @@ impl Node for Butterworth {
     }
 
     fn prepare(&mut self, sample_rate: u32, _max_frames: usize) {
-        let cutoff = self.cutoff.get();
-        // Sample rates are exact in `f32` well past any audio rate.
-        #[allow(clippy::cast_precision_loss)]
-        let mut running = Running {
-            sample_rate: sample_rate as f32,
-            cutoff: Ramp::new(cutoff.log2(), sample_rate),
-            order: self.order(),
-            sections: [SvfCoefficients::identity(); SECTIONS],
-            one_pole: OnePoleCoefficients::low_pass_prewarped(1.0),
-            channels: [Cascade::default(); 2],
-        };
-        running.design(self.response, cutoff);
-        self.running = Some(running);
+        self.running = Some(Cascade::new(
+            self.response,
+            self.cutoff.get(),
+            self.order.get(),
+            sample_rate,
+        ));
     }
 
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
-        let order = self.order();
-        let cutoff = self.cutoff.get();
         let response = self.response;
         let Some(running) = self.running.as_mut() else {
             return;
@@ -208,19 +245,11 @@ impl Node for Butterworth {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        if order != running.order {
-            running.order = order;
-            running.channels = [Cascade::default(); 2];
-            running.design(response, running.cutoff.current().exp2());
-        }
-        running.cutoff.set_target(cutoff.log2());
+        running.set(response, self.cutoff.get(), self.order.get());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample = |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied();
         for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-            if running.cutoff.is_ramping() {
-                let cutoff = running.cutoff.next_value().exp2();
-                running.design(response, cutoff);
-            }
+            running.tick(response);
             *l = running.process(0, sample(in_left, i).unwrap_or(0.0));
             *r = running.process(1, sample(in_right, i).unwrap_or(0.0));
         }
