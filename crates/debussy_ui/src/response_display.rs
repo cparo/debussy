@@ -38,10 +38,11 @@ const FREQUENCY_LINES: [(f32, &str); 10] = [
 ];
 
 /// The plot's insets from the display's edges, in logical pixels: a gutter on the left for the
-/// gain labels and one below for the frequency labels.
+/// gain labels, one below for the frequency labels, and room above and to the right for the
+/// units, `dB` over the gain labels and `Hz` after the last frequency label.
 const LEFT: f32 = 36.0;
-const RIGHT: f32 = 10.0;
-const TOP: f32 = 10.0;
+const RIGHT: f32 = 34.0;
+const TOP: f32 = 22.0;
 const BOTTOM: f32 = 20.0;
 
 /// The labels' capital height, in logical pixels.
@@ -187,23 +188,29 @@ fn db_label(db: f32) -> String {
     }
 }
 
-/// The frequency labels centred under their lines (kept within the plot's width), and the gain labels right-aligned in the
-/// gutter, centred on theirs.
+/// The frequency labels centred under their lines (the first kept from the gutter), followed by
+/// `Hz`; and the gain labels right-aligned in the gutter, centred on theirs, under `dB`.
 fn draw_labels(mask: &mut Mask, plot: &Plot, face: &dyn Typeface) {
     let baseline = plot.bottom() + LABEL_GAP + LABEL_SIZE;
+    let mut end = plot.left;
     for (frequency, label) in FREQUENCY_LINES {
         let advance = face.advance(label, LABEL_SIZE);
-        let x = (plot.x(frequency) - advance / 2.0)
-            .min(plot.right() - advance)
-            .max(plot.left);
+        let x = (plot.x(frequency) - advance / 2.0).max(plot.left);
         face.draw(mask, label, x, baseline, LABEL_SIZE);
+        end = x + advance;
     }
+    let x = end + face.advance(" ", LABEL_SIZE);
+    face.draw(mask, "Hz", x, baseline, LABEL_SIZE);
+    let gain_right = plot.left - LABEL_GAP;
     for db in db_lines() {
         let label = db_label(db);
-        let x = plot.left - LABEL_GAP - face.advance(&label, LABEL_SIZE);
+        let x = gain_right - face.advance(&label, LABEL_SIZE);
         let baseline = plot.y(db) + LABEL_SIZE / 2.0;
         face.draw(mask, &label, x, baseline, LABEL_SIZE);
     }
+    let x = gain_right - face.advance("dB", LABEL_SIZE);
+    let baseline = plot.y(TOP_DB) - LABEL_SIZE / 2.0 - LABEL_GAP;
+    face.draw(mask, "dB", x, baseline, LABEL_SIZE);
 }
 
 /// The response as a polyline, sampled twice per physical column across the plot and at the
@@ -402,5 +409,26 @@ mod tests {
             "lowest {lowest}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_draw_labels_include_the_units() {
+        let font = StrokeFont;
+        let plot = plot();
+        let mut mask = Mask::new(600, 320, 1.0);
+        draw_labels(&mut mask, &plot, &font);
+        let inked = |x0: f32, x1: f32, y0: f32, y1: f32| {
+            mask.coverage().iter().enumerate().any(|(i, &c)| {
+                let (x, y) = ((i % 600) as f32 + 0.5, (i / 600) as f32 + 0.5);
+                c > 0.0 && x > x0 && x < x1 && y > y0 && y < y1
+            })
+        };
+        // `dB` above the `+12` label, in the gutter.
+        let label_top = plot.y(TOP_DB) - LABEL_SIZE / 2.0;
+        assert!(inked(0.0, LEFT, 0.0, label_top - 1.0));
+        // `Hz` right of the `20k` label, on the frequency labels' row, inside the display.
+        let hz = plot.right() + font.advance("20k", LABEL_SIZE) / 2.0 + 1.0;
+        assert!(inked(hz, 600.0, plot.bottom(), 320.0));
+        assert!(!inked(598.0, 600.0, 0.0, 320.0));
     }
 }
