@@ -4,7 +4,7 @@
 - **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-10
 - **Issue:** —
-- **Architecture:** [Equaliser displays](../architecture/user-interface.md#equaliser-displays)
+- **Architecture:** [Equaliser displays](../architecture/effect-displays.md#equaliser-displays)
 
 ## Context
 

@@ -50,7 +50,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   A "Delete" button at the bottom right asks first: a confirmation with Cancel, the default
   (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
-  [display](#effect-displays): ungrouped parameters in a row,
+  [display](effect-displays.md#effect-displays): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll whose scrollbar has its own row below the
   strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
   integer one a slider in whole steps, and a choice a pick list,
@@ -81,6 +81,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   Each lane is rasterised at the window's scale factor, blurred with a Gaussian of
   σ = 0.5 physical pixel, and drawn as an image; the playhead cursor is drawn sharp over it
   ([ADR-0068](../adrs/0068-lanes-are-rasterised-in-memory-and-blurred-with-a.md)).
+  Lanes and effect displays are drawn as horizontal strips, each under the renderer's 2 MiB
+  synchronous upload limit. While a node dialog is open, the lanes under it are not drawn and are
+  recomputed only when the tracks or their channels change, and once more when it closes
+  ([ADR-0095](../adrs/0095-rasters-reach-the-gpu-in-strips-under-the-renderer.md)).
   With the grid toggle on (session state, off at launch), bar and beat lines of the project's
   grid (see `docs/architecture/project.md` "Musical time") are drawn sharp over the lanes too,
   one physical pixel wide, bars stronger than beats. Beat lines are hidden when they would fall
@@ -119,41 +123,6 @@ keeps its face and greys its icon out towards the face. A tooltip that follows t
 action. The ≡ buttons draw a menu icon in the chrome's text colour, centred in their button. Other
 toolbar buttons keep text labels
 ([ADR-0072](../adrs/0072-toolbar-controls-show-icons-named-in-tooltips.md)).
-
-## Effect displays
-
-An effect's dialog shows a display area between its header and its controls: the dialog's width
-less its padding, 320 logical pixels tall, scrolling with the controls. An effect kind may register
-an `EffectDisplay` (`crates/debussy_ui/src/effect_display.rs`), which is given each parameter's
-name, current value (the dragged one while dragging) and unit, and a `DisplayContext`: the
-effect's kind, the tone, the project's sample rate, and the area's size in physical pixels. It
-returns non-premultiplied RGBA pixels, stretched to the area. It runs on the
-interface thread each time the dialog is drawn. A kind with no display, or a display that returns
-nothing, leaves the area charcoal grey (`#2B2B2B`) in both tones
-([ADR-0091](../adrs/0091-effect-displays-are-registered-per-effect-kind-and.md)).
-
-## Equaliser displays
-
-`high-pass`, `low-pass` and `parametric-eq` share one display, `ResponseDisplay`
-(`crates/debussy_ui/src/response_display.rs`), which plots the exact magnitude response their
-parameter values ask for at the project's sample rate, as `audio_effects::frequency_response`
-gives it (`docs/architecture/effects.md` "Frequency response"):
-
-- Axes are fixed: 20 Hz to 20 kHz on a log scale across, +12 dB at the top to −96 dB at the
-  bottom. The plot runs to the area's top and right edges, with gutters of 46 logical pixels on
-  the left and 20 at the bottom for labels.
-- Grid lines, the same grey in both tones, mark 20, 50, 100, 200, 500 Hz, 1, 2, 5, 10 and 20 kHz,
-  and every 12 dB; the 0 dB line is brighter. A line on the plot's edge is drawn just inside it.
-- Each label carries its unit with no space, such as `20Hz`, `1kHz`, `+12dB` and `−96dB`, in light
-  grey. Frequency labels sit centred under their lines and gain labels right-aligned to the left
-  of theirs, each moved inward as far as needed to stay inside the area.
-- The curve is a 2-logical-pixel line in the tone's audio colour, sampled twice per physical
-  column and at each notch's centre. Gains beyond the axes are drawn on the plot's edge, the
-  line kept wholly inside it; nothing is drawn from the Nyquist frequency up.
-- The background is transparent, so the area's charcoal shows through.
-- Labels are drawn into the pixels through the `Typeface` trait (`crates/debussy_ui/src/
-  typeface.rs`); `StrokeFont`, an in-house face of straight strokes, implements it
-  ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)).
 
 ## Patch board
 

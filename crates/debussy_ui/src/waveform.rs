@@ -9,13 +9,12 @@ use std::cell::Cell;
 
 use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
-use iced::widget::image;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse};
 use project_model::{Clip, Source, Tempo, Track, TrackId};
 
 use crate::app::Message;
 use crate::grid::grid_lines;
-use crate::raster::Raster;
+use crate::raster::{Raster, draw_tiled};
 use crate::services::Services;
 use crate::theme::{CURSOR, mix, tokens, tone_of};
 
@@ -138,6 +137,14 @@ fn paint<T: Copy>(
     }
 }
 
+/// The lanes a track has: one per channel.
+pub(crate) fn channels(track: &Track) -> usize {
+    match track.layout {
+        audio_buffers::Layout::Mono => 1,
+        audio_buffers::Layout::Stereo => 2,
+    }
+}
+
 /// The lanes of `track`, one per channel (left above right), from timeline frame `start` at
 /// `samples_per_column` frames per waveform column, showing `display`.
 pub fn lanes(
@@ -148,11 +155,7 @@ pub fn lanes(
     services: &mut dyn Services,
 ) -> Vec<Lane> {
     let spc = samples_per_column.max(MIN_SAMPLES_PER_COLUMN);
-    let channels = match track.layout {
-        audio_buffers::Layout::Mono => 1,
-        audio_buffers::Layout::Stereo => 2,
-    };
-    (0..channels)
+    (0..channels(track))
         .map(|channel| match display {
             Display::Waveform if spc < BASE_BUCKET => {
                 let mut trace = vec![None; LANE_COLUMNS * spc as usize + 1];
@@ -331,10 +334,13 @@ impl Program<Message> for LaneView<'_> {
             }
             raster.blur(BLUR_SIGMA);
             let (width, height) = (raster.width() as u32, raster.height() as u32);
-            let handle = image::Handle::from_rgba(width, height, raster.into_rgba8());
-            frame.draw_image(
+            let rgba = raster.into_rgba8();
+            draw_tiled(
+                frame,
                 Rectangle::new(Point::ORIGIN, size),
-                canvas::Image::new(handle).filter_method(image::FilterMethod::Nearest),
+                width,
+                height,
+                &rgba,
             );
         });
         vec![lane]

@@ -710,9 +710,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { kind, .. } => {
-                self.effect_panel(id, kind, size.width - 2.0 * DIALOG_PADDING)
-            }
+            NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
             NodeKind::Bus(_) => Space::new().into(),
         };
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
@@ -775,6 +773,7 @@ impl App {
             span,
             scale: self.scale_factor,
         });
+        let hidden = self.node_dialog_open();
         let mut tracks = column![];
         for (id, lanes) in &self.lanes {
             let Some(track) = self.session().state().track(*id) else {
@@ -785,6 +784,13 @@ impl App {
                 .as_ref()
                 .filter(|(ids, _)| ids.contains(id))
                 .and_then(|(_, range)| band(range.start(), range.end(), start, span));
+            // Behind a node dialog the lanes are hidden: space of the same height keeps the
+            // pane's scrolling (ADR-0095).
+            if hidden {
+                tracks = tracks
+                    .push(Space::new().height(Length::Fixed(LANE_HEIGHT * lanes.len() as f32)));
+                continue;
+            }
             for lane in lanes {
                 let view = LaneView {
                     lane,

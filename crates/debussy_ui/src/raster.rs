@@ -1,8 +1,12 @@
 //! A lane drawn into memory: rectangles painted at the display's scale, blurred with a Gaussian,
 //! and handed to the canvas as an image (`docs/architecture/user-interface.md` "Layout",
-//! ADR-0068).
+//! ADR-0068) in strips the renderer uploads at once (ADR-0095).
 
-use iced::Color;
+use std::ops::Range;
+
+use iced::widget::canvas::{self, Frame};
+use iced::widget::image;
+use iced::{Color, Rectangle};
 
 use crate::stroke::Mask;
 
@@ -164,6 +168,63 @@ impl Raster {
     }
 }
 
+/// One more than the largest image, in bytes, that the renderer uploads in the frame it is first
+/// drawn: `iced_wgpu` 0.14 (`src/image/cache.rs`, `MAX_SYNC_SIZE`) uploads an image under this
+/// size at once, and hands a larger one to a background worker, drawing nothing in its place
+/// until the upload finishes (ADR-0095).
+const SYNC_UPLOAD_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// Draws `rgba` (`width` × `height` physical pixels, four bytes each, not premultiplied) over
+/// `bounds` as horizontal strips, each small enough for the renderer to upload in the frame it
+/// is first drawn. Draws nothing unless `rgba` holds exactly four bytes per pixel.
+pub(crate) fn draw_tiled(
+    frame: &mut Frame,
+    bounds: Rectangle,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) {
+    let row_bytes = u64::from(width) * 4;
+    if height == 0 || u64::try_from(rgba.len()).ok() != Some(row_bytes * u64::from(height)) {
+        return;
+    }
+    let logical_row = bounds.height / height as f32;
+    for rows in strips(width, height) {
+        // In range: the length check above covers every row.
+        let (Ok(from), Ok(to)) = (
+            usize::try_from(u64::from(rows.start) * row_bytes),
+            usize::try_from(u64::from(rows.end) * row_bytes),
+        ) else {
+            return;
+        };
+        let Some(bytes) = rgba.get(from..to) else {
+            return;
+        };
+        let handle = image::Handle::from_rgba(width, rows.len() as u32, bytes.to_vec());
+        let strip = Rectangle {
+            y: bounds.y + rows.start as f32 * logical_row,
+            height: rows.len() as f32 * logical_row,
+            ..bounds
+        };
+        frame.draw_image(
+            strip,
+            canvas::Image::new(handle).filter_method(image::FilterMethod::Nearest),
+        );
+    }
+}
+
+/// The rows of each strip of a `width` × `height` image, top to bottom: as many rows as stay
+/// under [`SYNC_UPLOAD_LIMIT`], and at least one.
+fn strips(width: u32, height: u32) -> impl Iterator<Item = Range<u32>> {
+    let row_bytes = (u64::from(width) * 4).max(1);
+    let per_strip = u32::try_from((SYNC_UPLOAD_LIMIT - 1) / row_bytes)
+        .unwrap_or(u32::MAX)
+        .max(1);
+    (0..height)
+        .step_by(per_strip as usize)
+        .map(move |start| start..start.saturating_add(per_strip).min(height))
+}
+
 /// The whole pixels from `a` to `b` touches, within `0..len`; `None` if none.
 fn span(a: f32, b: f32, len: usize) -> Option<std::ops::Range<usize>> {
     // Also refuses a NaN edge, which compares false either way.
@@ -214,6 +275,31 @@ mod tests {
 
     fn at(raster: &Raster, x: usize, y: usize) -> [f32; 4] {
         raster.pixels[y * raster.width + x]
+    }
+
+    #[test]
+    fn test_strips_cover_every_row_under_the_limit() {
+        // 1800 × 640 physical pixels: a 900-pixel display at 2×, 4.6 MB whole.
+        for (width, height) in [(1800, 640), (1, 1), (100, 7), (524_288, 3), (4096, 128)] {
+            let strips: Vec<_> = strips(width, height).collect();
+            let rows: u32 = strips.iter().map(|r| r.end - r.start).sum();
+            assert_eq!(rows, height, "{width} × {height}");
+            let mut next = 0;
+            for strip in &strips {
+                assert_eq!(strip.start, next);
+                assert!(strip.end > strip.start);
+                next = strip.end;
+                let bytes = u64::from(width) * 4 * u64::from(strip.end - strip.start);
+                // A single row wider than the limit cannot be split further.
+                assert!(
+                    bytes < SYNC_UPLOAD_LIMIT || strip.len() == 1,
+                    "{width} × {height}"
+                );
+            }
+        }
+        assert_eq!(strips(1800, 640).count(), 3);
+        assert_eq!(strips(524_288, 3).count(), 3);
+        assert_eq!(strips(100, 0).count(), 0);
     }
 
     #[test]

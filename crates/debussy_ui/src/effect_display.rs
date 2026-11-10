@@ -1,12 +1,17 @@
 //! The display at the top of an effect's dialog: a picture of what the effect does, drawn by
 //! the [`EffectDisplay`] registered for its kind, or blank charcoal grey for a kind with none
-//! (`docs/architecture/user-interface.md` "Effect displays").
+//! (`docs/architecture/effect-displays.md` "Effect displays"). The picture is drawn again only
+//! when what it shows or its size changes (ADR-0095).
 
-use iced::widget::{container, image};
-use iced::{ContentFit, Element, Fill, Length};
+use std::cell::RefCell;
+
+use iced::widget::canvas::{Cache, Geometry, Program};
+use iced::widget::{canvas, container};
+use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use signal_graph::ParameterInfo;
 
 use crate::app::Message;
+use crate::raster::draw_tiled;
 use crate::response_display::ResponseDisplay;
 use crate::theme::{self, Tone};
 
@@ -77,8 +82,8 @@ pub struct DisplayContext<'a> {
     pub height: u32,
 }
 
-/// Draws the display of one kind of effect. It runs on the interface thread whenever the
-/// dialog is drawn, so it should be quick.
+/// Draws the display of one kind of effect. It runs on the interface thread whenever its
+/// parameters, the tone, the sample rate or the display's size change, so it should be quick.
 pub trait EffectDisplay: Sync {
     /// The picture of an effect whose parameters stand at `parameters` (in the effect's own
     /// order), `context.width` × `context.height` physical pixels; it is stretched to the
@@ -112,40 +117,31 @@ fn find(
 }
 
 /// The display area for an effect of `kind` whose parameters `infos` stand at `values`, in a
-/// project at `sample_rate`, `width` logical pixels wide at `scale` physical pixels per logical
-/// pixel: the picture of the display registered for `kind`, or charcoal grey.
+/// project at `sample_rate`, at `scale` physical pixels per logical pixel: the picture of the
+/// display registered for `kind`, or charcoal grey. It fills the width it is given.
 pub(crate) fn display_area<'a>(
     kind: &str,
-    infos: &[ParameterInfo],
-    values: &[f32],
+    infos: &'a [ParameterInfo],
+    values: Vec<f32>,
     tone: Tone,
     sample_rate: u32,
-    width: f32,
     scale: f32,
 ) -> Element<'a, Message> {
-    let parameters: Vec<DisplayParameter<'_>> = infos
-        .iter()
-        .zip(values)
-        .map(|(info, &value)| DisplayParameter {
-            name: &info.name,
-            value,
-            unit: &info.unit,
+    let body: Element<'a, Message> = match display_for(kind) {
+        Some(display) => canvas(DisplayView {
+            display,
+            inputs: Inputs {
+                kind: kind.to_owned(),
+                values,
+                tone,
+                sample_rate,
+            },
+            infos,
+            scale,
         })
-        .collect();
-    let context = DisplayContext {
-        kind,
-        tone,
-        sample_rate,
-        width: physical(width, scale),
-        height: physical(DISPLAY_HEIGHT, scale),
-    };
-    let picture = display_for(kind).and_then(|d| d.draw(&parameters, &context));
-    let body: Element<'a, Message> = match picture {
-        Some(p) => image(image::Handle::from_rgba(p.width, p.height, p.rgba))
-            .width(Fill)
-            .height(Fill)
-            .content_fit(ContentFit::Fill)
-            .into(),
+        .width(Fill)
+        .height(Fill)
+        .into(),
         None => iced::widget::Space::new().into(),
     };
     container(body)
@@ -153,6 +149,122 @@ pub(crate) fn display_area<'a>(
         .height(Length::Fixed(DISPLAY_HEIGHT))
         .style(theme::blank_display)
         .into()
+}
+
+/// What a display's picture depends on, besides its size.
+#[derive(Debug, Clone, PartialEq)]
+struct Inputs {
+    /// The effect's kind.
+    kind: String,
+    /// The parameters' values, in the effect's order.
+    values: Vec<f32>,
+    /// The tone of the chrome around the display.
+    tone: Tone,
+    /// The project's sample rate, in Hz.
+    sample_rate: u32,
+}
+
+/// What the cached picture was drawn from: its inputs and its size in physical pixels.
+#[derive(Debug, Clone, PartialEq)]
+struct Key {
+    inputs: Inputs,
+    width: u32,
+    height: u32,
+}
+
+/// The canvas state of a display area: its picture, kept until the key it was drawn from
+/// changes.
+#[derive(Default)]
+struct DisplayState {
+    cache: Cache,
+    key: RefCell<Option<Key>>,
+}
+
+/// Draws a registered display's picture into a canvas, once per change of its inputs or size.
+struct DisplayView<'a> {
+    /// The display registered for the effect's kind.
+    display: &'static dyn EffectDisplay,
+    /// What the picture shows.
+    inputs: Inputs,
+    /// The parameters' metadata, in the effect's order.
+    infos: &'a [ParameterInfo],
+    /// The display's physical pixels per logical pixel.
+    scale: f32,
+}
+
+impl DisplayView<'_> {
+    /// The key of a picture `size` logical pixels big.
+    fn key(&self, size: Size) -> Key {
+        Key {
+            inputs: self.inputs.clone(),
+            width: physical(size.width, self.scale),
+            height: physical(size.height, self.scale),
+        }
+    }
+
+    /// Forgets `state`'s picture if it was drawn from other inputs or at another size than
+    /// `size`'s; returns whether it did.
+    fn refresh(&self, state: &DisplayState, size: Size) -> bool {
+        let key = self.key(size);
+        let mut kept = state.key.borrow_mut();
+        if kept.as_ref() == Some(&key) {
+            return false;
+        }
+        state.cache.clear();
+        *kept = Some(key);
+        true
+    }
+
+    /// The display's picture, `width` × `height` physical pixels.
+    fn picture(&self, width: u32, height: u32) -> Option<Pixels> {
+        let parameters: Vec<DisplayParameter<'_>> = self
+            .infos
+            .iter()
+            .zip(&self.inputs.values)
+            .map(|(info, &value)| DisplayParameter {
+                name: &info.name,
+                value,
+                unit: &info.unit,
+            })
+            .collect();
+        let context = DisplayContext {
+            kind: &self.inputs.kind,
+            tone: self.inputs.tone,
+            sample_rate: self.inputs.sample_rate,
+            width,
+            height,
+        };
+        self.display.draw(&parameters, &context)
+    }
+}
+
+impl Program<Message> for DisplayView<'_> {
+    type State = DisplayState;
+
+    fn draw(
+        &self,
+        state: &DisplayState,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let size = bounds.size();
+        self.refresh(state, size);
+        let key = self.key(size);
+        let geometry = state.cache.draw(renderer, size, |frame| {
+            if let Some(p) = self.picture(key.width, key.height) {
+                draw_tiled(
+                    frame,
+                    Rectangle::with_size(size),
+                    p.width,
+                    p.height,
+                    &p.rgba,
+                );
+            }
+        });
+        vec![geometry]
+    }
 }
 
 /// `logical` pixels at `scale`, rounded to whole physical pixels; at least one.
@@ -238,7 +350,7 @@ mod tests {
     #[test]
     fn test_display_area_builds_with_and_without_a_display() {
         let infos = [ParameterInfo::new("gain", -24.0, 24.0, 0.0).with_unit("dB")];
-        let _blank = display_area("unknown", &infos, &[0.0], Tone::Dark, 48_000, 300.0, 2.0);
+        let _blank = display_area("unknown", &infos, vec![0.0], Tone::Dark, 48_000, 2.0);
         let infos = [
             ParameterInfo::new("cutoff", 20.0, 20_000.0, 80.0),
             ParameterInfo::new("order", 1.0, 8.0, 2.0),
@@ -246,11 +358,64 @@ mod tests {
         let _drawn = display_area(
             "high-pass",
             &infos,
-            &[80.0, 2.0],
+            vec![80.0, 2.0],
             Tone::Dark,
             48_000,
-            300.0,
             2.0,
         );
+    }
+
+    fn flat_view(infos: &[ParameterInfo], gain: f32, tone: Tone) -> DisplayView<'_> {
+        DisplayView {
+            display: &Flat,
+            inputs: Inputs {
+                kind: "flat".to_owned(),
+                values: vec![gain],
+                tone,
+                sample_rate: 48_000,
+            },
+            infos,
+            scale: 2.0,
+        }
+    }
+
+    #[test]
+    fn test_refresh_keeps_the_picture_until_an_input_changes() {
+        let infos = [ParameterInfo::new("gain", -24.0, 24.0, 0.0).with_unit("dB")];
+        let state = DisplayState::default();
+        let size = Size::new(300.0, DISPLAY_HEIGHT);
+        let view = flat_view(&infos, -3.0, Tone::Dark);
+        assert!(view.refresh(&state, size), "first draw");
+        assert!(!view.refresh(&state, size), "same inputs");
+        assert!(!flat_view(&infos, -3.0, Tone::Dark).refresh(&state, size));
+        assert!(
+            flat_view(&infos, -2.0, Tone::Dark).refresh(&state, size),
+            "value"
+        );
+        assert!(
+            flat_view(&infos, -2.0, Tone::Light).refresh(&state, size),
+            "tone"
+        );
+        let view = flat_view(&infos, -2.0, Tone::Light);
+        assert!(
+            view.refresh(&state, Size::new(301.0, DISPLAY_HEIGHT)),
+            "size"
+        );
+        let mut rate = flat_view(&infos, -2.0, Tone::Light);
+        rate.inputs.sample_rate = 44_100;
+        assert!(
+            rate.refresh(&state, Size::new(301.0, DISPLAY_HEIGHT)),
+            "sample rate"
+        );
+    }
+
+    #[test]
+    fn test_picture_is_drawn_at_physical_size() -> Result<(), Box<dyn std::error::Error>> {
+        let infos = [ParameterInfo::new("gain", -24.0, 24.0, 0.0).with_unit("dB")];
+        let view = flat_view(&infos, -3.0, Tone::Light);
+        let key = view.key(Size::new(100.0, DISPLAY_HEIGHT));
+        let picture = view.picture(key.width, key.height).ok_or("no picture")?;
+        assert_eq!((picture.width(), picture.height()), (200, 640));
+        Ok(())
     }
 }

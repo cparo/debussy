@@ -4,7 +4,7 @@
 - **Decided by:** agent, unratified
 - **Date:** 2026-11-10
 - **Issue:** —
-- **Architecture:** [Effect displays](../architecture/user-interface.md#effect-displays)
+- **Architecture:** [Effect displays](../architecture/effect-displays.md#effect-displays)
 
 ## Context
 
