@@ -874,9 +874,10 @@ fn test_spectrogram_display_reads_spectra_per_channel() -> Result<(), Box<dyn Er
 }
 
 #[test]
-fn test_tone_toggles_and_follows_the_system() -> Result<(), Box<dyn Error>> {
+fn test_tone_opens_dark_and_toggles() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
-    app.update(Message::SystemTone(debussy_ui::Tone::Light));
+    assert_eq!(app.tone(), debussy_ui::Tone::Dark);
+    app.update(Message::ToggleTone);
     assert_eq!(app.tone(), debussy_ui::Tone::Light);
     app.update(Message::ToggleTone);
     assert_eq!(app.tone(), debussy_ui::Tone::Dark);

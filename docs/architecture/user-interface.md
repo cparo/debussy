@@ -49,7 +49,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   built-in effect's controls; a bus or an effect this build does not know has only the header.
   A "Delete" button at the bottom right asks first: a confirmation with Cancel, the default
   (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
-  metadata (`docs/architecture/signal-graph.md` "Effect nodes"): ungrouped parameters in a row,
+  metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
+  [display](#effect-displays): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll. A linear parameter is a slider, a logarithmic one
   a slider over its logarithm, an integer one a slider in whole steps, a choice a pick list and a
   toggle an on/off button; sliders show the value and unit, hertz from 1000 up as kilohertz. A
@@ -83,8 +84,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Colours:** audio signals (and a selected button's face, and the logo) are orange in the dark
   tone and blue in the light tone
   ([ADR-0071](../adrs/0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md)); control
-  signals are lavender in both. The tone follows the system's appearance at launch and
-  when it changes; the toggle is not saved.
+  signals are lavender in both. The logo is the exception: sage green (`#84A07C`) in the light
+  tone. The interface opens in the dark tone whatever the system's appearance, and does not
+  follow it; the toggle is not saved
+  ([ADR-0090](../adrs/0090-the-interface-opens-in-the-dark-tone-and-the-light.md)).
 - **Button groups** (each toggle and each set of related toolbar or dialog buttons) are drawn as
   one strip, rounded only at its ends, with a hairline seam between buttons.
 - **Menus** are flat buttons floated over the window; a click anywhere else closes the open menu.
@@ -96,13 +99,14 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 Application icons and interface glyphs are SVG files in `crates/debussy_ui/assets/icons/`,
 compiled into the binary and drawn with `iced`'s `svg` widget. Each is a single-colour shape on a
 transparent background; the interface tints it with a theme colour, so a file's own fill colour
-never shows. The logo (`debussy.svg`) sits at the left of the top bar in the accent of a selected
-toolbar button, with no box or background of its own.
+never shows. The logo (`debussy.svg`) sits at the left of the top bar, with no box or background
+of its own, in the accent of a selected toolbar button in the dark tone and sage green in the
+light (see [Layout](#layout)).
 
 The waveform/spectrogram toggle, the grid toggle, undo, redo, cut, copy, paste, play/pause, stop, record, the
 click button (an in-house metronome), the audio device button (a microphone wearing over-ear
 headphones) and the light/dark toggle show 16 px icons instead of text, padded to a text button's height. The
-light/dark toggle shows the tone it switches to, in the logo's accent, with no button face or
+light/dark toggle shows the tone it switches to, in the selected-button accent, with no button face or
 outline, like the ≡ buttons. The record icon is recording red (`#BB0000`, both tones) on the
 button's face, and black on a red face while recording
 ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). Any other icon takes its button's text colour; a disabled icon button
@@ -110,6 +114,17 @@ keeps its face and greys its icon out towards the face. A tooltip that follows t
 action. The ≡ buttons draw a menu icon in the chrome's text colour, centred in their button. Other
 toolbar buttons keep text labels
 ([ADR-0072](../adrs/0072-toolbar-controls-show-icons-named-in-tooltips.md)).
+
+## Effect displays
+
+An effect's dialog shows a display area between its header and its controls: the dialog's width
+less its padding, 320 logical pixels tall, scrolling with the controls. An effect kind may register
+an `EffectDisplay` (`crates/debussy_ui/src/effect_display.rs`), which is given each parameter's
+name, current value (the dragged one while dragging) and unit, the tone, and the area's size in
+physical pixels, and returns non-premultiplied RGBA pixels, stretched to the area. It runs on the
+interface thread each time the dialog is drawn. A kind with no display, or a display that returns
+nothing, leaves the area charcoal grey (`#2B2B2B`) in both tones
+([ADR-0091](../adrs/0091-effect-displays-are-registered-per-effect-kind-and.md)).
 
 ## Patch board
 
