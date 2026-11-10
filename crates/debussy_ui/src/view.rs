@@ -89,6 +89,26 @@ pub(crate) fn tool<'a>(
     button_at(face, message, selected, Place::Alone)
 }
 
+/// A text button labelled `label` (owned, unlike [`Face::Label`]) that sends `message`, lit
+/// when `selected`, styled as [`tool`]'s labels and filling its width.
+pub(crate) fn toggle_button<'a>(
+    label: String,
+    message: Message,
+    selected: bool,
+) -> Element<'a, Message> {
+    button(text(label).size(TOOL_TEXT).center().width(Length::Fill))
+        .on_press(message)
+        .padding([8.0, 12.0])
+        .width(Length::Fill)
+        .style(theme::accent_style(
+            selected,
+            Place::Alone,
+            true,
+            Accent::Audio,
+        ))
+        .into()
+}
+
 /// A toolbar button styled for `place`.
 fn button_at<'a>(
     face: Face<'a>,
@@ -178,7 +198,7 @@ fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
-pub(crate) fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
+fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
     if let [(face, message, selected)] = buttons.as_slice() {
         return tool(*face, message.clone(), *selected);
     }

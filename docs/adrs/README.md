@@ -116,5 +116,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0090](0090-the-interface-opens-in-the-dark-tone-and-the-light.md) | The interface opens in the dark tone and the light-tone logo is sage green | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0091](0091-effect-displays-are-registered-per-effect-kind-and.md) | Effect displays are registered per effect kind and draw RGBA pixels from parameter values and the tone | Accepted | [Effect displays](../architecture/user-interface.md#effect-displays) |
 | [ADR-0092](0092-equaliser-displays-plot-the-exact-digital.md) | Equaliser displays plot the exact digital magnitude response at the project sample rate on fixed axes, labelled in an in-house stroke font behind a Typeface seam | Accepted | [Equaliser displays](../architecture/user-interface.md#equaliser-displays) |
-| [ADR-0093](0093-effect-controls-show-slider-values-as-hover.md) | Effect controls show slider values as hover tooltips and two-valued parameters as unlabelled two-button strips | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0093](0093-effect-controls-show-slider-values-as-hover.md) | Effect controls show slider values as hover tooltips and toggles as one named button, lit while on | Accepted | [Layout](../architecture/user-interface.md#layout) |
 

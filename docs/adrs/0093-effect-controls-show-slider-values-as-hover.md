@@ -1,4 +1,4 @@
-# ADR-0093 — Effect controls show slider values as hover tooltips and two-valued parameters as unlabelled two-button strips
+# ADR-0093 — Effect controls show slider values as hover tooltips and toggles as one named button, lit while on
 
 - **Status:** Accepted
 - **Decided by:** Chris Paro
@@ -17,10 +17,9 @@ the same way, so this is the pattern for them, not a one-off fix.
 
 - A slider (linear, logarithmic or integer) keeps its name label. Its value and unit appear only
   as a tooltip while the slider is hovered, which includes while it is dragged.
-- A two-valued parameter, either a toggle or a choice of exactly two options, is a strip of two
-  mutually exclusive buttons. Each button is named by the value it selects ("On" then "Off" for a
-  toggle; a choice's options in their order), and the strip has no name label.
-- A choice of three or more options stays a labelled pick list.
+- A toggle is a single button labelled with the parameter's name (such as "Enabled"). It is lit
+  while on and unlit while off, and clicking it flips the value. It has no separate name label.
+- A choice stays a labelled pick list, whatever its number of options.
 - These are rules of the generic control builder (`effect_panel.rs`), so they apply to every
   built-in effect, not only the equaliser.
 
@@ -30,14 +29,17 @@ the same way, so this is the pattern for them, not a one-off fix.
   row, and one button does not show the other state.
 - **Values in the label row ("Gain −3.0 dB")**: rejected. It saves a row, but every strip still
   shows text that changes with every drag.
-- **A checkbox for toggles**: rejected. It needs a name label to mean anything, while a pair of
-  named buttons explains itself and also covers two-option choices.
+- **A strip of two mutually exclusive buttons named by their values ("On" | "Off")**: tried first
+  and rejected on review. It takes two buttons' width, and the values alone do not say what is
+  being switched. One named button says both what is switched and, by being lit, its state.
+- **A checkbox for toggles**: rejected. It needs a name label beside it, while a named button that
+  lights up matches the toolbar's toggles.
 
 ## Consequences
 
 - An exact value can be read only by hovering, so it cannot be read at a glance, and not at all on
   input with no hover. The equaliser display shows the overall effect.
-- A two-valued parameter's meaning must be clear from its value names alone. A future two-option
-  choice whose options need context ("A"/"B") would need better option names.
+- A toggle's state is shown by its highlight alone, so the lit and unlit styles must stay easy to
+  tell apart in both tones.
 - A parameter frozen while playing still shows "Stop to change" under its name, whatever its
   scale.
