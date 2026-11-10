@@ -103,31 +103,51 @@ impl Butterworth {
 
     /// The order the parameter holds, from 1 to [`MAX_ORDER`].
     fn order(&self) -> usize {
-        // The parameter holds whole numbers from 1 to 8.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let order = self.order.get() as usize;
-        order.clamp(1, MAX_ORDER)
+        order_from_value(self.order.get())
     }
+}
+
+/// The coefficients of an `order`-pole Butterworth filter passing `response`'s side of `cutoff`
+/// (Hz) at `sample_rate`: one two-pole section per pole pair (the first `order / 2` are used;
+/// the rest are left as the identity) and, used only for an odd order, a one-pole. Shared by
+/// processing and the frequency response, so the two cannot differ.
+pub(crate) fn design(
+    response: Response,
+    order: usize,
+    cutoff: f32,
+    sample_rate: f32,
+) -> ([SvfCoefficients; SECTIONS], OnePoleCoefficients) {
+    let g = prewarp(cutoff, sample_rate);
+    let mut sections = [SvfCoefficients::identity(); SECTIONS];
+    for (section, coefficients) in sections.iter_mut().enumerate() {
+        let Some(q) = butterworth_q(order, section) else {
+            break;
+        };
+        let k = 1.0 / q;
+        *coefficients = match response {
+            Response::HighPass => SvfCoefficients::new(g, k, 1.0, -k, -1.0),
+            Response::LowPass => SvfCoefficients::new(g, k, 0.0, 0.0, 1.0),
+        };
+    }
+    let one_pole = match response {
+        Response::HighPass => OnePoleCoefficients::high_pass_prewarped(g),
+        Response::LowPass => OnePoleCoefficients::low_pass_prewarped(g),
+    };
+    (sections, one_pole)
+}
+
+/// The order an `order` parameter value means: rounded down, from 1 to [`MAX_ORDER`].
+pub(crate) fn order_from_value(value: f32) -> usize {
+    // `as` saturates, and NaN becomes 0, so the clamp sees a whole number.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let order = value as usize;
+    order.clamp(1, MAX_ORDER)
 }
 
 impl Running {
     /// Sets the coefficients for `cutoff` (Hz) at the current order.
     fn design(&mut self, response: Response, cutoff: f32) {
-        let g = prewarp(cutoff, self.sample_rate);
-        for (section, coefficients) in self.sections.iter_mut().enumerate() {
-            let Some(q) = butterworth_q(self.order, section) else {
-                break;
-            };
-            let k = 1.0 / q;
-            *coefficients = match response {
-                Response::HighPass => SvfCoefficients::new(g, k, 1.0, -k, -1.0),
-                Response::LowPass => SvfCoefficients::new(g, k, 0.0, 0.0, 1.0),
-            };
-        }
-        self.one_pole = match response {
-            Response::HighPass => OnePoleCoefficients::high_pass_prewarped(g),
-            Response::LowPass => OnePoleCoefficients::low_pass_prewarped(g),
-        };
+        (self.sections, self.one_pole) = design(response, self.order, cutoff, self.sample_rate);
     }
 
     /// Filters one sample of channel `channel`.

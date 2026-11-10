@@ -226,3 +226,37 @@ fn test_random_per_sample_coefficient_changes_stay_bounded() {
     // Bounded by the largest gain asked for times the input, with room for resonance.
     assert!(peak < 1e4, "peak {peak}");
 }
+
+#[test]
+fn test_magnitude_agrees_with_the_impulse_response() {
+    let cases = [
+        SvfCoefficients::low_pass(700.0, 3.0, RATE),
+        SvfCoefficients::high_pass(150.0, 0.6, RATE),
+        SvfCoefficients::bell(2_500.0, 1.5, -9.0, RATE),
+        SvfCoefficients::low_shelf(300.0, FRAC_1_SQRT_2, 8.0, RATE),
+        SvfCoefficients::high_shelf(6_000.0, FRAC_1_SQRT_2, -5.0, RATE),
+        SvfCoefficients::notch(1_200.0, 1.0, RATE),
+    ];
+    for c in cases {
+        let h = impulse(single(c));
+        for frequency in [50.0, 400.0, 1_000.0, 3_000.0, 9_000.0, 20_000.0] {
+            let exact = c
+                .magnitude(frequency, RATE)
+                .map_or(f64::NAN, |m| 20.0 * f64::from(m).log10());
+            let measured = gain_db(&h, frequency);
+            assert!(
+                (exact - measured).abs() < 0.01,
+                "{c:?} at {frequency}: {exact} vs {measured}"
+            );
+        }
+    }
+    let one = OnePoleCoefficients::high_pass(400.0, RATE);
+    let mut pole = OnePole::new();
+    let h = impulse(|x| pole.process(x, &one));
+    for frequency in [50.0, 400.0, 5_000.0] {
+        let exact = one
+            .magnitude(frequency, RATE)
+            .map_or(f64::NAN, |m| 20.0 * f64::from(m).log10());
+        assert!((exact - gain_db(&h, frequency)).abs() < 0.01);
+    }
+}

@@ -74,7 +74,13 @@ impl BandType {
     }
 
     /// The coefficients for this type at `frequency` (Hz), `q` and `gain_db`, at `sample_rate`.
-    fn design(self, frequency: f32, q: f32, gain_db: f32, sample_rate: f32) -> SvfCoefficients {
+    pub(crate) fn design(
+        self,
+        frequency: f32,
+        q: f32,
+        gain_db: f32,
+        sample_rate: f32,
+    ) -> SvfCoefficients {
         match self {
             BandType::Bell => SvfCoefficients::bell(frequency, q, gain_db, sample_rate),
             BandType::LowShelf => SvfCoefficients::low_shelf(frequency, q, gain_db, sample_rate),
@@ -110,6 +116,12 @@ pub fn band_parameter_name(band: usize, control: BandControl) -> String {
         BandControl::Q => "q",
     };
     format!("band {} {control}", band + 1)
+}
+
+/// The response a band whose `enabled` and `type` parameters stand at `enabled` and `kind`
+/// asks for; `None` when it is off.
+pub(crate) fn wanted(enabled: f32, kind: f32) -> Option<BandType> {
+    (enabled >= 0.5).then(|| BandType::from_value(kind))
 }
 
 /// A band's state once prepared.
@@ -178,7 +190,7 @@ impl Band {
 
     /// The response the parameters ask for; `None` when the band is off.
     fn wanted(&self) -> Option<BandType> {
-        (self.enabled.get() >= 0.5).then(|| BandType::from_value(self.kind.get()))
+        wanted(self.enabled.get(), self.kind.get())
     }
 }
 
