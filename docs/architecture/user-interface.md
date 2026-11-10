@@ -118,7 +118,7 @@ toolbar buttons keep text labels
 ## Effect displays
 
 An effect's dialog shows a display area between its header and its controls: the dialog's width
-less its padding, 512 logical pixels tall, scrolling with the controls. An effect kind may register
+less its padding, 320 logical pixels tall, scrolling with the controls. An effect kind may register
 an `EffectDisplay` (`crates/debussy_ui/src/effect_display.rs`), which is given each parameter's
 name, current value (the dragged one while dragging) and unit, the tone, and the area's size in
 physical pixels, and returns non-premultiplied RGBA pixels, stretched to the area. It runs on the

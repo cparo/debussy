@@ -18,7 +18,7 @@ are needed first, so displays can be added one by one.
 value and unit, the tone, and a size in physical pixels, and returning `Option<Pixels>`: a
 validated buffer of non-premultiplied RGBA bytes. Displays are registered by effect kind in a
 static table in `effect_display.rs`. The dialog draws the result as an `iced` image stretched to a
-512-pixel-tall area spanning the dialog's width; with no display, or none drawn, the area is
+320-pixel-tall area spanning the dialog's width; with no display, or none drawn, the area is
 charcoal grey.
 
 ## Alternatives considered

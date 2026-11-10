@@ -10,7 +10,7 @@ use crate::app::Message;
 use crate::theme::{self, Tone};
 
 /// The display area's height, in logical pixels; its width fills the dialog.
-pub(crate) const DISPLAY_HEIGHT: f32 = 512.0;
+pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
 
 /// One of an effect's parameters, as a display is given it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -196,7 +196,7 @@ mod tests {
                 physical(DISPLAY_HEIGHT, 2.0),
             )
             .ok_or("no picture")?;
-        assert_eq!((picture.width(), picture.height()), (200, 1024));
+        assert_eq!((picture.width(), picture.height()), (200, 640));
         assert_eq!(picture.rgba.first(), Some(&200));
         Ok(())
     }
