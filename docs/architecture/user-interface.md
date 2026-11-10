@@ -135,15 +135,16 @@ parameter values ask for at the project's sample rate, as `audio_effects::freque
 gives it (`docs/architecture/effects.md` "Frequency response"):
 
 - Axes are fixed: 20 Hz to 20 kHz on a log scale across, +12 dB at the top to −96 dB at the
-  bottom, in a plot inset 36 logical pixels from the left, 20 from the bottom, 22 from the top
-  and 34 from the right for labels.
+  bottom. The plot runs to the area's top and right edges, with gutters of 46 logical pixels on
+  the left and 20 at the bottom for labels.
 - Grid lines, the same grey in both tones, mark 20, 50, 100, 200, 500 Hz, 1, 2, 5, 10 and 20 kHz,
-  and every 12 dB; the 0 dB line is brighter. Frequency labels sit under their lines and gain
-  labels to the left of theirs, in light grey. The units label each axis's end: `dB` above the
-  gain labels and `Hz` after the last frequency label.
+  and every 12 dB; the 0 dB line is brighter. A line on the plot's edge is drawn just inside it.
+- Each label carries its unit with no space, such as `20Hz`, `1kHz`, `+12dB` and `−96dB`, in light
+  grey. Frequency labels sit centred under their lines and gain labels right-aligned to the left
+  of theirs, each moved inward as far as needed to stay inside the area.
 - The curve is a 2-logical-pixel line in the tone's audio colour, sampled twice per physical
-  column and at each notch's centre. Gains beyond the axes are drawn on the plot's edge; nothing
-  is drawn from the Nyquist frequency up.
+  column and at each notch's centre. Gains beyond the axes are drawn on the plot's edge, the
+  line kept wholly inside it; nothing is drawn from the Nyquist frequency up.
 - The background is transparent, so the area's charcoal shows through.
 - Labels are drawn into the pixels through the `Typeface` trait (`crates/debussy_ui/src/
   typeface.rs`); `StrokeFont`, an in-house face of straight strokes, implements it

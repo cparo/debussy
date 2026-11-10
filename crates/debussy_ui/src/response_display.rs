@@ -25,24 +25,23 @@ const DB_STEP: f32 = 12.0;
 
 /// The frequencies of the vertical grid lines, in Hz, and their labels.
 const FREQUENCY_LINES: [(f32, &str); 10] = [
-    (20.0, "20"),
-    (50.0, "50"),
-    (100.0, "100"),
-    (200.0, "200"),
-    (500.0, "500"),
-    (1_000.0, "1k"),
-    (2_000.0, "2k"),
-    (5_000.0, "5k"),
-    (10_000.0, "10k"),
-    (20_000.0, "20k"),
+    (20.0, "20Hz"),
+    (50.0, "50Hz"),
+    (100.0, "100Hz"),
+    (200.0, "200Hz"),
+    (500.0, "500Hz"),
+    (1_000.0, "1kHz"),
+    (2_000.0, "2kHz"),
+    (5_000.0, "5kHz"),
+    (10_000.0, "10kHz"),
+    (20_000.0, "20kHz"),
 ];
 
 /// The plot's insets from the display's edges, in logical pixels: a gutter on the left for the
-/// gain labels, one below for the frequency labels, and room above and to the right for the
-/// units, `dB` over the gain labels and `Hz` after the last frequency label.
-const LEFT: f32 = 36.0;
-const RIGHT: f32 = 34.0;
-const TOP: f32 = 22.0;
+/// gain labels and one below for the frequency labels. The grid runs to the top and right edges.
+const LEFT: f32 = 46.0;
+const RIGHT: f32 = 0.0;
+const TOP: f32 = 0.0;
 const BOTTOM: f32 = 20.0;
 
 /// The labels' capital height, in logical pixels.
@@ -157,15 +156,16 @@ fn render(
 
 /// The vertical and horizontal grid lines.
 fn draw_grid(raster: &mut Raster, plot: &Plot) {
+    // A line on the plot's edge is moved inward to show its whole width.
     let half = GRID_WIDTH / 2.0;
     for (frequency, _) in FREQUENCY_LINES {
-        let x = plot.x(frequency);
-        raster.fill_rect(x - half, plot.top, GRID_WIDTH, plot.height, GRID);
+        let x = (plot.x(frequency) - half).clamp(plot.left, plot.right() - GRID_WIDTH);
+        raster.fill_rect(x, plot.top, GRID_WIDTH, plot.height, GRID);
     }
     for db in db_lines() {
         let color: Color = if db == 0.0 { GRID_ZERO } else { GRID };
-        let y = plot.y(db);
-        raster.fill_rect(plot.left, y - half, plot.width, GRID_WIDTH, color);
+        let y = (plot.y(db) - half).clamp(plot.top, plot.bottom() - GRID_WIDTH);
+        raster.fill_rect(plot.left, y, plot.width, GRID_WIDTH, color);
     }
 }
 
@@ -177,40 +177,46 @@ fn db_lines() -> impl Iterator<Item = f32> {
     (0..=count).map(|i| TOP_DB - f32::from(i) * DB_STEP)
 }
 
-/// The label of a gain line, such as `"+12"`, `"0"` or `"−24"`.
+/// The label of a gain line, such as `"+12dB"`, `"0dB"` or `"−24dB"`.
 fn db_label(db: f32) -> String {
     if db > 0.0 {
-        format!("+{db:.0}")
+        format!("+{db:.0}dB")
     } else if db < 0.0 {
-        format!("\u{2212}{:.0}", -db)
+        format!("\u{2212}{:.0}dB", -db)
     } else {
-        "0".to_owned()
+        "0dB".to_owned()
     }
 }
 
-/// The frequency labels centred under their lines (the first kept from the gutter), followed by
-/// `Hz`; and the gain labels right-aligned in the gutter, centred on theirs, under `dB`.
-fn draw_labels(mask: &mut Mask, plot: &Plot, face: &dyn Typeface) {
+/// Each label, with its unit, and where it goes: `(text, x, baseline)` in logical pixels. The
+/// frequency labels are centred under their lines and the gain labels right-aligned in the
+/// gutter, centred on theirs; a label that would cross the frame's edge is moved inward.
+fn labels(plot: &Plot, face: &dyn Typeface) -> Vec<(String, f32, f32)> {
+    let mut labels = Vec::new();
     let baseline = plot.bottom() + LABEL_GAP + LABEL_SIZE;
-    let mut end = plot.left;
     for (frequency, label) in FREQUENCY_LINES {
         let advance = face.advance(label, LABEL_SIZE);
-        let x = (plot.x(frequency) - advance / 2.0).max(plot.left);
-        face.draw(mask, label, x, baseline, LABEL_SIZE);
-        end = x + advance;
+        let x = (plot.x(frequency) - advance / 2.0)
+            .min(plot.right() - advance)
+            .max(plot.left);
+        labels.push((label.to_owned(), x, baseline));
     }
-    let x = end + face.advance(" ", LABEL_SIZE);
-    face.draw(mask, "Hz", x, baseline, LABEL_SIZE);
-    let gain_right = plot.left - LABEL_GAP;
+    // The stroke's half-width, kept inside the frame too.
+    let margin = 1.0;
     for db in db_lines() {
         let label = db_label(db);
-        let x = gain_right - face.advance(&label, LABEL_SIZE);
-        let baseline = plot.y(db) + LABEL_SIZE / 2.0;
-        face.draw(mask, &label, x, baseline, LABEL_SIZE);
+        let x = plot.left - LABEL_GAP - face.advance(&label, LABEL_SIZE);
+        let baseline = (plot.y(db) + LABEL_SIZE / 2.0).max(plot.top + LABEL_SIZE + margin);
+        labels.push((label, x, baseline));
     }
-    let x = gain_right - face.advance("dB", LABEL_SIZE);
-    let baseline = plot.y(TOP_DB) - LABEL_SIZE / 2.0 - LABEL_GAP;
-    face.draw(mask, "dB", x, baseline, LABEL_SIZE);
+    labels
+}
+
+/// Draws [`labels`] into `mask`.
+fn draw_labels(mask: &mut Mask, plot: &Plot, face: &dyn Typeface) {
+    for (text, x, baseline) in labels(plot, face) {
+        face.draw(mask, &text, x, baseline, LABEL_SIZE);
+    }
 }
 
 /// The response as a polyline, sampled twice per physical column across the plot and at the
@@ -242,7 +248,9 @@ fn draw_curve(mask: &mut Mask, plot: &Plot, response: &FrequencyResponse, scale:
         } else {
             db.clamp(BOTTOM_DB, TOP_DB)
         };
-        let point = (x, plot.y(db));
+        // Kept a half-width inside the top edge, so a clipped boost shows the whole line.
+        let y = plot.y(db).max(plot.top + CURVE_WIDTH / 2.0);
+        let point = (x, y);
         if let Some((x0, y0)) = previous {
             mask.stroke_segment(x0, y0, point.0, point.1, CURVE_WIDTH);
         }
@@ -325,7 +333,7 @@ mod tests {
         assert_eq!(db_lines().count(), 10);
         assert_eq!(
             [db_label(12.0), db_label(0.0), db_label(-96.0)],
-            ["+12", "0", "\u{2212}96"]
+            ["+12dB", "0dB", "\u{2212}96dB"]
         );
     }
 
@@ -350,7 +358,7 @@ mod tests {
             .map(|(row, _)| *row)
             .min()
             .ok_or("no curve")?;
-        assert!((top as f32 - (TOP - CURVE_WIDTH)).abs() < 1.5, "top {top}");
+        assert_eq!(top, 0, "the clipped curve reaches the top edge");
         Ok(())
     }
 
@@ -412,23 +420,23 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_labels_include_the_units() {
+    fn test_labels_carry_units_and_stay_in_the_frame() {
         let font = StrokeFont;
         let plot = plot();
-        let mut mask = Mask::new(600, 320, 1.0);
-        draw_labels(&mut mask, &plot, &font);
-        let inked = |x0: f32, x1: f32, y0: f32, y1: f32| {
-            mask.coverage().iter().enumerate().any(|(i, &c)| {
-                let (x, y) = ((i % 600) as f32 + 0.5, (i / 600) as f32 + 0.5);
-                c > 0.0 && x > x0 && x < x1 && y > y0 && y < y1
-            })
-        };
-        // `dB` above the `+12` label, in the gutter.
-        let label_top = plot.y(TOP_DB) - LABEL_SIZE / 2.0;
-        assert!(inked(0.0, LEFT, 0.0, label_top - 1.0));
-        // `Hz` right of the `20k` label, on the frequency labels' row, inside the display.
-        let hz = plot.right() + font.advance("20k", LABEL_SIZE) / 2.0 + 1.0;
-        assert!(inked(hz, 600.0, plot.bottom(), 320.0));
-        assert!(!inked(598.0, 600.0, 0.0, 320.0));
+        let labels = labels(&plot, &font);
+        let texts: Vec<&str> = labels.iter().map(|(t, _, _)| t.as_str()).collect();
+        for text in ["20Hz", "1kHz", "20kHz", "+12dB", "0dB", "\u{2212}96dB"] {
+            assert!(texts.contains(&text), "{text}");
+        }
+        for (text, x, baseline) in &labels {
+            let right = x + font.advance(text, LABEL_SIZE);
+            assert!(*x >= 0.0 && right <= 600.0, "{text}: {x}..{right}");
+            assert!(
+                baseline - LABEL_SIZE >= 0.0 && *baseline <= DISPLAY_HEIGHT,
+                "{text}"
+            );
+        }
+        // The grid reaches the top and right edges.
+        assert_eq!((plot.top, plot.right()), (0.0, 600.0));
     }
 }
