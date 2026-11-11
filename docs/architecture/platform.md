@@ -12,6 +12,11 @@ whose format is not MP3, AAC or FLAC, or that reports more than 2 channels, a sa
 8–384 kHz or more than 24 hours, is refused, and a decode that runs past 24 hours stops with an
 error. Every AudioToolbox status is checked ([ADR-0051](../adrs/0051-audiotoolbox-codecs-use-objc2-bindings-unsafe.md)).
 
+## Folders
+
+The paths of the app's folders and files on macOS (the projects folder and the settings file) are
+worked out in `macos_platform::folders`; no other crate names a macOS folder. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
+
 ## Audio device I/O
 
 Audio devices are opened, enumerated and streamed through `cpal`, used only inside the platform

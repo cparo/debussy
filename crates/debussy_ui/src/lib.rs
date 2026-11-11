@@ -68,7 +68,7 @@ use shell::Shell;
 
 pub use app::{App, DialogFocus, Message, NewNode};
 pub use effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
-pub use launcher::{Launcher, Start};
+pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
