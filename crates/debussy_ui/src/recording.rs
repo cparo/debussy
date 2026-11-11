@@ -377,6 +377,17 @@ impl App {
         self.refresh_lanes();
     }
 
+    /// Discards the pending pass's takes and disarms every track. Only while stopped.
+    pub(crate) fn discard_pass(&mut self) {
+        if let Some(pass) = self.pass.take() {
+            self.services.discard_takes(&pass.files());
+        }
+        if !self.arming.is_empty() {
+            self.arming.clear();
+            self.sync_arming();
+        }
+    }
+
     /// Re-arms without takes, releasing the spent ones, unless playback has started again.
     fn after_pass(&mut self) {
         if !self.engine.is_playing() {

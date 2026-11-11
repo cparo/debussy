@@ -1890,6 +1890,47 @@ fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>
 }
 
 #[test]
+fn test_can_switch_project_only_when_stopped_and_disarmed() -> Result<(), Box<dyn Error>> {
+    // The ≡ menu's New project and Open entries, and ⌘N and ⌘O, follow this.
+    let (mut app, mut processor, _, _) = app()?;
+    let track = vocal(&app)?;
+    assert!(app.can_switch_project());
+    app.update(Message::Play);
+    assert!(!app.can_switch_project());
+    app.update(Message::Stop);
+    assert!(app.can_switch_project());
+    app.update(Message::Arm(track));
+    assert!(!app.can_switch_project());
+    app.update(Message::SetCountIn(0));
+    app.update(Message::Record);
+    assert!(app.is_recording());
+    assert!(!app.can_switch_project());
+    block(&mut processor)?;
+    app.update(Message::Stop);
+    assert!(!app.can_switch_project(), "the take is still being saved");
+    Ok(())
+}
+
+#[test]
+fn test_close_discards_the_pass_disarms_and_saves() -> Result<(), Box<dyn Error>> {
+    let (mut app, _, calls, _) = app()?;
+    let track = vocal(&app)?;
+    app.update(Message::Arm(track));
+    app.update(Message::Record);
+    app.update(Message::StartRename(track));
+    app.update(Message::RenameText("Lead".into()));
+    let saves = calls.borrow().saves;
+    app.close();
+    assert!(!app.engine().is_playing());
+    assert_eq!(calls.borrow().discarded, ["Vocal 0.wav"]);
+    assert!(app.arming(track).is_none());
+    assert_eq!(calls.borrow().input.last(), Some(&false));
+    assert!(calls.borrow().saves > saves, "the rename is saved");
+    assert!(app.can_switch_project());
+    Ok(())
+}
+
+#[test]
 fn test_take_stopped_before_capture_is_discarded() -> Result<(), Box<dyn Error>> {
     let (mut app, mut processor, calls, _) = app()?;
     let track = vocal(&app)?;

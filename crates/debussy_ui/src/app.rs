@@ -191,6 +191,16 @@ pub enum Message {
     Split(f32),
     /// Quit the application; the window's shell handles it.
     Quit,
+    /// Show the new project panel; the window's shell handles it.
+    NewProject,
+    /// Create the new project at this sample rate, in hertz; the window's shell handles it.
+    NewProjectRate(u32),
+    /// Choose where to create the new project, and switch to it; the window's shell handles it.
+    CreateProject,
+    /// Close the new project panel; the window's shell handles it.
+    CancelNewProject,
+    /// Choose a project to open, and switch to it; the window's shell handles it.
+    OpenProject,
     /// Undo the latest step.
     Undo,
     /// Redo the latest undone step.
@@ -860,11 +870,7 @@ impl App {
             }
             Message::SetGrid(grid) => self.grid = grid,
             Message::ToggleTone => self.set_tone(self.tone.toggled()),
-            Message::Rescaled(scale) => {
-                if scale.is_finite() && scale > 0.0 {
-                    self.scale_factor = scale;
-                }
-            }
+            Message::Rescaled(scale) => self.set_scale_factor(scale),
             Message::OpenMenu(menu) => {
                 self.menu = (self.menu != Some(menu)).then_some(menu);
                 // The device menu lists the devices present now, so one plugged in since shows.
@@ -872,7 +878,14 @@ impl App {
                     self.refresh_devices();
                 }
             }
-            Message::CloseMenu | Message::Quit => {}
+            // The shell handles these.
+            Message::CloseMenu
+            | Message::Quit
+            | Message::NewProject
+            | Message::NewProjectRate(_)
+            | Message::CreateProject
+            | Message::CancelNewProject
+            | Message::OpenProject => {}
             Message::Scrolled(offset) => self.scrolled = offset,
             Message::Split(share) => self.split = share.clamp(MIN_SPLIT, MAX_SPLIT),
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
@@ -1563,7 +1576,33 @@ impl App {
         }
     }
 
-    fn set_tone(&mut self, tone: Tone) {
+    /// Readies the project to be closed for another (`docs/architecture/user-interface.md`
+    /// "Application startup"): finishes any typing, stops the transport, discards a pass still
+    /// being recorded, disarms, and saves any change.
+    pub fn close(&mut self) {
+        self.finish_rename();
+        self.finish_tempo();
+        let _ = self.engine.stop();
+        self.discard_pass();
+        self.autosave();
+    }
+
+    /// Whether another project can be opened or created: stopped, nothing armed, and no take
+    /// still being saved.
+    pub fn can_switch_project(&self) -> bool {
+        !self.engine.is_playing() && self.arming.is_empty() && !self.recording_pending()
+    }
+
+    /// Sets the window's scale factor: physical pixels per logical pixel. Ignores one that is
+    /// not finite and positive.
+    pub fn set_scale_factor(&mut self, scale: f32) {
+        if scale.is_finite() && scale > 0.0 {
+            self.scale_factor = scale;
+        }
+    }
+
+    /// Uses the light or dark chrome.
+    pub fn set_tone(&mut self, tone: Tone) {
         self.tone = tone;
         self.generation = self.generation.wrapping_add(1);
     }

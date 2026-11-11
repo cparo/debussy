@@ -7,11 +7,25 @@ Debussy is in early development. This guide covers what works today.
 Build once with `cargo build --release`, then run:
 
 ```sh
+target/release/debussy
+```
+
+The window opens on a start screen. Pick a sample rate (44.1, 48, 88.2 or 96 kHz; 48 kHz unless
+you choose another) and click **New project…** to choose where to save it, or **Open project…**
+to open an existing `.debussy` project. The project's sample rate is fixed once it is created.
+
+With a project open, the ≡ menu at the top right has **New project…** (⌘N) and **Open…** (⌘O);
+the open project is saved before the other one opens. Both need playback stopped and no track
+armed. New project will not overwrite something that already exists.
+
+A project can also be named on the command line:
+
+```sh
 target/release/debussy MySong.debussy
 ```
 
 A project that does not exist yet is created at 48 kHz; add `--rate 44100` (or 88200, 96000) to
-choose another rate. The project's sample rate is fixed once it is created.
+choose another rate.
 
 Playback uses the audio device chosen in the window (at first, the system's default output),
 which must support the project's rate.

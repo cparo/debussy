@@ -14,6 +14,8 @@ Image support is on without codecs (`image-without-codecs`), for drawing in-memo
 engine's control side. It reaches I/O and the platform only through its `Services` trait, which
 `debussy` implements: disk-streamed track feeds, moving the streams, waveform summaries, and
 saving. Its update logic runs without a window, so it is tested directly ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
+Opening and creating projects goes through its `Launcher` trait, also implemented by `debussy`
+(see [Application startup](#application-startup)).
 
 The window is laid out as described under [Layout](#layout).
 
@@ -23,8 +25,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 
 - **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
-  light/dark toggle, and the ≡ application menu: new and open (disabled until the interface can
-  switch projects), import, export, export mono, and quit.
+  light/dark toggle, and the ≡ application menu: new project and open (see
+  [Application startup](#application-startup)), import, export, export mono, and quit.
 - **Bottom bar:** the audio device button, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the click button, the position bar, the playhead's time, and the
   status line ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). The
@@ -231,11 +233,25 @@ Cut, delete and paste are refused while the transport is playing; copy is not.
 
 ## Application startup
 
-`debussy` opens the project named on its command line, creating it if missing, imports any
+With a project on its command line, `debussy` opens it, creating it if missing, imports any
 `--import` files as new tracks, builds missing waveform summaries, and opens the window, playing
-through the default output device, which must run at the project rate. With `--export` it renders
+through the chosen output device, which must run at the project rate. With `--export` it renders
 the project to a file and exits instead. Command-line import and export stand in until the
 interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).
+
+With no arguments, the window opens on a start screen: a sample rate picker (44.1, 48, 88.2 or
+96 kHz, 48 kHz by default), New project, and Open project. With a project open, the ≡ menu's New
+project (⌘N) shows the same panel over the window, with Cancel, and Open (⌘O) opens another
+project; both need the transport stopped, no track armed and no take still being saved. New
+project asks where to save through a save dialog, adds the `.debussy` extension if missing, and
+refuses a path that exists; Open asks for a bundle through a folder dialog and never creates one.
+
+Switching saves and closes the open project, then replaces the whole `App`, with its services and
+audio output; the tone and scale factor carry over. Opening goes through `debussy_ui`'s `Launcher`
+trait, which `debussy` implements, in two steps: everything that can fail happens first, while the
+open project still runs, and a failure shows in the status line and leaves it open; only then is
+the old `App` dropped and the new one's audio output started
+([ADR-0097](../adrs/0097-debussy-starts-without-a-project-and-switches.md)).
 
 ## Recording
 
