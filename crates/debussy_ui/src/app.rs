@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
+use std::path::PathBuf;
 
 use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
 
@@ -199,8 +200,15 @@ pub enum Message {
     CreateProject,
     /// Close the new project panel; the window's shell handles it.
     CancelNewProject,
-    /// Choose a project to open, and switch to it; the window's shell handles it.
+    /// Show the Open browser, listing the projects folder; the window's shell handles it.
     OpenProject,
+    /// Open this project from the Open browser's list; the window's shell handles it.
+    OpenListed(PathBuf),
+    /// Choose a project anywhere through a folder dialog, and switch to it; the window's shell
+    /// handles it.
+    BrowseProjects,
+    /// Close the Open browser; the window's shell handles it.
+    CancelOpen,
     /// Undo the latest step.
     Undo,
     /// Redo the latest undone step.
@@ -885,7 +893,10 @@ impl App {
             | Message::NewProjectRate(_)
             | Message::CreateProject
             | Message::CancelNewProject
-            | Message::OpenProject => {}
+            | Message::OpenProject
+            | Message::OpenListed(_)
+            | Message::BrowseProjects
+            | Message::CancelOpen => {}
             Message::Scrolled(offset) => self.scrolled = offset,
             Message::Split(share) => self.split = share.clamp(MIN_SPLIT, MAX_SPLIT),
             Message::Undo | Message::Redo => self.history(message == Message::Undo),
