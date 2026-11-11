@@ -120,4 +120,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0094](0094-the-parametric-eq-has-four-bands-framed-by.md) | The parametric EQ has four bands framed by optional high- and low-pass stages | Accepted | [Parametric equaliser](../architecture/effects.md#parametric-equaliser) |
 | [ADR-0095](0095-rasters-reach-the-gpu-in-strips-under-the-renderer.md) | Rasters reach the GPU in strips under the renderer's synchronous upload limit, and the effect display redraws only when its inputs change | Accepted | [Effect displays](../architecture/effect-displays.md#effect-displays) |
 | [ADR-0096](0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md) | Effect dialogs share the mixer's keyboard focus, and their group strips are as tall as the tallest | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0097](0097-debussy-starts-without-a-project-and-switches.md) | debussy starts without a project and switches projects by replacing the App | Accepted | [Application startup](../architecture/user-interface.md#application-startup) |
 

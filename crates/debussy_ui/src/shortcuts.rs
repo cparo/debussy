@@ -35,6 +35,8 @@ pub fn shortcut(event: Event) -> Option<Message> {
             "v" => Some(Message::Paste),
             "z" if modifiers.shift() => Some(Message::Redo),
             "z" => Some(Message::Undo),
+            "n" if !modifiers.shift() => Some(Message::NewProject),
+            "o" if !modifiers.shift() => Some(Message::OpenProject),
             _ => None,
         },
         _ => None,
@@ -81,6 +83,14 @@ mod tests {
         assert_eq!(
             shortcut(press(character("Z"), command | Modifiers::SHIFT)),
             Some(Message::Redo)
+        );
+        assert_eq!(
+            shortcut(press(character("n"), command)),
+            Some(Message::NewProject)
+        );
+        assert_eq!(
+            shortcut(press(character("o"), command)),
+            Some(Message::OpenProject)
         );
         assert_eq!(shortcut(press(character("x"), Modifiers::empty())), None);
         assert_eq!(

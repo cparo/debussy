@@ -7,8 +7,8 @@ use anyhow::{Result, bail};
 /// What the user asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Args {
-    /// The project bundle to open, created if missing.
-    pub project: PathBuf,
+    /// The project bundle to open, created if missing; `None` opens the start screen.
+    pub project: Option<PathBuf>,
     /// The sample rate for a new project.
     pub sample_rate: u32,
     /// Files to import as new tracks before opening.
@@ -21,8 +21,9 @@ pub struct Args {
 
 /// The usage text.
 pub const USAGE: &str = "\
-usage: debussy PROJECT.debussy [--rate HZ] [--import FILE]... [--export FILE [--mono]]
+usage: debussy [PROJECT.debussy [--rate HZ] [--import FILE]... [--export FILE [--mono]]]
 
+  With no project, opens the start screen to create or open one.
   Opens PROJECT.debussy, creating it at --rate (default 48000) if it does not exist.
   --import FILE   import WAV, FLAC, AAC or MP3 as a new track at the start (repeatable)
   --export FILE   render the whole project to FILE (.wav 24-bit, .flac 24-bit, .m4a AAC)
@@ -57,9 +58,9 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Args> {
             extra => bail!("unexpected argument {extra}\n\n{USAGE}"),
         }
     }
-    let Some(project) = project else {
-        bail!("{USAGE}");
-    };
+    if project.is_none() && (!imports.is_empty() || export.is_some()) {
+        bail!("--import and --export need a project\n\n{USAGE}");
+    }
     Ok(Args {
         project,
         sample_rate,
@@ -91,7 +92,7 @@ mod tests {
             "mix.flac",
             "--mono",
         ]))?;
-        assert_eq!(args.project, PathBuf::from("Song.debussy"));
+        assert_eq!(args.project, Some(PathBuf::from("Song.debussy")));
         assert_eq!(args.sample_rate, 44_100);
         assert_eq!(
             args.imports,
@@ -105,13 +106,23 @@ mod tests {
     #[test]
     fn test_parse_refuses_bad_input() {
         for bad in [
-            &[][..],
-            &["a", "b"],
+            &["a", "b"][..],
+            &["--import", "a.wav"],
+            &["--export", "mix.wav"],
             &["a", "--rate"],
             &["a", "--bogus"],
             &["a", "--rate", "x"],
         ] {
             assert!(parse(strings(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn test_parse_without_arguments_opens_the_start_screen() -> Result<()> {
+        let args = parse(strings(&[]))?;
+        assert_eq!(args.project, None);
+        assert_eq!(args.sample_rate, 48_000);
+        assert!(args.imports.is_empty() && args.export.is_none());
+        Ok(())
     }
 }

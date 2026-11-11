@@ -53,7 +53,7 @@ pub(crate) const RENAME_INPUT: &str = "rename-track";
 /// The size of a toolbar button's icon, and of the project name's text, in logical pixels.
 const ICON_SIZE: f32 = 16.0;
 /// A toolbar button's text size.
-const TOOL_TEXT: f32 = 13.0;
+pub(crate) const TOOL_TEXT: f32 = 13.0;
 /// The width of the playhead time beside the position bar: room for "00:00:00.000".
 const TIME_WIDTH: f32 = 100.0;
 /// The tempo field's width in the bottom bar.
@@ -204,7 +204,7 @@ fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
 }
 
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
-fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
+pub(crate) fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
     if let [(face, message, selected)] = buttons.as_slice() {
         return tool(*face, message.clone(), *selected);
     }
@@ -941,9 +941,11 @@ impl App {
         let when_stopped = |message: Message| stopped.then_some(message);
         let entries = match menu {
             Menu::App => {
+                let can_switch = self.can_switch_project();
+                let when_idle = |message: Message| can_switch.then_some(message);
                 vec![
-                    Entry::item("New project", None),
-                    Entry::item("Open…", None),
+                    Entry::item("New project…", when_idle(Message::NewProject)),
+                    Entry::item("Open…", when_idle(Message::OpenProject)),
                     Entry::Separator,
                     Entry::item("Import…", when_stopped(Message::Import)),
                     Entry::item("Export…", Some(Message::Export(false))),
