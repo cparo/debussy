@@ -11,11 +11,16 @@ target/release/debussy
 ```
 
 The window opens on a start screen. Pick a sample rate (44.1, 48, 88.2 or 96 kHz; 48 kHz unless
-you choose another) and click **New project…** to choose where to save it, or **Open project…**
-to open an existing `.debussy` project. The project's sample rate is fixed once it is created.
+you choose another) and click **New project…** to choose where to save it. Projects go in
+`~/Music/Debussy` unless you pick another folder, and the first is suggested as `Untitled`. The
+project's sample rate is fixed once it is created.
 
-With a project open, the ≡ menu at the top right has **New project…** (⌘N) and **Open…** (⌘O);
-the open project is saved before the other one opens. Both need playback stopped and no track
+Below that, the start screen lists the projects in `~/Music/Debussy`, newest first; click one to
+open it. **Browse…** opens a `.debussy` project stored anywhere else.
+
+With a project open, the ≡ menu at the top right has **New project…** (⌘N) and **Open…** (⌘O),
+which shows the same list over the window (Escape cancels); the open project is saved before the
+other one opens. Both need playback stopped and no track
 armed. New project will not overwrite something that already exists.
 
 A project can also be named on the command line:

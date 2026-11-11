@@ -113,8 +113,7 @@ silent stand-in with stereo ports enough for its saved connections ([ADR-0054](.
 
 ## Project bundle
 
-A project is a directory named `<name>.debussy`, presented by macOS as a single document,
-containing:
+A project is a directory named `<name>.debussy`, containing:
 
 - `project.json` — the current state, with an integer `format_version` field;
 - `versions/` — one JSON file per named version, in the same format as `project.json`, named by
@@ -125,6 +124,15 @@ containing:
   regenerated.
 
 A reader must refuse a `format_version` newer than it supports and must migrate older ones ([ADR-0013](../adrs/0013-a-project-is-a-bundle-directory-with-versioned.md)).
+macOS shows the bundle as a folder until the type is declared as a package
+([#128](https://github.com/cparo/debussy/issues/128)).
+
+## Projects folder
+
+New projects are created in `~/Music/Debussy` by default, the folder created when missing. Open
+lists the projects there: each directory named `*.debussy` directly inside it that holds a
+`project.json`, newest `project.json` modification time first, at most 1000. A project elsewhere is
+opened through a folder dialog. The app keeps no list of recent projects. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
 
 ## Saved format
 

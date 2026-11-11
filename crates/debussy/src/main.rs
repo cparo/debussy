@@ -10,23 +10,13 @@ mod launcher;
 mod project;
 mod services;
 
-use std::path::PathBuf;
-
 use anyhow::{Context, Result};
-
-/// Where the app settings live: `~/Library/Application Support/Debussy/settings.json`.
-fn settings_path() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").context("HOME is not set")?;
-    Ok(PathBuf::from(home)
-        .join("Library")
-        .join("Application Support")
-        .join("Debussy")
-        .join("settings.json"))
-}
+use macos_platform::folders;
 
 fn main() -> Result<()> {
     let args = args::parse(std::env::args().skip(1))?;
-    let launcher = launcher::AppLauncher::new(settings_path()?);
+    let settings_path = folders::settings_path().context("HOME is not set")?;
+    let launcher = launcher::AppLauncher::new(settings_path, folders::projects_dir());
     let app = match &args.project {
         Some(path) => {
             let (mut bundle, mut session) = project::open_or_create(path, args.sample_rate)?;
