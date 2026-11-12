@@ -113,7 +113,7 @@ fn test_dynamics_runs_real_time_at_its_largest_settings() -> TestResult {
     let quiet = rig.render(40)?;
     assert!(quiet[..4_800].iter().all(|&x| x == 0.0));
     rig.set(DynamicsControl::Asymmetric, 1.0)?;
-    rig.set(DynamicsControl::NegativeSteepness, 12.0)?;
+    rig.set(DynamicsControl::NegativeSteepness, 4.0)?;
     rig.set(DynamicsControl::LinkChannels, 0.0)?;
     rig.set(DynamicsControl::Preamp, 12.0)?;
     rig.set(DynamicsControl::CurveExponent, 2.0)?;
@@ -131,7 +131,8 @@ fn test_dynamics_waveshaper_runs_real_time() -> TestResult {
         (DynamicsControl::Release, 0.0),
         (DynamicsControl::Oversampling, 1.0),
     ])?;
-    rig.set(DynamicsControl::Steepness, 24.0)?;
+    rig.set(DynamicsControl::Steepness, 10.0)?;
+    rig.set(DynamicsControl::CurveExponent, 0.2)?;
     let output = rig.render(20)?;
     // Driven hard, the sine is squared off near ±1; oversampled, the down-sampling filter may
     // ring a little past it.

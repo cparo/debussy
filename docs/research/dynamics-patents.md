@@ -7,6 +7,8 @@ claims of the in-force ones against Planned design (see Claim analysis).
 **Decision (Chris Paro, 2026-11-12, `flag-risk` tag `patent`):** weighted-peak mode is dropped;
 no mode derives a gain from a block's peak, so row 1's "maximum amplitude value" element is
 absent and the design as built does not read on any in-force candidate. Recorded in ADR-0100.
+Element 5 later moved to normalised dB levels (ADR-0102); no verdict above depends on the curve's
+form.
 
 ## Planned design
 

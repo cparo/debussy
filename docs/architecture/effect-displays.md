@@ -45,9 +45,10 @@ pixels on the left and 20 at the bottom for labels, grid and labels drawn as in 
 displays", and the curves in the tone's audio colour:
 
 - **Envelope**, on the left: the window weights of `docs/architecture/effects.md` "Dynamics"
-  against time. The release side fills the left half of the plot and the attack side the right,
-  each scaled to its own length; a side of zero length gives the other the whole width, and with
-  both zero the window is a single vertical line. Weight runs from 0 at the bottom to 1 at the
+  against time on one linear axis, from the oldest sample weighed (or the current sample, if
+  later) at the left to the lookahead at the right, so each side's width is in proportion to its
+  length; with both sides zero the window is a single vertical line
+  ([ADR-0103](../adrs/0103-the-dynamics-envelope-plot-has-one-linear-time.md)). Weight runs from 0 at the bottom to 1 at the
   top, with grid lines at 0, 0.5 and 1. A brighter vertical line marks the current sample. The
   labels under the plot give the oldest sample's age at the left, the lookahead at the right and
   `0ms` at the current sample when there is room, such as `−110ms` and `+10ms`.

@@ -49,7 +49,7 @@ struct Settings {
     preamp: f32,
     makeup: f32,
     asymmetric: bool,
-    /// Steepness (dB), curve exponent and ceiling (dB) for positive, then negative, samples.
+    /// Steepness, curve exponent and ceiling (dB) for positive, then negative, samples.
     curves: [(f32, f32, f32); 2],
 }
 
@@ -65,13 +65,13 @@ impl Settings {
         use DynamicsControl as C;
         let asymmetric = get(C::Asymmetric, 0.0) >= 0.5;
         let positive = (
-            get(C::Steepness, 0.0),
+            get(C::Steepness, 1.0),
             get(C::CurveExponent, 1.0),
             get(C::Ceiling, 0.0),
         );
         let negative = if asymmetric {
             (
-                get(C::NegativeSteepness, 0.0),
+                get(C::NegativeSteepness, 1.0),
                 get(C::NegativeCurveExponent, 1.0),
                 get(C::NegativeCeiling, 0.0),
             )
@@ -258,9 +258,10 @@ fn ms_label(ms: f32) -> String {
     }
 }
 
-/// The envelope window: its release side on the left half and its attack side on the right,
-/// each scaled to fill its half (a side of zero length gives the other the whole width), the
-/// peak at weight 1 at the top. The current sample is a brighter vertical line.
+/// The envelope window against time on one linear axis, from the oldest sample it weighs (or
+/// the current sample, if later) at the left to the lookahead at the right, so each side's width
+/// is in proportion to its length. Weight 1 is at the top. The current sample is a brighter
+/// vertical line.
 #[allow(clippy::too_many_arguments)] // the frame, its settings and the three layers it draws on
 fn draw_envelope(
     raster: &mut Raster,
@@ -272,69 +273,47 @@ fn draw_envelope(
     scale: f32,
 ) {
     let (attack, release) = (settings.attack.max(0.0), settings.release.max(0.0));
-    let peak_x = match (attack > 0.0, release > 0.0) {
-        (true, true) | (false, false) => frame.left + frame.width / 2.0,
-        (true, false) => frame.left,
-        (false, true) => frame.right(),
-    };
-    // The `x` of a time `offset` ms from the peak.
-    let x_of = |offset: f32| {
-        if offset >= 0.0 {
-            if attack > 0.0 {
-                peak_x + (offset / attack).min(1.0) * (frame.right() - peak_x)
-            } else {
-                peak_x
-            }
-        } else if release > 0.0 {
-            peak_x - (-offset / release).min(1.0) * (peak_x - frame.left)
-        } else {
-            peak_x
-        }
-    };
+    let lookahead = settings.lookahead.max(0.0);
+    // Times in ms relative to the current sample, positive ahead; the peak is at `p`.
+    let peak = lookahead - attack;
+    let (mut start, mut end) = ((peak - release).min(0.0), lookahead);
+    if end - start < 1e-3 {
+        // Nothing to span: a window of zero length at the current sample.
+        (start, end) = (-0.5, 0.5);
+    }
+    let x_of = |t: f32| frame.left + (t - start) / (end - start) * frame.width;
     let y_of = |weight: f32| frame.bottom() - weight.clamp(0.0, 1.0) * frame.height;
     for weight in [0.0, 0.5, 1.0] {
         horizontal(raster, frame, y_of(weight), GRID);
         label_beside(labels, frame, face, &format!("{weight}"), y_of(weight));
     }
-    // The current sample is `attack − lookahead` ms before the peak's offset from it.
-    let current = attack - settings.lookahead;
-    vertical(raster, frame, x_of(current), GRID_ZERO);
-    // Labels: the oldest sample's age at the left, the lookahead at the right, and the current
-    // sample.
-    let oldest = -(attack + release - settings.lookahead);
-    label_under(labels, frame, face, &ms_label(oldest), frame.left);
-    label_under(
-        labels,
-        frame,
-        face,
-        &ms_label(settings.lookahead),
-        frame.right(),
-    );
-    let now = x_of(current);
+    vertical(raster, frame, x_of(0.0), GRID_ZERO);
+    label_under(labels, frame, face, &ms_label(peak - release), frame.left);
+    label_under(labels, frame, face, &ms_label(lookahead), frame.right());
+    let now = x_of(0.0);
     if now - frame.left > 40.0 && frame.right() - now > 40.0 {
         label_under(labels, frame, face, "0ms", now);
     }
     if attack == 0.0 && release == 0.0 {
-        curves.stroke_segment(peak_x, y_of(0.0), peak_x, y_of(1.0), CURVE_WIDTH);
+        let x = x_of(peak);
+        curves.stroke_segment(x, y_of(0.0), x, y_of(1.0), CURVE_WIDTH);
         return;
     }
-    // A few thousand points at most.
+    // A few thousand points at most, plus the peak itself so its corner is drawn.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let steps = (frame.width * scale * 2.0).ceil().max(1.0) as u32;
+    #[allow(clippy::cast_precision_loss)]
+    let mut times: Vec<f32> = (0..=steps)
+        .map(|step| start + (end - start) * step as f32 / steps as f32)
+        .collect();
+    times.push(peak);
+    times.sort_by(f32::total_cmp);
     let mut previous: Option<(f32, f32)> = None;
-    for step in 0..=steps {
-        #[allow(clippy::cast_precision_loss)]
-        let x = frame.left + frame.width * step as f32 / steps as f32;
-        let offset = if x >= peak_x {
-            if frame.right() > peak_x {
-                (x - peak_x) / (frame.right() - peak_x) * attack
-            } else {
-                0.0
-            }
-        } else {
-            -(peak_x - x) / (peak_x - frame.left) * release
-        };
-        let y = y_of(settings.weight(offset)).max(frame.top + CURVE_WIDTH / 2.0);
+    for t in times {
+        let (x, y) = (
+            x_of(t),
+            y_of(settings.weight(t - peak)).max(frame.top + CURVE_WIDTH / 2.0),
+        );
         if let Some((x0, y0)) = previous {
             curves.stroke_segment(x0, y0, x, y, CURVE_WIDTH);
         }
@@ -488,10 +467,33 @@ mod tests {
     }
 
     #[test]
+    fn test_draw_envelope_widths_follow_attack_and_release()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // 10 ms attack, 90 ms release, no lookahead: the peak sits 90% across the envelope plot,
+        // at the top, so the attack side is a tenth of its width.
+        let pixels = draw(&[
+            (DynamicsControl::Attack, 10.0),
+            (DynamicsControl::Release, 90.0),
+        ])
+        .ok_or("nothing drawn")?;
+        let frame = Frame::half(0.0, 800.0);
+        let top: Vec<usize> = accent(&pixels)
+            .into_iter()
+            .filter(|&(x, y)| y < 4 && (x as f32) < frame.right())
+            .map(|(x, _)| x)
+            .collect();
+        let peak = top.iter().sum::<usize>() as f32 / top.len().max(1) as f32;
+        let expected = frame.left + 0.9 * frame.width;
+        assert!((peak - expected).abs() < 3.0, "{peak} vs {expected}");
+        Ok(())
+    }
+
+    #[test]
     fn test_output_db_includes_preamp_makeup_and_ceiling() {
         let settings = Settings::from(&[]);
-        // tanh of a small level is the level.
-        assert!((settings.output_db(-60.0, 0) + 60.0).abs() < 0.01);
+        // The curve fixes the floor and full scale.
+        assert!(settings.output_db(0.0, 0).abs() < 1e-3);
+        assert!(settings.output_db(-60.0, 0) > -60.0);
         let loud = Settings {
             makeup: 24.0,
             ..settings

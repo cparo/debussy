@@ -90,8 +90,8 @@ clipped at `ceiling`. The parameters are listed, and shown, in this order:
 | `release` | 0 to 5 000 | 100 | The window's past side, in ms; stopped-only |
 | `release exponent` | 0.1 to 16, logarithmic | 1 | Shape of the release side; stopped-only |
 | `lookahead` | 0 to 100 | 0 | The window's reach ahead and the effect's delay, in ms; stopped-only |
-| `steepness` | −24 to +48 | 0 | Level scale inside the curve, in dB |
-| `curve exponent` | 1 to 16, logarithmic | 1 | The curve's exponent |
+| `steepness` | 0.01 to 10, logarithmic | 1 | Sharpness of the curve's shoulder |
+| `curve exponent` | 0 to 16 | 1 | Below 1 raises quiet levels, above 1 lowers them |
 | `makeup` | −24 to +24 | 0 | Gain after the curve, in dB |
 | `ceiling` | −48 to +24 | 0 | Clip level in dB |
 | `asymmetric` | off (0) or on (1) | off | Whether negative samples use the `negative` values |
@@ -106,13 +106,16 @@ clipped at `ceiling`. The parameters are listed, and shown, in this order:
   of each block the level is `√(Σ wₖ·Sₖ / (block length · Σ wₖ))` over the window's blocks, each
   weighted at its centre, so a full-scale square wave reads 1. Linked, both channels use the mean
   of their two weighted sums.
-- **Gain.** For level `x` the curve's output level is `tanh((s·x)^c)`, with `s` the steepness as a
-  linear gain and `c` the curve exponent; the gain is that divided by `x`, and at silence its
-  limit (`s` when `c` is 1, else 0). The gain moves linearly from its previous value to the new
+- **Gain.** The curve maps levels in dB. With the level normalised as `u = (dB + 96) / 96` (0 at
+  −96 dB, 1 at 0 dB), steepness `s` and curve exponent `c`, the output is
+  `−96·(1 − tanh((s·u)^c) / tanh(s^c))` dB, so −96 dB and 0 dB map to themselves; at or below
+  −96 dB, and at silence, the level passes unchanged. The gain is the output level less the input
+  level ([ADR-0102](../adrs/0102-the-dynamics-curve-maps-normalised-db-levels.md)). The gain moves linearly from its previous value to the new
   one over the block after it is computed. When asymmetric, a negative sample takes the gain of
   the `negative` steepness and exponent from the same level.
 - **Waveshaper.** With `attack` and `release` both 0, each sample of each channel is its own
-  level, so a sample `y` becomes `sign(y)·tanh((s·|y|)^c)`; `link channels` has no effect.
+  level, so a sample's magnitude is mapped through the curve and its sign kept; `link channels`
+  has no effect.
 - **DC blocker.** A one-pole high-pass at 7 Hz, cleared when `asymmetric` is turned on.
 - **Clip.** The output is held between `−negative ceiling` and `+ceiling` (both `ceiling` unless
   asymmetric), each as a linear gain. Oversampled, the down-sampling filter may ring slightly past

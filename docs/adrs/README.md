@@ -125,4 +125,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0099](0099-the-dynamics-effect-is-a-weighted-rms-window.md) | The dynamics effect is a weighted-RMS window driving a tanh transfer curve | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
 | [ADR-0100](0100-weighted-rms-dynamics-may-be-built-in-house-no.md) | Weighted-RMS dynamics may be built in-house; no gain is derived from a block's peak | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0101](0101-the-dynamics-display-shows-the-envelope-window.md) | The dynamics display shows the envelope window beside the transfer curve | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
+| [ADR-0102](0102-the-dynamics-curve-maps-normalised-db-levels.md) | The dynamics curve maps normalised dB levels through tanh | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
+| [ADR-0103](0103-the-dynamics-envelope-plot-has-one-linear-time.md) | The dynamics envelope plot has one linear time axis | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
 

@@ -3,12 +3,13 @@
 //!
 //! The signal is amplified by the preamp, then delayed by the lookahead. Its level is a weighted
 //! RMS over a window of 0.5 ms blocks, recomputed once per block, and the gain the transfer curve
-//! gives for that level is interpolated across the next block. With attack and release both zero
+//! gives for that level is interpolated across the next block. The curve works on levels in dB,
+//! normalised so the noise floor (−96 dB) is 0 and full scale is 1 (ADR-0102). With attack and release both zero
 //! the level is each sample's own magnitude, which makes the curve a waveshaper. Shaping, the DC
 //! blocker, makeup and the clip run oversampled.
 
 use audio_buffers::Layout;
-use dsp::{OnePole, OnePoleCoefficients, Oversampler, db_to_gain};
+use dsp::{OnePole, OnePoleCoefficients, Oversampler, db_to_gain, gain_to_db};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
@@ -31,8 +32,8 @@ const BLOCK_SECONDS: f64 = 0.000_5;
 /// The DC blocker's cutoff, in Hz.
 const DC_BLOCKER_HZ: f32 = 7.0;
 
-/// Below this level the transfer curve's gain is taken at its limit for silence.
-const SILENT_LEVEL: f32 = 1e-9;
+/// The level the transfer curve maps to 0, in dB; full scale maps to 1.
+pub const FLOOR_DB: f32 = -96.0;
 
 /// One of the dynamics effect's controls, each a parameter, in the order they are declared and
 /// shown.
@@ -52,7 +53,7 @@ pub enum DynamicsControl {
     ReleaseExponent,
     /// How far ahead the window reaches, in ms: the effect's delay; stopped-only.
     Lookahead,
-    /// The level scale inside the transfer curve, in dB.
+    /// How sharp the transfer curve's shoulder is: a multiplier inside it.
     Steepness,
     /// The transfer curve's exponent.
     CurveExponent,
@@ -135,6 +136,12 @@ impl DynamicsControl {
                 .with_scale(Scale::Logarithmic)
                 .with_group(group)
         };
+        let steepness = |group| {
+            ParameterInfo::new(name, 0.01, 10.0, 1.0)
+                .with_scale(Scale::Logarithmic)
+                .with_group(group)
+        };
+        let curve_exponent = |group| ParameterInfo::new(name, 0.0, 16.0, 1.0).with_group(group);
         match self {
             DynamicsControl::Preamp => db(-24.0, 48.0, "input"),
             DynamicsControl::LinkChannels => ParameterInfo::new(name, 0.0, 1.0, 1.0)
@@ -147,16 +154,16 @@ impl DynamicsControl {
                 exponent(0.1, "envelope").stopped_only()
             }
             DynamicsControl::Lookahead => ms(MAX_LOOKAHEAD_MS, 0.0),
-            DynamicsControl::Steepness => db(-24.0, 48.0, "curve"),
-            DynamicsControl::CurveExponent => exponent(1.0, "curve"),
+            DynamicsControl::Steepness => steepness("curve"),
+            DynamicsControl::CurveExponent => curve_exponent("curve"),
             DynamicsControl::Makeup => db(-24.0, 24.0, "curve"),
             DynamicsControl::Ceiling => db(-48.0, 24.0, "curve"),
             DynamicsControl::Asymmetric => ParameterInfo::new(name, 0.0, 1.0, 0.0)
                 .with_scale(Scale::Toggle)
                 .with_state_labels("Asymmetric", "Symmetric")
                 .with_group("negative"),
-            DynamicsControl::NegativeSteepness => db(-24.0, 48.0, "negative"),
-            DynamicsControl::NegativeCurveExponent => exponent(1.0, "negative"),
+            DynamicsControl::NegativeSteepness => steepness("negative"),
+            DynamicsControl::NegativeCurveExponent => curve_exponent("negative"),
             DynamicsControl::NegativeCeiling => db(-48.0, 24.0, "negative"),
             DynamicsControl::Oversampling => ParameterInfo::new(name, 0.0, 3.0, 0.0)
                 .with_scale(Scale::Choice(
@@ -195,42 +202,44 @@ pub fn window_weight(
     }
 }
 
-/// The transfer curve: the output level for input level `level` (non-negative, linear), with
-/// linear `steepness` and `exponent`: `tanh((steepness · level)^exponent)`.
-pub fn transfer(level: f32, steepness: f32, exponent: f32) -> f32 {
-    let scaled = steepness * level;
-    if exponent == 1.0 {
-        scaled.tanh()
-    } else {
-        scaled.powf(exponent).tanh()
+/// The transfer curve: the output level in dB for input level `input_db`. With
+/// `u = (input_db − FLOOR_DB) / −FLOOR_DB` (0 at the floor, 1 at full scale), the output is
+/// `FLOOR_DB · (1 − v)` with `v = tanh((steepness · u)^exponent) / tanh(steepness^exponent)`, so
+/// the floor and full scale map to themselves. An exponent below 1 bends the curve up (quiet
+/// levels raised), above 1 down (quiet levels lowered); a higher steepness sharpens the shoulder.
+/// At or below the floor the level passes unchanged.
+pub fn transfer_db(input_db: f32, steepness: f32, exponent: f32) -> f32 {
+    let u = (input_db - FLOOR_DB) / -FLOOR_DB;
+    if u.is_nan() || u <= 0.0 {
+        return input_db;
     }
+    let v = (steepness * u).powf(exponent).tanh() / steepness.powf(exponent).tanh();
+    FLOOR_DB * (1.0 - v)
 }
 
-/// The gain the transfer curve applies at `level`: `transfer(level) / level`, or its limit as
-/// the level falls to silence.
+/// The gain the transfer curve applies at linear level `level`: unity at silence and at or below
+/// the floor.
 fn curve_gain(level: f32, steepness: f32, exponent: f32) -> f32 {
-    if level > SILENT_LEVEL {
-        transfer(level, steepness, exponent) / level
-    } else if exponent <= 1.0 {
-        steepness
-    } else {
-        0.0
+    if level <= 0.0 {
+        return 1.0;
     }
+    let input_db = gain_to_db(level);
+    db_to_gain(transfer_db(input_db, steepness, exponent) - input_db)
 }
 
 /// The static curve the display plots: the output level for a steady input level `input`
-/// (linear), through the preamp, transfer curve, makeup and clip, with every value in dB but
-/// `curve_exponent`.
+/// (linear), through the preamp, transfer curve, makeup and clip. The gains are in dB; the
+/// steepness and exponent are as [`transfer_db`] takes them.
 pub fn static_output(
     input: f32,
     preamp_db: f32,
-    steepness_db: f32,
+    steepness: f32,
     curve_exponent: f32,
     makeup_db: f32,
     ceiling_db: f32,
 ) -> f32 {
     let level = input * db_to_gain(preamp_db);
-    let shaped = transfer(level, db_to_gain(steepness_db), curve_exponent) * db_to_gain(makeup_db);
+    let shaped = level * curve_gain(level, steepness, curve_exponent) * db_to_gain(makeup_db);
     shaped.min(db_to_gain(ceiling_db))
 }
 
@@ -553,8 +562,7 @@ impl Running {
             for sample in self.high.iter_mut() {
                 let side = side_of(*sample);
                 let shaped = if instantaneous {
-                    transfer(sample.abs(), step.steepness[side], step.exponent[side])
-                        .copysign(*sample)
+                    *sample * curve_gain(sample.abs(), step.steepness[side], step.exponent[side])
                 } else {
                     *sample * channel.gain[side]
                 };
@@ -651,8 +659,8 @@ impl Dynamics {
             preamp: db_to_gain(self.get(C::Preamp)),
             makeup: db_to_gain(self.get(C::Makeup)),
             steepness: [
-                db_to_gain(self.get(C::Steepness)),
-                db_to_gain(negative(C::NegativeSteepness, C::Steepness)),
+                self.get(C::Steepness),
+                negative(C::NegativeSteepness, C::Steepness),
             ],
             exponent: [
                 self.get(C::CurveExponent),
@@ -835,10 +843,24 @@ mod tests {
     }
 
     #[test]
-    fn test_curve_gain_limits_at_silence() {
-        assert_eq!(curve_gain(0.0, 2.0, 1.0), 2.0);
-        assert_eq!(curve_gain(0.0, 2.0, 3.0), 0.0);
-        assert!((curve_gain(1.0, 1.0, 1.0) - 1.0_f32.tanh()).abs() < 1e-6);
+    fn test_curve_gain_is_unity_at_silence_and_below_floor() {
+        assert_eq!(curve_gain(0.0, 2.0, 1.0), 1.0);
+        assert!((curve_gain(db_to_gain(-120.0), 2.0, 3.0) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_transfer_db_fixes_floor_and_full_scale() {
+        for (steepness, exponent) in [(0.01, 1.0), (1.0, 0.5), (3.0, 2.0), (10.0, 16.0)] {
+            assert!((transfer_db(FLOOR_DB + 1e-6, steepness, exponent) - FLOOR_DB).abs() < 0.1);
+            assert!(transfer_db(0.0, steepness, exponent).abs() < 1e-4);
+        }
+        // Below 1 the curve bends up, above 1 down; exponent 0 sends everything above the floor
+        // to full scale.
+        assert!(transfer_db(-48.0, 0.01, 0.5) > -48.0);
+        assert!(transfer_db(-48.0, 0.01, 2.0) < -48.0);
+        assert!(transfer_db(-48.0, 1.0, 0.0).abs() < 1e-4);
+        // A shallow steepness with exponent 1 is nearly the identity.
+        assert!((transfer_db(-48.0, 0.01, 1.0) + 48.0).abs() < 0.01);
     }
 
     #[test]
@@ -857,13 +879,21 @@ mod tests {
     }
 
     #[test]
-    fn test_process_compresses_full_scale_square_to_tanh_of_one() -> TestResult {
-        // A full-scale square wave reads level 1, so the default curve's gain is tanh(1).
+    fn test_process_maps_square_levels_through_the_curve() -> TestResult {
+        // A full-scale square wave reads 0 dB, which the curve maps to itself; half scale reads
+        // −6 dB, which the default curve raises.
         let mut dynamics = effect(&[])?;
         let (mut left, mut right) = (square(1.0, 24_000), square(1.0, 24_000));
         run(&mut dynamics, &mut left, &mut right);
         let settled = peak(&left[20_000..]);
-        assert!((settled - 1.0_f32.tanh()).abs() < 1e-3, "{settled}");
+        assert!((settled - 1.0).abs() < 1e-3, "{settled}");
+        let mut dynamics = effect(&[])?;
+        let (mut left, mut right) = (square(0.5, 24_000), square(0.5, 24_000));
+        run(&mut dynamics, &mut left, &mut right);
+        let settled = peak(&left[20_000..]);
+        let expected = db_to_gain(transfer_db(gain_to_db(0.5), 1.0, 1.0));
+        assert!((settled - expected).abs() < 1e-3, "{settled}");
+        assert!(settled > 0.5);
         Ok(())
     }
 
@@ -872,8 +902,8 @@ mod tests {
         let mut dynamics = effect(&[(DynamicsControl::CurveExponent, 4.0)])?;
         let (mut left, mut right) = (square(0.01, 24_000), square(0.01, 24_000));
         run(&mut dynamics, &mut left, &mut right);
-        // Gain 0.01³: 120 dB down.
-        assert!(peak(&left[20_000..]) < 1e-7);
+        // −40 dB in comes out below −80 dB.
+        assert!(peak(&left[20_000..]) < db_to_gain(-80.0));
         Ok(())
     }
 
@@ -882,14 +912,14 @@ mod tests {
         let mut dynamics = effect(&[
             (DynamicsControl::Attack, 0.0),
             (DynamicsControl::Release, 0.0),
-            (DynamicsControl::Steepness, 12.0),
+            (DynamicsControl::Steepness, 4.0),
+            (DynamicsControl::CurveExponent, 0.5),
         ])?;
         let input: Vec<f32> = (0..1_000).map(|i| (i as f32 * 0.01).sin()).collect();
         let (mut left, mut right) = (input.clone(), input.clone());
         run(&mut dynamics, &mut left, &mut right);
-        let s = db_to_gain(12.0);
         for (out, x) in left.iter().zip(&input) {
-            assert!((out - (s * x).tanh()).abs() < 1e-5);
+            assert!((out - x * curve_gain(x.abs(), 4.0, 0.5)).abs() < 1e-4);
         }
         Ok(())
     }
@@ -930,10 +960,18 @@ mod tests {
             run(&mut dynamics, &mut left, &mut right);
             Ok(peak(&right[20_000..]))
         };
-        // Linked: the quiet side takes the loud side's gain. Unlinked: it keeps its own, near 1.
+        // Linked: the quiet side takes the gain of the mean level. Unlinked: it keeps its own.
+        let shared = ((1.0 + 0.01 * 0.01) / 2.0_f32).sqrt();
         let linked = render(1.0)?;
-        assert!((linked - 0.01 * (0.5_f32).sqrt().tanh() / 0.5_f32.sqrt()).abs() < 1e-4);
-        assert!((render(0.0)? - 0.01).abs() < 1e-4);
+        assert!(
+            (linked - 0.01 * curve_gain(shared, 1.0, 1.0)).abs() < 1e-5,
+            "{linked}"
+        );
+        let unlinked = render(0.0)?;
+        assert!(
+            (unlinked - 0.01 * curve_gain(0.01, 1.0, 1.0)).abs() < 1e-6,
+            "{unlinked}"
+        );
         Ok(())
     }
 
@@ -943,8 +981,11 @@ mod tests {
             (DynamicsControl::Attack, 0.0),
             (DynamicsControl::Release, 0.0),
             (DynamicsControl::Asymmetric, 1.0),
-            (DynamicsControl::Steepness, 12.0),
-            (DynamicsControl::NegativeSteepness, -12.0),
+            (DynamicsControl::CurveExponent, 0.5),
+            (DynamicsControl::NegativeCurveExponent, 2.0),
+            // Headroom, so the clip after the DC blocker does not cut the shifted peaks.
+            (DynamicsControl::Ceiling, 6.0),
+            (DynamicsControl::NegativeCeiling, 6.0),
         ])?;
         let frames = 4 * RATE as usize;
         let input: Vec<f32> = (0..frames)
@@ -960,7 +1001,7 @@ mod tests {
         let half = (RATE / 200) as usize;
         let asymmetry =
             (0..tail.len() - half).fold(0.0_f32, |m, i| m.max((tail[i] + tail[i + half]).abs()));
-        assert!(asymmetry > 0.5, "{asymmetry}");
+        assert!(asymmetry > 0.2, "{asymmetry}");
         Ok(())
     }
 
@@ -977,7 +1018,11 @@ mod tests {
         let (mut left, mut right) = (input.clone(), input.clone());
         run(&mut dynamics, &mut left, &mut right);
         for i in 500..2_000 {
-            assert!((left[i] - input[i - 32].tanh()).abs() < 1e-3, "at {i}");
+            let x = input[i - 32];
+            assert!(
+                (left[i] - x * curve_gain(x.abs(), 1.0, 1.0)).abs() < 2e-3,
+                "at {i}"
+            );
         }
         Ok(())
     }

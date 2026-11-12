@@ -30,8 +30,8 @@ mod response;
 mod utility;
 
 pub use dynamics::{
-    Dynamics, DynamicsControl, MAX_ATTACK_MS, MAX_LOOKAHEAD_MS, MAX_RELEASE_MS,
-    OVERSAMPLING_FACTORS, static_output, transfer, window_weight,
+    Dynamics, DynamicsControl, FLOOR_DB, MAX_ATTACK_MS, MAX_LOOKAHEAD_MS, MAX_RELEASE_MS,
+    OVERSAMPLING_FACTORS, static_output, transfer_db, window_weight,
 };
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
