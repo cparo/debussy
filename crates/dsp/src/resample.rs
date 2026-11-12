@@ -239,7 +239,7 @@ fn design(from: f64, to: f64, up: usize, quality: Quality) -> (usize, Box<[f32]>
 }
 
 /// Kaiser's β for a stopband attenuation in dB.
-fn kaiser_beta(attenuation: f64) -> f64 {
+pub(crate) fn kaiser_beta(attenuation: f64) -> f64 {
     if attenuation > 50.0 {
         0.1102 * (attenuation - 8.7)
     } else if attenuation >= 21.0 {
@@ -250,7 +250,7 @@ fn kaiser_beta(attenuation: f64) -> f64 {
 }
 
 /// The zeroth-order modified Bessel function of the first kind, by its power series.
-fn bessel_i0(x: f64) -> f64 {
+pub(crate) fn bessel_i0(x: f64) -> f64 {
     let half = x / 2.0;
     let mut term = 1.0;
     let mut sum = 1.0;

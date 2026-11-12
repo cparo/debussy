@@ -13,6 +13,7 @@ state.
 | `high-pass` | High-pass filter | "High-pass and low-pass filters" |
 | `low-pass` | Low-pass filter | "High-pass and low-pass filters" |
 | `parametric-eq` | Parametric EQ | "Parametric equaliser" |
+| `dynamics` | Dynamics | "Dynamics" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
@@ -72,6 +73,61 @@ stopped-only order. Turning it on or off crossfades its output with its input ov
 ramp time; a stage that is off passes its input through and is not processed
 ([ADR-0094](../adrs/0094-the-parametric-eq-has-four-bands-framed-by.md)). Saved values for bands
 5 to 8 match no parameter and are ignored.
+
+## Dynamics
+
+`dynamics` is a compressor, limiter, gate or saturator by its settings. In order, a sample is
+amplified by `preamp` and delayed by `lookahead`, multiplied by a gain the transfer curve gives for
+the signal's level, passed through a DC blocker when `asymmetric` is on, amplified by `makeup`, and
+clipped at `ceiling`. The parameters are listed, and shown, in this order:
+
+| Name | Range | Default | Meaning |
+|---|---|---|---|
+| `preamp` | −24 to +48 | 0 | Input gain in dB |
+| `link channels` | off (0) or on (1) | on | Whether left and right share one level |
+| `attack` | 0 to 100 | 10 | The window's future side, in ms; stopped-only |
+| `attack exponent` | 0.1 to 16, logarithmic | 1 | Shape of the attack side; stopped-only |
+| `release` | 0 to 5 000 | 100 | The window's past side, in ms; stopped-only |
+| `release exponent` | 0.1 to 16, logarithmic | 1 | Shape of the release side; stopped-only |
+| `lookahead` | 0 to 100 | 0 | The window's reach ahead and the effect's delay, in ms; stopped-only |
+| `steepness` | −24 to +48 | 0 | Level scale inside the curve, in dB |
+| `curve exponent` | 1 to 16, logarithmic | 1 | The curve's exponent |
+| `makeup` | −24 to +24 | 0 | Gain after the curve, in dB |
+| `ceiling` | −48 to +24 | 0 | Clip level in dB |
+| `asymmetric` | off (0) or on (1) | off | Whether negative samples use the `negative` values |
+| `negative steepness`, `negative curve exponent`, `negative ceiling` | as the positive ones | as the positive ones | The curve and clip for negative samples |
+| `oversampling` | 1× (0), 2× (1), 4× (2), 8× (3) | 1× | Rate of the stages from the gain to the clip; stopped-only |
+
+- **Level.** The level is a weighted RMS of the preamplified input. With time `t` in ms relative
+  to the sample being shaped, positive ahead, the window's peak (weight 1) is at
+  `p = lookahead − attack`; ahead of it the weight is `1 − ((t − p)/attack)^attack exponent` up to
+  `p + attack`, behind it `1 − ((p − t)/release)^release exponent` back to `p − release`, and 0
+  beyond. A side of zero length has no weight. Squares are summed over 0.5 ms blocks; at the end
+  of each block the level is `√(Σ wₖ·Sₖ / (block length · Σ wₖ))` over the window's blocks, each
+  weighted at its centre, so a full-scale square wave reads 1. Linked, both channels use the mean
+  of their two weighted sums.
+- **Gain.** For level `x` the curve's output level is `tanh((s·x)^c)`, with `s` the steepness as a
+  linear gain and `c` the curve exponent; the gain is that divided by `x`, and at silence its
+  limit (`s` when `c` is 1, else 0). The gain moves linearly from its previous value to the new
+  one over the block after it is computed. When asymmetric, a negative sample takes the gain of
+  the `negative` steepness and exponent from the same level.
+- **Waveshaper.** With `attack` and `release` both 0, each sample of each channel is its own
+  level, so a sample `y` becomes `sign(y)·tanh((s·|y|)^c)`; `link channels` has no effect.
+- **DC blocker.** A one-pole high-pass at 7 Hz, cleared when `asymmetric` is turned on.
+- **Clip.** The output is held between `−negative ceiling` and `+ceiling` (both `ceiling` unless
+  asymmetric), each as a linear gain. Oversampled, the down-sampling filter may ring slightly past
+  it.
+- **Oversampling.** The delayed signal is up-sampled by `dsp::Oversampler`, the gain, DC blocker,
+  makeup and clip run at the higher rate, and it is filtered back down. Each direction is a
+  linear-phase Kaiser-windowed sinc cut off at half the base rate, 80 dB down, delaying 16 base
+  frames.
+- **Latency** is `lookahead` in frames, plus 32 frames when oversampled.
+- `preamp`, `makeup`, both steepnesses, exponents and ceilings ramp over the parameter ramp time;
+  `link channels` and `asymmetric` take effect at once. The stopped-only parameters are read when
+  the node is prepared.
+
+([ADR-0099](../adrs/0099-the-dynamics-effect-is-a-weighted-rms-window.md)) No mode derives a gain
+from a block's peak ([ADR-0100](../adrs/0100-weighted-rms-dynamics-may-be-built-in-house-no.md)).
 
 ## Frequency response
 

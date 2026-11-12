@@ -15,4 +15,7 @@ real-input packing and the Hann-windowed STFT ([ADR-0039](../adrs/0039-the-fft-i
 intensity-graded waveform trace ([ADR-0064](../adrs/0064-the-intensity-graded-trace-may-be-built-in-house.md)), and the
 trapezoidal state-variable and one-pole filters with their bell, shelf, notch and Butterworth
 designers, prewarped bilinear transform and log-frequency smoothing
-([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)).
+([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)), and the dynamics
+effect's weighted-RMS window, tanh transfer curve, asymmetric shaping with a DC blocker,
+integer-factor oversampling and display
+([ADR-0100](../adrs/0100-weighted-rms-dynamics-may-be-built-in-house-no.md)).

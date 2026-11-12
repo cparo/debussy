@@ -9,6 +9,8 @@
 //!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
 //! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
 //!   stages (`docs/architecture/effects.md` "Parametric equaliser").
+//! - `dynamics`: [`Dynamics`], the compressor, limiter, gate and saturator
+//!   (`docs/architecture/effects.md` "Dynamics").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id.
@@ -18,6 +20,7 @@
 
 #![forbid(unsafe_code)]
 
+mod dynamics;
 mod error;
 mod filters;
 mod mixer;
@@ -26,6 +29,10 @@ mod registry;
 mod response;
 mod utility;
 
+pub use dynamics::{
+    Dynamics, DynamicsControl, MAX_ATTACK_MS, MAX_LOOKAHEAD_MS, MAX_RELEASE_MS,
+    OVERSAMPLING_FACTORS, static_output, transfer, window_weight,
+};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};

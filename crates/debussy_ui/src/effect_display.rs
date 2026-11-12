@@ -11,6 +11,7 @@ use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use signal_graph::ParameterInfo;
 
 use crate::app::Message;
+use crate::dynamics_display::DynamicsDisplay;
 use crate::raster::draw_tiled;
 use crate::response_display::ResponseDisplay;
 use crate::theme::{self, Tone};
@@ -101,6 +102,7 @@ const DISPLAYS: &[(&str, &dyn EffectDisplay)] = &[
     ("high-pass", &ResponseDisplay),
     ("low-pass", &ResponseDisplay),
     ("parametric-eq", &ResponseDisplay),
+    ("dynamics", &DynamicsDisplay),
 ];
 
 /// The display registered for effects of `kind`, if any.

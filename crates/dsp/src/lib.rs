@@ -15,6 +15,8 @@
 //! - `filter`: [`Svf`] and [`OnePole`], trapezoidal filters, their coefficient designers and
 //!   [`butterworth_q`].
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
+//! - `oversample`: [`Oversampler`], integer-factor oversampling with a whole-sample delay
+//!   (ADR-0099).
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -25,6 +27,7 @@ mod fft;
 mod filter;
 mod level;
 mod noise;
+mod oversample;
 mod resample;
 
 pub use dither::{Depth, Ditherer};
@@ -39,4 +42,5 @@ pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
 pub use noise::Noise;
+pub use oversample::{MAX_OVERSAMPLING, Oversampler};
 pub use resample::{MAX_PHASES, Quality, Resampler};

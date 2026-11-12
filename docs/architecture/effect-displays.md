@@ -36,3 +36,26 @@ gives it (`docs/architecture/effects.md` "Frequency response"):
 - Labels are drawn into the pixels through the `Typeface` trait (`crates/debussy_ui/src/
   typeface.rs`); `StrokeFont`, an in-house face of straight strokes, implements it
   ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)).
+
+## Dynamics display
+
+`dynamics` has `DynamicsDisplay` (`crates/debussy_ui/src/dynamics_display.rs`): two plots side by
+side, each half the area's width less a 12-logical-pixel gap, each with gutters of 46 logical
+pixels on the left and 20 at the bottom for labels, grid and labels drawn as in "Equaliser
+displays", and the curves in the tone's audio colour:
+
+- **Envelope**, on the left: the window weights of `docs/architecture/effects.md` "Dynamics"
+  against time. The release side fills the left half of the plot and the attack side the right,
+  each scaled to its own length; a side of zero length gives the other the whole width, and with
+  both zero the window is a single vertical line. Weight runs from 0 at the bottom to 1 at the
+  top, with grid lines at 0, 0.5 and 1. A brighter vertical line marks the current sample. The
+  labels under the plot give the oldest sample's age at the left, the lookahead at the right and
+  `0ms` at the current sample when there is room, such as `−110ms` and `+10ms`.
+- **Transfer curve**, on the right: the steady-state output level for each input level, through
+  the preamp, curve, makeup and ceiling (`audio_effects::static_output`), with input from −96 to
+  +12 dB across and output from −96 to +12 dB up, grid lines every 24 dB across and every 12 dB
+  up, 0 dB brighter. When `asymmetric` is on, the plot is split by a centre line at −96 dB: the
+  positive samples' curve rises above it to +12 dB at the top and the negative samples' curve
+  falls below it to +12 dB at the bottom, with grid lines every 36 dB in each half
+
+([ADR-0101](../adrs/0101-the-dynamics-display-shows-the-envelope-window.md)).

@@ -118,6 +118,27 @@ fn set_parameters(
     }
 }
 
+/// Whether any stopped-only parameter of graph node `id` has a different value in `new` than in
+/// `old`, so the node must be replaced to take it (`docs/architecture/signal-graph.md`
+/// "Effect nodes").
+fn stopped_only_changed(
+    graph: &Graph,
+    id: GraphNodeId,
+    old: &NodeTarget,
+    new: &NodeTarget,
+) -> bool {
+    let Some(parameters) = graph.parameters(id) else {
+        return false;
+    };
+    parameters.iter().any(|parameter| {
+        let info = parameter.info();
+        let value = |values: &BTreeMap<String, f32>| {
+            values.get(&info.name).copied().unwrap_or(info.default)
+        };
+        info.stopped_only && value(&old.parameters) != value(&new.parameters)
+    })
+}
+
 /// Whether port `port` of `node` (an output if `output`) is mono, as the graph declares it.
 fn is_mono(graph: &Graph, node: GraphNodeId, output: bool, port: usize) -> bool {
     let ports = if output {
@@ -252,7 +273,12 @@ impl Mirror {
                     self.remove_node(graph, key)?;
                     continue;
                 }
-                Some(new) if new.shape == old.target.shape => None,
+                Some(new)
+                    if new.shape == old.target.shape
+                        && !stopped_only_changed(graph, old.id, &old.target, new) =>
+                {
+                    None
+                }
                 Some(new) => Some(new.clone()),
             };
             let Some(new) = replace else {
@@ -262,6 +288,11 @@ impl Mirror {
                 let id = old.id;
                 let node = processor(&new.shape)
                     .unwrap_or_else(|| Box::new(audio_effects::Silence::new(1, 1)));
+                if new.shape == old.target.shape {
+                    // Replaced for a stopped-only value: the new node must be prepared with it,
+                    // and replace_node prepares it with the old node's values.
+                    set_parameters(graph, id, &new.parameters, None);
+                }
                 // replace_node carries values over by name; the model's values win after.
                 let dropped = graph.replace_node(id, node)?;
                 // A model connection that lost any of its graph connections is remade later.

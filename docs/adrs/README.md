@@ -122,4 +122,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0096](0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md) | Effect dialogs share the mixer's keyboard focus, and their group strips are as tall as the tallest | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0097](0097-debussy-starts-without-a-project-and-switches.md) | debussy starts without a project and switches projects by replacing the App | Accepted | [Application startup](../architecture/user-interface.md#application-startup) |
 | [ADR-0098](0098-projects-live-in-music-debussy-and-open-lists-them.md) | Projects live in ~/Music/Debussy and Open lists them in the window | Accepted | [Projects folder](../architecture/project.md#projects-folder) |
+| [ADR-0099](0099-the-dynamics-effect-is-a-weighted-rms-window.md) | The dynamics effect is a weighted-RMS window driving a tanh transfer curve | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
+| [ADR-0100](0100-weighted-rms-dynamics-may-be-built-in-house-no.md) | Weighted-RMS dynamics may be built in-house; no gain is derived from a block's peak | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0101](0101-the-dynamics-display-shows-the-envelope-window.md) | The dynamics display shows the envelope window beside the transfer curve | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
 

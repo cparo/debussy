@@ -83,7 +83,9 @@ stopped-only: it changes only while playback is stopped or paused, and no automa
 toggle may name its on and off states, for display only. The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
-([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).
+([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)). A change to a stopped-only value replaces
+the node, prepared with the new value, so a value that sets its latency takes effect
+([ADR-0099](../adrs/0099-the-dynamics-effect-is-a-weighted-rms-window.md)).
 
 ## Port types
 

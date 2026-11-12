@@ -38,6 +38,7 @@
 mod app;
 mod click;
 mod device;
+mod dynamics_display;
 mod effect_display;
 mod effect_panel;
 mod equal_heights;

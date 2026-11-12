@@ -178,7 +178,7 @@ fn db_lines() -> impl Iterator<Item = f32> {
 }
 
 /// The label of a gain line, such as `"+12dB"`, `"0dB"` or `"−24dB"`.
-fn db_label(db: f32) -> String {
+pub(crate) fn db_label(db: f32) -> String {
     if db > 0.0 {
         format!("+{db:.0}dB")
     } else if db < 0.0 {

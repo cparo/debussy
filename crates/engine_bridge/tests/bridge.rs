@@ -278,6 +278,51 @@ fn test_mixer_growth_keeps_connections_and_parameters() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+#[test]
+fn test_stopped_only_change_replaces_node_with_new_latency() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    // Lets the real-time side take the waiting plan, so the next one can be committed.
+    let mut settle = |bridge: &mut Bridge| -> Result<usize, Box<dyn Error>> {
+        runner.begin_block(256).map_err(|_| "block refused")?;
+        runner.process();
+        bridge.commit()?;
+        Ok(bridge.latency())
+    };
+    let track = bridge.edit(&mut session, |s| s.add_track("vox", Layout::Stereo))?;
+    let effect = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Effect {
+            kind: "dynamics".to_owned(),
+            parameters: BTreeMap::new(),
+        })
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Track(track), 0, Endpoint::Node(effect), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.set_parameter(effect, "makeup", Some(-6.0))
+    })?;
+    let node = bridge.node(Endpoint::Node(effect));
+    assert_eq!(settle(&mut bridge)?, 0);
+    bridge.edit(&mut session, |s| {
+        s.set_parameter(effect, "lookahead", Some(10.0))
+    })?;
+    // Replaced in place for the new latency, keeping its connections and other values.
+    assert_eq!(bridge.node(Endpoint::Node(effect)), node);
+    assert_eq!(settle(&mut bridge)?, 480);
+    assert_eq!(
+        bridge.parameter(effect, "makeup").map(|p| p.get()),
+        Some(-6.0)
+    );
+    assert_in_step(&bridge, session.state())?;
+    assert!(bridge.undo(&mut session)?);
+    assert_eq!(settle(&mut bridge)?, 0);
+    Ok(())
+}
+
 /// Stored audio in memory.
 struct Memory(Arc<BTreeMap<String, Vec<f32>>>, Vec<String>);
 
