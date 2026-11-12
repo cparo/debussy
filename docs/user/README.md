@@ -117,6 +117,14 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   above it, and **notch** removes a narrow range. **Gain** is the boost or cut in dB (±24), and
   **Q** sets the width: higher is narrower. An optional **High-pass** before the bands and
   **Low-pass** after them work like the filters above; each is off until you turn it on.
+- **Compressor**, **Expander**, **Gate** and **Limiter** are one dynamics effect with different
+  starting settings. Above the **Threshold**, **Ratio above** turns the level down (∞ holds it at
+  the threshold); below it, **Ratio below** turns it further down, by no more than **Range**.
+  **Knee** softens the bend. Turn the **Ceiling** on to keep the output under a level; it is a soft
+  limit and can pass it by a fraction of a dB. **Attack**, **Release** and **Hold** set how fast
+  the effect reacts, **Detector** follows peaks or the average (RMS), and **Makeup** adds gain
+  back. **Lookahead** lets it react before a peak arrives, delaying the sound by that much; it can
+  only be changed while stopped or paused.
 
 Effect settings are saved with the project.
 
@@ -136,4 +144,4 @@ Export renders the whole project and exits without opening the window.
 ## Not yet available
 
 Punch-in and loop recording, editing clips in the window, automation, and effects beyond the
-filters and equaliser.
+filters, equaliser and dynamics.

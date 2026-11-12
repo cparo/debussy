@@ -122,4 +122,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0096](0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md) | Effect dialogs share the mixer's keyboard focus, and their group strips are as tall as the tallest | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0097](0097-debussy-starts-without-a-project-and-switches.md) | debussy starts without a project and switches projects by replacing the App | Accepted | [Application startup](../architecture/user-interface.md#application-startup) |
 | [ADR-0098](0098-projects-live-in-music-debussy-and-open-lists-them.md) | Projects live in ~/Music/Debussy and Open lists them in the window | Accepted | [Projects folder](../architecture/project.md#projects-folder) |
+| [ADR-0099](0099-dynamics-is-one-feed-forward-effect-with-level.md) | Dynamics is one feed-forward effect with level ballistics, a soft ceiling and presets, and no windowed-peak limiter path | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
+| [ADR-0100](0100-a-latency-setting-parameter-replaces-its-node-when.md) | A latency-setting parameter replaces its node when it changes | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 

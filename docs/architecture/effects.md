@@ -13,8 +13,16 @@ state.
 | `high-pass` | High-pass filter | "High-pass and low-pass filters" |
 | `low-pass` | Low-pass filter | "High-pass and low-pass filters" |
 | `parametric-eq` | Parametric EQ | "Parametric equaliser" |
+| `dynamics` | Dynamics | "Dynamics" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
+
+## Effect presets
+
+A preset is a name, an effect kind and values for some of its parameters; the rest start at their
+defaults. A kind with presets is offered in the Add menu only through them, and a node started
+from a preset is an ordinary node of its kind: the preset's name is not saved. The presets are
+`audio_effects::PRESETS` ([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)).
 
 ## Filters
 
@@ -82,3 +90,50 @@ and band morphs are not included. Every kind in "High-pass and low-pass filters"
 equaliser" has one; a band that is off adds no stage ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)). The
 equaliser's response includes the stages of each enabled pass stage, and a pass stage that is off adds none
 ([ADR-0094](../adrs/0094-the-parametric-eq-has-four-bands-framed-by.md)).
+
+## Dynamics
+
+`dynamics` is one feed-forward processor that is a compressor, expander, gate or limiter by its
+values ([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)). Per frame:
+
+1. **Detect.** Peak takes `max(|L|, |R|)`; RMS takes `max(L², R²)`. Both channels share one gain.
+2. **Smooth the level.** A one-pole with the attack time constant while the detected value is above
+   the level and the release time constant while it is below; release waits `hold` after the last
+   frame that raised the level. RMS smooths power and takes its square root. The gain is not
+   smoothed again.
+3. **Curve.** With threshold `T` and knee `W`, the smoothed level `x` in dB gets a gain of
+   `(x − T)·(ratio below − 1)` below `T − W/2`, clamped at −`range`, and `(x − T)·(1/ratio above −
+   1)` above `T + W/2`; inside the knee a quadratic joins them with level and slope continuous.
+   `ratio above` at its maximum is infinite. `makeup` is added.
+4. **Ceiling.** When enabled, the level after the curve and makeup is held at or below `ceiling`,
+   with a quadratic knee `ceiling knee` wide. The ceiling acts on the smoothed level: a soft limit
+   that can overshoot during attack. There is no peak-hold or windowed-maximum path.
+5. **Apply** the gain to the input delayed by `lookahead`.
+
+`dsp::transfer_db` gives the steady-state curve, for processing and display alike. The curve's
+continuous values ramp over the parameter ramp time; turning the ceiling on or off ramps its
+share of the gain.
+
+| Name | Group | Range | Default |
+|---|---|---|---|
+| `threshold` | curve | −80 to 0 dB | −18 |
+| `ratio above` | curve | 1 to 100, logarithmic; 100 is ∞ | 4 |
+| `ratio below` | curve | 1 to 100, logarithmic | 1 |
+| `knee` | curve | 0 to 24 dB | 6 |
+| `range` | curve | 0 to 96 dB | 96 |
+| `ceiling enabled` | ceiling | off (0) or on (1) | off |
+| `ceiling` | ceiling | −24 to 0 dB | −1 |
+| `ceiling knee` | ceiling | 0 to 12 dB | 0 |
+| `attack` | timing | 0.01 to 200 ms, logarithmic | 10 |
+| `release` | timing | 1 to 3000 ms, logarithmic | 150 |
+| `hold` | timing | 0 to 500 ms | 0 |
+| `detector` | timing | peak (0), RMS (1) | peak |
+| `lookahead` | timing | 0 to 10 ms; sets latency | 0 |
+| `makeup` | output | −24 to +24 dB | 0 |
+
+The latency is `lookahead` in whole frames at the graph's rate. `lookahead` is a latency-setting
+parameter (see `docs/architecture/signal-graph.md` "Effect nodes").
+
+Presets: **Compressor** (the defaults); **Expander** (threshold −40, ratio below 2, ratio above 1);
+**Gate** (threshold −50, ratio below 100, ratio above 1, range 80, attack 0.1, hold 50, release
+100); **Limiter** (ratio above 1, ceiling on at −1, lookahead 5, attack 0.2, release 100).

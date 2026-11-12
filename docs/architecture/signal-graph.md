@@ -80,10 +80,16 @@ Each parameter declares, besides its name, range and default, a unit (possibly e
 (linear, logarithmic, integer, choice of named options by index, or toggle) and a group (possibly
 empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
 stopped-only: it changes only while playback is stopped or paused, and no automation drives it. A
-toggle may name its on and off states, for display only. The
+toggle may name its on and off states, and any parameter may name a label for its maximum (such as
+∞), for display only. The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).
+
+A parameter may be marked latency-setting: the node's latency depends on it, and it is
+stopped-only. A recorded change to it replaces the node in place, keeping its graph id and
+connections, with one prepared at the new value, so the next plan delay-compensates the new
+latency ([ADR-0100](../adrs/0100-a-latency-setting-parameter-replaces-its-node-when.md)).
 
 ## Port types
 

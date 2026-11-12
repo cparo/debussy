@@ -15,4 +15,8 @@ real-input packing and the Hann-windowed STFT ([ADR-0039](../adrs/0039-the-fft-i
 intensity-graded waveform trace ([ADR-0064](../adrs/0064-the-intensity-graded-trace-may-be-built-in-house.md)), and the
 trapezoidal state-variable and one-pole filters with their bell, shelf, notch and Butterworth
 designers, prewarped bilinear transform and log-frequency smoothing
-([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)).
+([ADR-0088](../adrs/0088-equalisers-are-built-on-a-trapezoidal-state.md)), and the feed-forward
+dynamics processor: peak or RMS detection linked by the louder channel, attack, release and hold
+on the level, the two-sided quadratic-knee curve with range and soft ceiling, and the lookahead
+delay, without a windowed-peak limiter path
+([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)).

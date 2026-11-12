@@ -55,10 +55,17 @@ pub struct ParameterInfo {
     /// change while playing and no automation may drive it, so a node may apply a change at once,
     /// without a ramp.
     pub stopped_only: bool,
+    /// Whether the node's [`latency`](crate::Node::latency) depends on the value: a change
+    /// replaces the node with one prepared at the new value, so the graph re-plans its delay
+    /// compensation. Implies [`stopped_only`](Self::stopped_only).
+    pub sets_latency: bool,
     /// For a [`Scale::Toggle`], the names of its states as `(on, off)`, such as
     /// `("Enabled", "Disabled")`, shown in place of the parameter's name; `None` to show the name
     /// in both states. Display only: not saved, and ignored for other scales.
     pub state_labels: Option<(String, String)>,
+    /// Text shown in place of the value when it is at the maximum, such as `"∞"` for a ratio
+    /// whose top value acts as infinite; `None` to show the number. Display only: not saved.
+    pub max_label: Option<String>,
 }
 
 impl ParameterInfo {
@@ -74,7 +81,9 @@ impl ParameterInfo {
             scale: Scale::Linear,
             group: String::new(),
             stopped_only: false,
+            sets_latency: false,
             state_labels: None,
+            max_label: None,
         }
     }
 
@@ -82,6 +91,17 @@ impl ParameterInfo {
     #[must_use]
     pub fn stopped_only(self) -> Self {
         ParameterInfo {
+            stopped_only: true,
+            ..self
+        }
+    }
+
+    /// This, setting the node's latency (see [`sets_latency`](Self::sets_latency)), and so
+    /// changeable only while playback is stopped or paused.
+    #[must_use]
+    pub fn sets_latency(self) -> Self {
+        ParameterInfo {
+            sets_latency: true,
             stopped_only: true,
             ..self
         }
@@ -108,6 +128,16 @@ impl ParameterInfo {
     pub fn with_state_labels(self, on: impl Into<String>, off: impl Into<String>) -> Self {
         ParameterInfo {
             state_labels: Some((on.into(), off.into())),
+            ..self
+        }
+    }
+
+    /// This, showing `label` in place of its value at the maximum (see
+    /// [`max_label`](Self::max_label)).
+    #[must_use]
+    pub fn with_max_label(self, label: impl Into<String>) -> Self {
+        ParameterInfo {
+            max_label: Some(label.into()),
             ..self
         }
     }
@@ -369,7 +399,15 @@ mod tests {
         assert_eq!(info.scale, Scale::Linear);
         assert!(!info.stopped_only);
         assert!(info.clone().stopped_only().stopped_only);
+        assert!(!info.sets_latency);
+        let latency = info.clone().sets_latency();
+        assert!(latency.sets_latency && latency.stopped_only);
         assert_eq!(info.state_labels, None);
+        assert_eq!(info.max_label, None);
+        assert_eq!(
+            info.clone().with_max_label("∞").max_label.as_deref(),
+            Some("∞")
+        );
         let toggle = ParameterInfo::new("enabled", 0.0, 1.0, 0.0)
             .with_scale(Scale::Toggle)
             .with_state_labels("Enabled", "Disabled");

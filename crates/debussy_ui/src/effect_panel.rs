@@ -262,17 +262,24 @@ fn capitalised(text: &str) -> String {
 }
 
 /// A parameter's label: its name without its group's prefix, capitalised, so `"band 1 q"` in
-/// group `"band 1"` is `"Q"`.
+/// group `"band 1"` is `"Q"`; a name that is all prefix, such as `"ceiling"` in group
+/// `"ceiling"`, is kept whole.
 fn label(info: &ParameterInfo) -> String {
     let name = info
         .name
         .strip_prefix(info.group.as_str())
-        .map_or(info.name.as_str(), str::trim_start);
+        .map(str::trim_start)
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(info.name.as_str());
     capitalised(name)
 }
 
-/// `value` with its unit, to a precision that suits its size; hertz from 1000 up as kilohertz.
+/// `value` with its unit, to a precision that suits its size; hertz from 1000 up as kilohertz;
+/// the parameter's maximum label, if it has one, at the maximum.
 fn format_value(info: &ParameterInfo, value: f32) -> String {
+    if let Some(label) = info.max_label.as_ref().filter(|_| value >= info.max) {
+        return label.clone();
+    }
     let (value, unit) = match info.unit.as_str() {
         "Hz" if value >= 1000.0 => (value / 1000.0, "kHz"),
         unit => (value, unit),
@@ -304,6 +311,8 @@ mod tests {
             "Cutoff"
         );
         assert_eq!(capitalised(""), "");
+        let whole = ParameterInfo::new("ceiling", -24.0, 0.0, -1.0).with_group("ceiling");
+        assert_eq!(label(&whole), "Ceiling");
     }
 
     #[test]
@@ -317,6 +326,9 @@ mod tests {
         assert_eq!(format_value(&db, -3.25), "-3.25 dB");
         let order = ParameterInfo::new("order", 1.0, 8.0, 2.0).with_scale(Scale::Integer);
         assert_eq!(format_value(&order, 4.0), "4");
+        let ratio = ParameterInfo::new("ratio", 1.0, 100.0, 4.0).with_max_label("∞");
+        assert_eq!(format_value(&ratio, 4.0), "4.00");
+        assert_eq!(format_value(&ratio, 100.0), "∞");
     }
 
     #[test]

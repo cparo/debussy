@@ -98,24 +98,30 @@ fn set_values(parameters: &[signal_graph::Parameter], wanted: &BTreeMap<String, 
 }
 
 /// Sets every parameter of `id` whose value in `wanted` (or its default) differs from its value
-/// in `previous`; with no `previous`, sets them all.
+/// in `previous`; with no `previous`, sets them all. Returns whether a parameter that sets the
+/// node's latency changed value, so the node must be replaced to re-read it.
 fn set_parameters(
     graph: &Graph,
     id: GraphNodeId,
     wanted: &BTreeMap<String, f32>,
     previous: Option<&BTreeMap<String, f32>>,
-) {
+) -> bool {
     let Some(parameters) = graph.parameters(id) else {
-        return;
+        return false;
     };
+    let mut latency_changed = false;
     for parameter in parameters {
         let info = parameter.info();
         let value = wanted.get(&info.name).copied().unwrap_or(info.default);
         let before = previous.map(|p| p.get(&info.name).copied().unwrap_or(info.default));
         if before != Some(value) {
             parameter.set(value);
+            // Compared with the model's last value, not the handle's: a control may have set the
+            // handle live before the edit was recorded (ADR-0043).
+            latency_changed |= info.sets_latency && before.is_some();
         }
     }
+    latency_changed
 }
 
 /// Whether port `port` of `node` (an output if `output`) is mono, as the graph declares it.
@@ -302,12 +308,17 @@ impl Mirror {
                 }
                 Some(old) => {
                     if old.target.parameters != new.parameters {
-                        set_parameters(
+                        let relatch = set_parameters(
                             graph,
                             old.id,
                             &new.parameters,
                             Some(&old.target.parameters),
                         );
+                        // The new node takes the values just set, by name, before it is
+                        // prepared, so its latency is read at the new value.
+                        if relatch && let Some(node) = processor(&new.shape) {
+                            graph.replace_node(old.id, node)?;
+                        }
                     }
                     if let (Some(seconds), true) = (new.seconds, old.target.seconds != new.seconds)
                     {

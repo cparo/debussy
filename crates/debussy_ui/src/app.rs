@@ -53,6 +53,8 @@ pub enum NewNode {
     FeedbackDelay,
     /// A built-in effect of this kind id (`audio_effects::EFFECTS`), at its defaults.
     Effect(&'static str),
+    /// A built-in effect started from the preset of this name (`audio_effects::PRESETS`).
+    Preset(&'static str),
 }
 
 impl NewNode {
@@ -71,6 +73,17 @@ impl NewNode {
                 kind: kind.to_owned(),
                 parameters: std::collections::BTreeMap::new(),
             },
+            NewNode::Preset(name) => {
+                let preset = audio_effects::preset(name);
+                NodeKind::Effect {
+                    kind: preset.map_or("", |p| p.kind).to_owned(),
+                    parameters: preset
+                        .into_iter()
+                        .flat_map(|p| p.values)
+                        .map(|&(name, value)| (name.to_owned(), value))
+                        .collect(),
+                }
+            }
         }
     }
 }

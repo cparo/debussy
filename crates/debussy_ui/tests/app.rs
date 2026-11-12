@@ -438,6 +438,22 @@ fn add_effect(app: &mut App, kind: &'static str) -> Result<NodeId, Box<dyn Error
 }
 
 #[test]
+fn test_preset_starts_its_effect_with_its_values() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddNode(NewNode::Preset("Limiter")));
+    let Some(Selection::Node(limiter)) = app.selection() else {
+        return Err("the new effect is not selected".into());
+    };
+    let node = app.session().state().node(limiter).ok_or("no node")?;
+    assert!(matches!(&node.kind, NodeKind::Effect { kind, .. } if kind == "dynamics"));
+    assert_eq!(app.parameter_value(limiter, "ceiling enabled"), 1.0);
+    assert_eq!(app.parameter_value(limiter, "lookahead"), 5.0);
+    // Values the preset leaves alone keep the effect's defaults.
+    assert_eq!(app.parameter_value(limiter, "threshold"), -18.0);
+    Ok(())
+}
+
+#[test]
 fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let eq = add_effect(&mut app, "parametric-eq")?;
