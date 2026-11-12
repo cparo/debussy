@@ -14,6 +14,7 @@ use crate::app::Message;
 use crate::raster::draw_tiled;
 use crate::response_display::ResponseDisplay;
 use crate::theme::{self, Tone};
+use crate::transfer_display::TransferDisplay;
 
 /// The display area's height, in logical pixels; its width fills the dialog.
 pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
@@ -101,6 +102,7 @@ const DISPLAYS: &[(&str, &dyn EffectDisplay)] = &[
     ("high-pass", &ResponseDisplay),
     ("low-pass", &ResponseDisplay),
     ("parametric-eq", &ResponseDisplay),
+    ("dynamics", &TransferDisplay),
 ];
 
 /// The display registered for effects of `kind`, if any.
@@ -314,7 +316,7 @@ mod tests {
         assert!(find(TEST_DISPLAYS, "flat").is_some());
         assert!(find(TEST_DISPLAYS, "eq").is_none());
         assert!(display_for("").is_none());
-        for kind in ["high-pass", "low-pass", "parametric-eq"] {
+        for kind in ["high-pass", "low-pass", "parametric-eq", "dynamics"] {
             assert!(display_for(kind).is_some(), "{kind}");
         }
     }

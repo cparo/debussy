@@ -14,12 +14,15 @@
 //!   (ADR-0039).
 //! - `filter`: [`Svf`] and [`OnePole`], trapezoidal filters, their coefficient designers and
 //!   [`butterworth_q`].
+//! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
+//!   or limiter, and [`DelayLine`] for lookahead (ADR-0099).
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
 mod dither;
+mod dynamics;
 mod error;
 mod fft;
 mod filter;
@@ -28,6 +31,10 @@ mod noise;
 mod resample;
 
 pub use dither::{Depth, Ditherer};
+pub use dynamics::{
+    Ballistics, Ceiling, Curve, DelayLine, FLOOR_DB, ceiling_gain_db, curve_gain_db,
+    smoothing_coefficient, transfer_db,
+};
 pub use error::Error;
 pub use fft::{
     Complex, Fft, MAX_SIZE as MAX_FFT_SIZE, MIN_SIZE as MIN_FFT_SIZE, RealFft, Stft, hann,

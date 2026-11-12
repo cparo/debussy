@@ -438,6 +438,51 @@ fn add_effect(app: &mut App, kind: &'static str) -> Result<NodeId, Box<dyn Error
 }
 
 #[test]
+fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let dynamics = add_effect(&mut app, "dynamics")?;
+    let matching = |app: &App| {
+        let infos = audio_effects::parameter_infos("dynamics").unwrap_or_default();
+        audio_effects::matching_preset("dynamics", &infos, |n| app.parameter_value(dynamics, n))
+            .map(|p| p.name)
+    };
+    // A new dynamics node is at its defaults: the Compressor.
+    assert_eq!(matching(&app), Some("Compressor"));
+    app.update(Message::SetParameter {
+        node: dynamics,
+        name: "knee".to_owned(),
+        value: 2.0,
+    });
+    assert_eq!(matching(&app), None);
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Limiter",
+    });
+    assert_eq!(matching(&app), Some("Limiter"));
+    assert_eq!(app.parameter_value(dynamics, "lookahead"), 5.0);
+    // Values the preset leaves alone return to their defaults.
+    assert_eq!(app.parameter_value(dynamics, "knee"), 6.0);
+    app.update(Message::Undo);
+    assert_eq!(matching(&app), None);
+    assert_eq!(app.parameter_value(dynamics, "knee"), 2.0);
+    // While playing, a preset that would change a stopped-only value is refused; others apply.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Limiter",
+    });
+    assert!(app.status().is_some());
+    assert_eq!(app.parameter_value(dynamics, "lookahead"), 0.0);
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Gate",
+    });
+    assert_eq!(matching(&app), Some("Gate"));
+    Ok(())
+}
+
+#[test]
 fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let eq = add_effect(&mut app, "parametric-eq")?;

@@ -278,6 +278,58 @@ fn test_mixer_growth_keeps_connections_and_parameters() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+#[test]
+fn test_lookahead_change_replaces_the_node_and_its_latency() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    // Runs a block, so the real-time side takes the waiting plans, then commits any held back.
+    let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
+        runner.begin_block(256).map_err(|_| "block refused")?;
+        runner.process();
+        bridge.commit()?;
+        assert!(!bridge.is_pending());
+        Ok(())
+    };
+    let track = bridge.edit(&mut session, |s| s.add_track("drums", Layout::Stereo))?;
+    let limiter = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Effect {
+            kind: "dynamics".to_owned(),
+            parameters: BTreeMap::new(),
+        })
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Track(track), 0, Endpoint::Node(limiter), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(limiter), 0, Endpoint::Output, 0)
+    })?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 0);
+    let node = bridge.node(Endpoint::Node(limiter));
+    // Set live first, as a control does while dragged, then recorded.
+    bridge
+        .parameter(limiter, "lookahead")
+        .ok_or("no lookahead")?
+        .set(5.0);
+    bridge.edit(&mut session, |s| {
+        s.set_parameter(limiter, "lookahead", Some(5.0))
+    })?;
+    settle(&mut bridge)?;
+    // 5 ms at 48 kHz, on the same graph node, still connected.
+    assert_eq!(bridge.latency(), 240);
+    assert_eq!(bridge.node(Endpoint::Node(limiter)), node);
+    assert_eq!(
+        bridge.parameter(limiter, "lookahead").map(|p| p.get()),
+        Some(5.0)
+    );
+    assert_in_step(&bridge, session.state())?;
+    assert!(bridge.undo(&mut session)?);
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 0);
+    assert_in_step(&bridge, session.state())?;
+    Ok(())
+}
+
 /// Stored audio in memory.
 struct Memory(Arc<BTreeMap<String, Vec<f32>>>, Vec<String>);
 

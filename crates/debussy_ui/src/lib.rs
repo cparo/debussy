@@ -57,6 +57,7 @@ mod shell;
 mod shortcuts;
 mod stroke;
 mod theme;
+mod transfer_display;
 mod transport;
 mod typeface;
 mod view;

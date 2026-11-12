@@ -9,15 +9,19 @@
 //!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
 //! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
 //!   stages (`docs/architecture/effects.md` "Parametric equaliser").
+//! - `dynamics`: [`Dynamics`], the compressor, expander, gate and limiter, and
+//!   [`dynamics_curve`], the curve its parameters ask for
+//!   (`docs/architecture/effects.md` "Dynamics").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
-//!   effects by kind id.
+//!   effects by kind id, and [`PRESETS`], named starting values for them.
 //! - `response`: [`FrequencyResponse`] and [`frequency_response`], the magnitude response an
 //!   equaliser's parameters ask for, for display.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
+mod dynamics;
 mod error;
 mod filters;
 mod mixer;
@@ -26,6 +30,7 @@ mod registry;
 mod response;
 mod utility;
 
+pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve, dynamics_curve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};
@@ -33,6 +38,9 @@ pub use parametric::{
     BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, PassControl, band_parameter_name,
     pass_parameter_name,
 };
-pub use registry::{EFFECTS, EffectKind, display_name, effect, parameter_infos};
+pub use registry::{
+    EFFECTS, EffectKind, PRESETS, Preset, display_name, effect, matching_preset, parameter_infos,
+    preset, presets,
+};
 pub use response::{FrequencyResponse, frequency_response};
 pub use utility::{Bus, Pick, Place, Silence};

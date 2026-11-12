@@ -261,6 +261,14 @@ pub enum Message {
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
     RefreshDevices,
+    /// Preset `preset` (`audio_effects::PRESETS`) was chosen for effect node `node`: every
+    /// parameter takes the preset's value or its default, as one undo step.
+    ApplyPreset {
+        /// The effect node.
+        node: NodeId,
+        /// The preset's name.
+        preset: &'static str,
+    },
     /// A parameter's slider moved: applied live, recorded on [`Message::Release`].
     Slide {
         /// The mixer or effect node.
@@ -1120,6 +1128,7 @@ impl App {
                     self.inputs = self.services.input_channels();
                 }
             }
+            Message::ApplyPreset { node, preset } => self.apply_preset(node, preset),
             Message::Slide { node, ref name, .. }
             | Message::SetParameter { node, ref name, .. }
                 if self.engine.is_playing() && self.is_stopped_only(node, name) =>
@@ -1366,6 +1375,46 @@ impl App {
     /// know.
     pub(crate) fn effect_parameters(&self, kind: &str) -> Option<&[ParameterInfo]> {
         self.effect_parameters.get(kind).map(Vec::as_slice)
+    }
+
+    /// Sets every parameter of effect node `node` to preset `name`'s value or its default, as
+    /// one undo step. Refused while playing if it would change a stopped-only value.
+    fn apply_preset(&mut self, node: NodeId, name: &str) {
+        let Some(preset) = audio_effects::preset(name) else {
+            return;
+        };
+        let Some(infos) = self.effect_parameters(preset.kind) else {
+            return;
+        };
+        let blocked = self.engine.is_playing()
+            && infos.iter().any(|info| {
+                info.stopped_only
+                    && info.constrain(preset.value(info))
+                        != Some(self.parameter_value(node, &info.name))
+            });
+        if blocked {
+            self.status = Some(format!(
+                "Pause or stop playback to choose the {} preset.",
+                preset.name
+            ));
+            return;
+        }
+        let edits = infos
+            .iter()
+            .map(|info| Edit::SetParameter {
+                node,
+                name: info.name.clone(),
+                value: preset
+                    .values
+                    .iter()
+                    .find(|(n, _)| *n == info.name)
+                    .map(|&(_, value)| value),
+            })
+            .collect();
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.apply(Edit::Batch(edits)));
+        self.report(result.map_err(|e| e.to_string()));
     }
 
     /// Whether parameter `name` of node `node` may change only while playback is stopped or
