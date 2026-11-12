@@ -38,7 +38,8 @@ pub use parametric::{
     pass_parameter_name,
 };
 pub use registry::{
-    EFFECTS, EffectKind, PRESETS, Preset, display_name, effect, parameter_infos, preset, presets,
+    EFFECTS, EffectKind, PRESETS, Preset, display_name, effect, matching_preset, parameter_infos,
+    preset, presets,
 };
 pub use response::{FrequencyResponse, frequency_response};
 pub use utility::{Bus, Pick, Place, Silence};

@@ -53,7 +53,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
   [display](effect-displays.md#effect-displays): ungrouped parameters in a row,
-  then one strip per group in a horizontal scroll whose scrollbar has its own row below the
+  after a "Preset" pick list if the kind has presets (`docs/architecture/effects.md`
+  "Effect presets"), then one strip per group in a horizontal scroll whose scrollbar has its own row below the
   strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
   integer one a slider in whole steps, and a choice a pick list,
   each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz

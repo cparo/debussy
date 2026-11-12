@@ -88,8 +88,9 @@ pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f3
 }
 
 impl App {
-    /// The display and controls of effect node `id` of kind `kind`; empty for a kind this build does not know. The display comes first; then the
-    /// ungrouped parameters, in a row; then one strip per group, scrolling horizontally.
+    /// The display and controls of effect node `id` of kind `kind`; empty for a kind this build
+    /// does not know. The display comes first; then the preset picker, if the kind has presets,
+    /// and the ungrouped parameters, in a row; then one strip per group, scrolling horizontally.
     pub(crate) fn effect_panel(&self, id: NodeId, kind: &str) -> Element<'_, Message> {
         let Some(infos) = self.effect_parameters(kind) else {
             return Space::new().into();
@@ -111,7 +112,9 @@ impl App {
         let order = tab_order(infos);
         let split = order.partition_point(|&i| infos[i].group.is_empty());
         let (ungrouped, grouped) = order.split_at(split);
-        let ungrouped = row(ungrouped.iter().map(|&i| self.control(id, infos, i))).spacing(16);
+        let ungrouped = row(self.preset_picker(id, kind, infos))
+            .extend(ungrouped.iter().map(|&i| self.control(id, infos, i)))
+            .spacing(16);
         let strips = grouped
             .chunk_by(|&a, &b| infos[a].group == infos[b].group)
             .map(|run| {
@@ -137,6 +140,35 @@ impl App {
         ]
         .spacing(10)
         .into()
+    }
+
+    /// A pick list of effect kind `kind`'s presets for node `id`, showing the preset its values
+    /// match or, if none, "Custom"; `None` for a kind with no presets.
+    fn preset_picker<'a>(
+        &'a self,
+        id: NodeId,
+        kind: &str,
+        infos: &[ParameterInfo],
+    ) -> Option<Element<'a, Message>> {
+        let names: Vec<&'static str> = audio_effects::presets(kind).map(|p| p.name).collect();
+        if names.is_empty() {
+            return None;
+        }
+        let selected =
+            audio_effects::matching_preset(kind, infos, |name| self.parameter_value(id, name))
+                .map(|p| p.name);
+        let picker = pick_list(names, selected, move |preset| Message::ApplyPreset {
+            node: id,
+            preset,
+        })
+        .placeholder("Custom")
+        .text_size(12);
+        Some(
+            column![text("Preset").size(12), picker]
+                .spacing(4)
+                .width(Length::Fixed(CONTROL_WIDTH))
+                .into(),
+        )
     }
 
     /// The control for parameter `infos[index]` of node `id`, ringed while it has the keyboard

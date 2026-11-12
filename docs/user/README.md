@@ -117,8 +117,9 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   above it, and **notch** removes a narrow range. **Gain** is the boost or cut in dB (±24), and
   **Q** sets the width: higher is narrower. An optional **High-pass** before the bands and
   **Low-pass** after them work like the filters above; each is off until you turn it on.
-- **Compressor**, **Expander**, **Gate** and **Limiter** are one dynamics effect with different
-  starting settings. Above the **Threshold**, **Ratio above** turns the level down (∞ holds it at
+- **Dynamics** is a compressor, expander, gate or limiter: pick one from **Preset** in its
+  controls to set everything at once (one undo step), then adjust. **Preset** shows **Custom** once
+  you change a setting. Above the **Threshold**, **Ratio above** turns the level down (∞ holds it at
   the threshold); below it, **Ratio below** turns it further down, by no more than **Range**.
   **Knee** softens the bend. Turn the **Ceiling** on to keep the output under a level; it is a soft
   limit and can pass it by a fraction of a dB. **Attack**, **Release** and **Hold** set how fast

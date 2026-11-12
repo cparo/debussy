@@ -438,18 +438,47 @@ fn add_effect(app: &mut App, kind: &'static str) -> Result<NodeId, Box<dyn Error
 }
 
 #[test]
-fn test_preset_starts_its_effect_with_its_values() -> Result<(), Box<dyn Error>> {
-    let (mut app, _processor, _, _) = app()?;
-    app.update(Message::AddNode(NewNode::Preset("Limiter")));
-    let Some(Selection::Node(limiter)) = app.selection() else {
-        return Err("the new effect is not selected".into());
+fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    let dynamics = add_effect(&mut app, "dynamics")?;
+    let matching = |app: &App| {
+        let infos = audio_effects::parameter_infos("dynamics").unwrap_or_default();
+        audio_effects::matching_preset("dynamics", &infos, |n| app.parameter_value(dynamics, n))
+            .map(|p| p.name)
     };
-    let node = app.session().state().node(limiter).ok_or("no node")?;
-    assert!(matches!(&node.kind, NodeKind::Effect { kind, .. } if kind == "dynamics"));
-    assert_eq!(app.parameter_value(limiter, "ceiling enabled"), 1.0);
-    assert_eq!(app.parameter_value(limiter, "lookahead"), 5.0);
-    // Values the preset leaves alone keep the effect's defaults.
-    assert_eq!(app.parameter_value(limiter, "threshold"), -18.0);
+    // A new dynamics node is at its defaults: the Compressor.
+    assert_eq!(matching(&app), Some("Compressor"));
+    app.update(Message::SetParameter {
+        node: dynamics,
+        name: "knee".to_owned(),
+        value: 2.0,
+    });
+    assert_eq!(matching(&app), None);
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Limiter",
+    });
+    assert_eq!(matching(&app), Some("Limiter"));
+    assert_eq!(app.parameter_value(dynamics, "lookahead"), 5.0);
+    // Values the preset leaves alone return to their defaults.
+    assert_eq!(app.parameter_value(dynamics, "knee"), 6.0);
+    app.update(Message::Undo);
+    assert_eq!(matching(&app), None);
+    assert_eq!(app.parameter_value(dynamics, "knee"), 2.0);
+    // While playing, a preset that would change a stopped-only value is refused; others apply.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Limiter",
+    });
+    assert!(app.status().is_some());
+    assert_eq!(app.parameter_value(dynamics, "lookahead"), 0.0);
+    app.update(Message::ApplyPreset {
+        node: dynamics,
+        preset: "Gate",
+    });
+    assert_eq!(matching(&app), Some("Gate"));
     Ok(())
 }
 

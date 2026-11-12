@@ -19,9 +19,11 @@ A kind id this build does not know plays as silence and keeps its saved values.
 
 ## Effect presets
 
-A preset is a name, an effect kind and values for some of its parameters; the rest start at their
-defaults. A kind with presets is offered in the Add menu only through them, and a node started
-from a preset is an ordinary node of its kind: the preset's name is not saved. The presets are
+A preset is a name, an effect kind and values for some of its parameters. Choosing one in a node's
+dialog sets every parameter to the preset's value or its default, as one undo step; while playing,
+a preset that would change a stopped-only value is refused. The dialog shows the preset whose
+values, over the defaults, equal the node's, or "Custom" if none does: the preset is not saved, and
+a new node at its defaults shows the preset that has no values. The presets are
 `audio_effects::PRESETS` ([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)).
 
 ## Filters

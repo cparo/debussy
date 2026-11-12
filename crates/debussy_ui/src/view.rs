@@ -979,24 +979,11 @@ impl App {
                 Entry::Separator,
             ]
             .into_iter()
-            // A kind with presets is offered only through them.
-            .chain(audio_effects::EFFECTS.iter().flat_map(|effect| {
-                let presets: Vec<Entry> = audio_effects::presets(effect.id)
-                    .map(|preset| {
-                        Entry::item(
-                            preset.name,
-                            Some(Message::AddNode(NewNode::Preset(preset.name))),
-                        )
-                    })
-                    .collect();
-                if presets.is_empty() {
-                    vec![Entry::item(
-                        effect.name,
-                        Some(Message::AddNode(NewNode::Effect(effect.id))),
-                    )]
-                } else {
-                    presets
-                }
+            .chain(audio_effects::EFFECTS.iter().map(|effect| {
+                Entry::item(
+                    effect.name,
+                    Some(Message::AddNode(NewNode::Effect(effect.id))),
+                )
             }))
             .collect(),
         };

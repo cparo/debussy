@@ -36,8 +36,8 @@ pub const EFFECTS: &[EffectKind] = &[
     },
 ];
 
-/// A named set of starting values for an effect kind, offered in place of the bare kind: the
-/// values it names override the kind's defaults, and the rest keep them.
+/// A named set of values for an effect kind, chosen in its dialog: the values it names override
+/// the kind's defaults, and the rest keep them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Preset {
     /// The name shown for it, such as `"Compressor"`.
@@ -48,8 +48,8 @@ pub struct Preset {
     pub values: &'static [(&'static str, f32)],
 }
 
-/// Every preset, in the order a menu lists them. A kind with presets is offered only through
-/// them (`docs/architecture/effects.md` "Effect presets").
+/// Every preset, in the order a dialog lists them (`docs/architecture/effects.md`
+/// "Effect presets").
 pub const PRESETS: &[Preset] = &[
     Preset {
         name: "Compressor",
@@ -92,7 +92,31 @@ pub const PRESETS: &[Preset] = &[
     },
 ];
 
-/// The presets of effect kind `kind`, in menu order; empty for a kind offered bare.
+impl Preset {
+    /// The value parameter `info` takes under this preset: the preset's, else the default.
+    pub fn value(&self, info: &ParameterInfo) -> f32 {
+        self.values
+            .iter()
+            .find(|(name, _)| *name == info.name)
+            .map_or(info.default, |&(_, value)| value)
+    }
+}
+
+/// The preset of effect kind `kind` whose values, over the defaults of `infos`, are exactly the
+/// values `value` gives by parameter name; `None` if no preset matches, as after any change.
+pub fn matching_preset(
+    kind: &str,
+    infos: &[ParameterInfo],
+    value: impl Fn(&str) -> f32,
+) -> Option<&'static Preset> {
+    presets(kind).find(|preset| {
+        infos
+            .iter()
+            .all(|info| info.constrain(preset.value(info)) == Some(value(&info.name)))
+    })
+}
+
+/// The presets of effect kind `kind`, in dialog order; empty for a kind with none.
 pub fn presets(kind: &str) -> impl Iterator<Item = &'static Preset> + '_ {
     PRESETS.iter().filter(move |p| p.kind == kind)
 }
@@ -157,6 +181,22 @@ mod tests {
             }
         }
         assert_eq!(presets("dynamics").count(), 4);
+        let infos = parameter_infos("dynamics").ok_or("no dynamics")?;
+        for entry in presets("dynamics") {
+            let values: Vec<(String, f32)> = infos
+                .iter()
+                .map(|i| (i.name.clone(), entry.value(i)))
+                .collect();
+            let value = |name: &str| {
+                values
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map_or(f32::NAN, |&(_, v)| v)
+            };
+            assert_eq!(matching_preset("dynamics", &infos, value), Some(entry));
+            let changed = |name: &str| if name == "knee" { 1.5 } else { value(name) };
+            assert_eq!(matching_preset("dynamics", &infos, changed), None);
+        }
         assert_eq!(presets("low-pass").count(), 0);
         Ok(())
     }

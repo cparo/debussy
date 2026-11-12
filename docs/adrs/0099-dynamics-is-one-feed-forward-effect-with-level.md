@@ -31,9 +31,11 @@ That was raised with `flag-risk` (tag `patent`).
 
 ## Decision
 
-- **One kind, `dynamics`, with presets.** Compressor, Expander, Gate and Limiter are entries in
-  `audio_effects::PRESETS` that set some parameters over the defaults. A kind with presets is
-  offered only through them, and the preset is not saved.
+- **One kind, `dynamics`, with presets chosen in its dialog** (decided by Chris Paro). The Add menu
+  offers "Dynamics". Its dialog has a preset pick list: Compressor, Expander, Gate and Limiter are
+  entries in `audio_effects::PRESETS`, and choosing one sets every parameter to the preset's value
+  or its default, as one undo step. The preset is not saved. The picker shows the preset the
+  current values match, else "Custom".
 - **Feed-forward, with ballistics on the level.** The detector is peak (`max(|L|,|R|)`) or RMS
   (`max(L²,R²)` as a power). One one-pole uses attack while rising and release while falling, and
   `hold` delays release after the last rise. The static curve is applied to the smoothed level and
@@ -63,6 +65,11 @@ That was raised with `flag-risk` (tag `patent`).
   row 1's lookahead reading is Unclear only together with the windowed path. Not chosen.
 - **Building as designed on a prior-art position** (musicdsp.org 2009, the expired US6535846B1).
   Not chosen without counsel.
+- **Presets as Add-menu entries** in place of "Dynamics". This lets the user pick only when the
+  node is added, and switching means deleting and rewiring the node. Replaced, before merge, by
+  the picker in the dialog.
+- **Remembering the chosen preset.** Saving it would add a field to the format, and the name would
+  go stale after any change. Matching the values gives the same display with nothing saved.
 - **Separate compressor, limiter and gate kinds.** They would duplicate the curve, and saved
   projects would hold three ids for one processor.
 - **Smoothing the gain rather than the level.** It is the other common topology. Smoothing the
