@@ -3,6 +3,7 @@
 
 use signal_graph::{Node, ParameterInfo};
 
+use crate::amplifier::Amplifier;
 use crate::dynamics::Dynamics;
 use crate::filters::{Butterworth, Response};
 use crate::parametric::ParametricEq;
@@ -33,6 +34,10 @@ pub const EFFECTS: &[EffectKind] = &[
     EffectKind {
         id: "dynamics",
         name: "Dynamics",
+    },
+    EffectKind {
+        id: "amplifier",
+        name: "Amplifier",
     },
 ];
 
@@ -135,6 +140,7 @@ pub fn effect(kind: &str) -> Option<Box<dyn Node>> {
         "low-pass" => Box::new(Butterworth::new(Response::LowPass).ok()?),
         "parametric-eq" => Box::new(ParametricEq::new().ok()?),
         "dynamics" => Box::new(Dynamics::new().ok()?),
+        "amplifier" => Box::new(Amplifier::new().ok()?),
         _ => return None,
     };
     Some(node)

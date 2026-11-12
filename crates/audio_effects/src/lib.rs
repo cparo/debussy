@@ -12,6 +12,9 @@
 //! - `dynamics`: [`Dynamics`], the compressor, expander, gate and limiter, and
 //!   [`dynamics_curve`], the curve its parameters ask for
 //!   (`docs/architecture/effects.md` "Dynamics").
+//! - `amplifier`: [`Amplifier`], a pre-amp, waveshaper and DC filter with optional
+//!   oversampling, and [`amplifier_curve`], the curve its parameters ask for
+//!   (`docs/architecture/effects.md` "Amplifier").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id, and [`PRESETS`], named starting values for them.
@@ -21,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+mod amplifier;
 mod dynamics;
 mod error;
 mod filters;
@@ -30,6 +34,7 @@ mod registry;
 mod response;
 mod utility;
 
+pub use amplifier::{Amplifier, Shape, ShaperCurve, amplifier_curve};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve, dynamics_curve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
