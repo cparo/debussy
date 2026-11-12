@@ -82,6 +82,18 @@ impl Resampler {
     /// [`Error::ZeroRate`], or [`Error::RatioTooComplex`] if the exact ratio needs more than
     /// [`MAX_PHASES`] phases.
     pub fn new(from: u32, to: u32, quality: Quality) -> Result<Self, Error> {
+        Self::with_taps_multiple(from, to, quality, 1)
+    }
+
+    /// As [`Resampler::new`], with the taps per phase rounded up to a multiple of `multiple` (at
+    /// least 1), so a caller can fix the filter length's parity. A longer filter of the same
+    /// design only lowers the stopband further.
+    pub(crate) fn with_taps_multiple(
+        from: u32,
+        to: u32,
+        quality: Quality,
+        multiple: usize,
+    ) -> Result<Self, Error> {
         if from == 0 || to == 0 {
             return Err(Error::ZeroRate);
         }
@@ -101,7 +113,7 @@ impl Resampler {
         let (taps, coefficients) = if from == to {
             (1, vec![1.0_f32].into_boxed_slice())
         } else {
-            design(f64::from(from), f64::from(to), up, quality)
+            design(f64::from(from), f64::from(to), up, quality, multiple)
         };
         let length = taps * up;
         let latency = if from == to {
@@ -187,9 +199,9 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-/// Designs the lowpass for `from → to` with `up` phases, returning taps per phase and the
-/// coefficients arranged phase by phase.
-fn design(from: f64, to: f64, up: usize, quality: Quality) -> (usize, Box<[f32]>) {
+/// Designs the lowpass for `from → to` with `up` phases and taps per phase a multiple of
+/// `multiple`, returning taps per phase and the coefficients arranged phase by phase.
+fn design(from: f64, to: f64, up: usize, quality: Quality, multiple: usize) -> (usize, Box<[f32]>) {
     let f_min = from.min(to);
     let pass = PASSBAND * f_min;
     let stop = quality.stopband(f_min);
@@ -201,6 +213,7 @@ fn design(from: f64, to: f64, up: usize, quality: Quality) -> (usize, Box<[f32]>
     let estimate = ((attenuation - 7.95) / (14.36 * transition)).ceil() + 1.0;
     // At least 1; the estimate is finite and positive for valid rates.
     let taps = ((estimate / up as f64).ceil() as usize).max(1);
+    let taps = taps.next_multiple_of(multiple.max(1));
     let length = taps * up;
 
     let beta = kaiser_beta(attenuation);
