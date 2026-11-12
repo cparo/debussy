@@ -36,3 +36,19 @@ gives it (`docs/architecture/effects.md` "Frequency response"):
 - Labels are drawn into the pixels through the `Typeface` trait (`crates/debussy_ui/src/
   typeface.rs`); `StrokeFont`, an in-house face of straight strokes, implements it
   ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)).
+
+## Dynamics display
+
+`dynamics` has `TransferDisplay` (`crates/debussy_ui/src/transfer_display.rs`), which plots the
+steady-state output level over the detected input level that its parameter values ask for:
+the curve, makeup and the ceiling if it is on, as `audio_effects::dynamics_curve` gives it, the
+same mapping processing uses. Ballistics, lookahead and the detector mode are not shown.
+
+- Axes are fixed: input from −96 dBFS at the left to +12 dBFS at the right, output from +12 dBFS at
+  the top to −96 dBFS at the bottom. Gutters, grid spacing, grid colour, labels and curve are as
+  in "Equaliser displays", with gain labels on both axes. The input labels are centred under
+  their lines, and every other one is dropped when they would crowd.
+- The 0 dBFS lines of both axes are 1 logical pixel wide and red (`#D03030`) in both tones, in
+  place of the brighter 0 dB grey.
+- Output levels beyond the axes, such as a gate's floor, are drawn on the plot's edge
+  ([ADR-0101](../adrs/0101-the-dynamics-display-plots-the-steady-state.md)).

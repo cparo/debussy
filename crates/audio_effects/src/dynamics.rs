@@ -110,6 +110,40 @@ fn slope_above(ratio: f32) -> f32 {
     }
 }
 
+/// The steady-state curve of a `dynamics` node: its static curve, makeup and ceiling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransferCurve {
+    curve: Curve,
+    ceiling: Option<Ceiling>,
+}
+
+impl TransferCurve {
+    /// The output level in dB for a steady detected level of `input_db`, as processing gives
+    /// it once settled ([`dsp::transfer_db`]).
+    pub fn output_db(&self, input_db: f32) -> f32 {
+        dsp::transfer_db(input_db, &self.curve, self.ceiling.as_ref())
+    }
+}
+
+/// The steady-state curve a `dynamics` node's parameters ask for, given each parameter's value
+/// by name; a name `value` does not know should give its default. Built by the same mapping as
+/// processing, so a display of it cannot differ.
+pub fn dynamics_curve(value: impl Fn(&str) -> f32) -> TransferCurve {
+    let curve = Curve {
+        threshold: value("threshold"),
+        slope_above: slope_above(value("ratio above")),
+        ratio_below: value("ratio below"),
+        knee: value("knee"),
+        range: value("range"),
+        makeup: value("makeup"),
+    };
+    let ceiling = (value("ceiling enabled") >= 0.5).then(|| Ceiling {
+        level: value("ceiling"),
+        knee: value("ceiling knee"),
+    });
+    TransferCurve { curve, ceiling }
+}
+
 /// The lookahead of `milliseconds` at `sample_rate`, in whole frames.
 fn lookahead_frames(milliseconds: f32, sample_rate: u32) -> usize {
     let frames = (f64::from(milliseconds.clamp(0.0, MAX_LOOKAHEAD_MS)) / 1000.0
@@ -384,6 +418,45 @@ mod tests {
         assert_eq!(dynamics.latency(), 240);
         dynamics.prepare(44_100, 64);
         assert_eq!(dynamics.latency(), 221);
+        Ok(())
+    }
+
+    #[test]
+    fn test_dynamics_curve_reads_parameters_by_name() -> Result<(), Error> {
+        let dynamics = Dynamics::new()?;
+        let infos: Vec<ParameterInfo> = dynamics
+            .parameters()
+            .iter()
+            .map(|p| p.info().clone())
+            .collect();
+        let default = |name: &str| {
+            infos
+                .iter()
+                .find(|i| i.name == name)
+                .map_or(f32::NAN, |i| i.default)
+        };
+        let TransferCurve { curve, ceiling } = dynamics_curve(default);
+        assert_eq!(
+            (curve.threshold, curve.slope_above, curve.knee),
+            (-18.0, 0.25, 6.0)
+        );
+        assert_eq!(ceiling, None);
+        // Above the knee at 4:1: −18 + 18/4.
+        assert!((dynamics_curve(default).output_db(0.0) - (-13.5)).abs() < 1e-4);
+        let limiter = |name: &str| match name {
+            "ceiling enabled" => 1.0,
+            "ratio above" => MAX_RATIO,
+            _ => default(name),
+        };
+        let TransferCurve { curve, ceiling } = dynamics_curve(limiter);
+        assert_eq!(curve.slope_above, 0.0);
+        assert_eq!(
+            ceiling,
+            Some(Ceiling {
+                level: -1.0,
+                knee: 0.0
+            })
+        );
         Ok(())
     }
 

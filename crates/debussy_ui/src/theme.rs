@@ -28,6 +28,9 @@ pub const GRID_ZERO: Color = Color::from_rgb8(0x58, 0x58, 0x58);
 /// An equaliser display's axis labels, light grey in both tones.
 pub const LABEL: Color = Color::from_rgb8(0x9C, 0x9C, 0x9C);
 
+/// Full scale (0 dBFS) on a display's axes, the same in both tones: a thin red line.
+pub const FULL_SCALE: Color = Color::from_rgb8(0xD0, 0x30, 0x30);
+
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tone {

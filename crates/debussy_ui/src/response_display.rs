@@ -17,11 +17,11 @@ use crate::typeface::{StrokeFont, Typeface};
 const FREQUENCIES: (f32, f32) = (20.0, 20_000.0);
 
 /// The highest and lowest gain shown, in dB.
-const TOP_DB: f32 = 12.0;
-const BOTTOM_DB: f32 = -96.0;
+pub(crate) const TOP_DB: f32 = 12.0;
+pub(crate) const BOTTOM_DB: f32 = -96.0;
 
 /// The spacing of the gain grid, in dB.
-const DB_STEP: f32 = 12.0;
+pub(crate) const DB_STEP: f32 = 12.0;
 
 /// The frequencies of the vertical grid lines, in Hz, and their labels.
 const FREQUENCY_LINES: [(f32, &str); 10] = [
@@ -39,22 +39,22 @@ const FREQUENCY_LINES: [(f32, &str); 10] = [
 
 /// The plot's insets from the display's edges, in logical pixels: a gutter on the left for the
 /// gain labels and one below for the frequency labels. The grid runs to the top and right edges.
-const LEFT: f32 = 46.0;
+pub(crate) const LEFT: f32 = 46.0;
 const RIGHT: f32 = 0.0;
 const TOP: f32 = 0.0;
-const BOTTOM: f32 = 20.0;
+pub(crate) const BOTTOM: f32 = 20.0;
 
 /// The labels' capital height, in logical pixels.
-const LABEL_SIZE: f32 = 9.0;
+pub(crate) const LABEL_SIZE: f32 = 9.0;
 
 /// The gap between a label and the plot or its line, in logical pixels.
-const LABEL_GAP: f32 = 5.0;
+pub(crate) const LABEL_GAP: f32 = 5.0;
 
 /// The curve's width, in logical pixels.
-const CURVE_WIDTH: f32 = 2.0;
+pub(crate) const CURVE_WIDTH: f32 = 2.0;
 
 /// The grid lines' width, in logical pixels.
-const GRID_WIDTH: f32 = 1.0;
+pub(crate) const GRID_WIDTH: f32 = 1.0;
 
 /// The display of every equaliser kind: its frequency response.
 pub(crate) struct ResponseDisplay;
@@ -170,7 +170,7 @@ fn draw_grid(raster: &mut Raster, plot: &Plot) {
 }
 
 /// The gains of the horizontal grid lines, from the top down.
-fn db_lines() -> impl Iterator<Item = f32> {
+pub(crate) fn db_lines() -> impl Iterator<Item = f32> {
     // A handful of lines.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let count = ((TOP_DB - BOTTOM_DB) / DB_STEP).round() as u16;
@@ -178,7 +178,7 @@ fn db_lines() -> impl Iterator<Item = f32> {
 }
 
 /// The label of a gain line, such as `"+12dB"`, `"0dB"` or `"−24dB"`.
-fn db_label(db: f32) -> String {
+pub(crate) fn db_label(db: f32) -> String {
     if db > 0.0 {
         format!("+{db:.0}dB")
     } else if db < 0.0 {
