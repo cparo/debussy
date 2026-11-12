@@ -19,4 +19,7 @@ designers, prewarped bilinear transform and log-frequency smoothing
 dynamics processor: peak or RMS detection linked by the louder channel, attack, release and hold
 on the level, the two-sided quadratic-knee curve with range and soft ceiling, and the lookahead
 delay, without a windowed-peak limiter path
-([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)).
+([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)), and the amplifier:
+pre-amp gain and bias, the atan, tanh and hard-clip shapes with a crossfade between them, the
+Butterworth DC filter, and 2× or 4× oversampling around the shaper with the polyphase resampler
+([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)).
