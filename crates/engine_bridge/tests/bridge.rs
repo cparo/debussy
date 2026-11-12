@@ -303,7 +303,7 @@ fn test_stopped_only_change_replaces_node_with_new_latency() -> Result<(), Box<d
         s.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)
     })?;
     bridge.edit(&mut session, |s| {
-        s.set_parameter(effect, "makeup", Some(-6.0))
+        s.set_parameter(effect, "positive output gain", Some(-6.0))
     })?;
     let node = bridge.node(Endpoint::Node(effect));
     assert_eq!(settle(&mut bridge)?, 0);
@@ -314,7 +314,9 @@ fn test_stopped_only_change_replaces_node_with_new_latency() -> Result<(), Box<d
     assert_eq!(bridge.node(Endpoint::Node(effect)), node);
     assert_eq!(settle(&mut bridge)?, 480);
     assert_eq!(
-        bridge.parameter(effect, "makeup").map(|p| p.get()),
+        bridge
+            .parameter(effect, "positive output gain")
+            .map(|p| p.get()),
         Some(-6.0)
     );
     assert_in_step(&bridge, session.state())?;

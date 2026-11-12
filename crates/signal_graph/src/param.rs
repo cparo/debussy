@@ -23,6 +23,10 @@ pub enum Scale {
     Choice(Vec<String>),
     /// Off (0) or on (1).
     Toggle,
+    /// 0, or continuous from the minimum (above 0) to the maximum, spaced evenly in the logarithm
+    /// of the value. A value below half the minimum is 0; one from there up to the minimum is the
+    /// minimum.
+    LogarithmicOrZero,
 }
 
 impl Scale {
@@ -59,6 +63,10 @@ pub struct ParameterInfo {
     /// `("Enabled", "Disabled")`, shown in place of the parameter's name; `None` to show the name
     /// in both states. Display only: not saved, and ignored for other scales.
     pub state_labels: Option<(String, String)>,
+    /// The name of a [`Scale::Toggle`] parameter of the same node that enables this one: while it
+    /// is off, this control is shown greyed and does not respond. `None` if always enabled.
+    /// Display only: not saved.
+    pub enabled_by: Option<String>,
 }
 
 impl ParameterInfo {
@@ -75,6 +83,7 @@ impl ParameterInfo {
             group: String::new(),
             stopped_only: false,
             state_labels: None,
+            enabled_by: None,
         }
     }
 
@@ -112,6 +121,15 @@ impl ParameterInfo {
         }
     }
 
+    /// This, enabled only while toggle `toggle` is on (see [`enabled_by`](Self::enabled_by)).
+    #[must_use]
+    pub fn with_enabled_by(self, toggle: impl Into<String>) -> Self {
+        ParameterInfo {
+            enabled_by: Some(toggle.into()),
+            ..self
+        }
+    }
+
     /// This, in group `group`.
     #[must_use]
     pub fn with_group(self, group: impl Into<String>) -> Self {
@@ -121,11 +139,19 @@ impl ParameterInfo {
         }
     }
 
-    /// `value` as the parameter holds it: clamped to the range, and rounded to a whole number if
-    /// the scale is stepped. `None` for NaN.
+    /// `value` as the parameter holds it: clamped to the range, rounded to a whole number if
+    /// the scale is stepped, and for [`Scale::LogarithmicOrZero`] snapped to 0 or the minimum
+    /// below the minimum. `None` for NaN.
     pub fn constrain(&self, value: f32) -> Option<f32> {
         if value.is_nan() {
             return None;
+        }
+        if self.scale == Scale::LogarithmicOrZero && value < self.min {
+            return Some(if value < self.min / 2.0 {
+                0.0
+            } else {
+                self.min
+            });
         }
         let value = value.clamp(self.min, self.max);
         Some(if self.scale.is_stepped() {
@@ -161,14 +187,14 @@ impl Parameter {
     /// # Errors
     ///
     /// [`Error::InvalidParameterRange`] if the range is not finite, `min > max`, a logarithmic
-    /// range does not stay above 0, or a choice's range is not its options' indices.
+    /// range's minimum is not above 0, or a choice's range is not its options' indices.
     pub fn new(info: ParameterInfo) -> Result<Self, Error> {
         if !info.min.is_finite() || !info.max.is_finite() || info.min > info.max {
             return Err(Error::InvalidParameterRange);
         }
         let valid = match &info.scale {
             Scale::Linear | Scale::Integer => true,
-            Scale::Logarithmic => info.min > 0.0,
+            Scale::Logarithmic | Scale::LogarithmicOrZero => info.min > 0.0,
             #[allow(clippy::cast_precision_loss)] // a handful of options
             Scale::Choice(options) => {
                 !options.is_empty() && info.min == 0.0 && info.max == (options.len() - 1) as f32
@@ -343,6 +369,40 @@ mod tests {
         assert!(Parameter::new(info(0.0, 0.0).with_scale(choice(0))).is_err());
         assert!(Parameter::new(info(0.0, 1.0).with_scale(Scale::Toggle)).is_ok());
         assert!(Parameter::new(info(0.0, 2.0).with_scale(Scale::Toggle)).is_err());
+    }
+
+    #[test]
+    fn test_new_refuses_log_or_zero_without_positive_min() {
+        let info =
+            |min, max| ParameterInfo::new("", min, max, 0.0).with_scale(Scale::LogarithmicOrZero);
+        assert!(Parameter::new(info(0.0, 10.0)).is_err());
+        assert!(Parameter::new(info(-1.0, 10.0)).is_err());
+        assert!(Parameter::new(info(0.25, 100.0)).is_ok());
+    }
+
+    #[test]
+    fn test_constrain_log_or_zero_snaps_below_min() -> Result<(), Error> {
+        let info =
+            ParameterInfo::new("attack", 0.25, 100.0, 0.0).with_scale(Scale::LogarithmicOrZero);
+        assert_eq!(info.constrain(0.0), Some(0.0));
+        assert_eq!(info.constrain(-3.0), Some(0.0));
+        assert_eq!(info.constrain(0.1), Some(0.0));
+        assert_eq!(info.constrain(0.125), Some(0.25));
+        assert_eq!(info.constrain(0.2), Some(0.25));
+        assert_eq!(info.constrain(10.0), Some(10.0));
+        assert_eq!(info.constrain(500.0), Some(100.0));
+        assert!(!Scale::LogarithmicOrZero.is_stepped());
+        // A default of 0 is kept, not raised to the minimum.
+        assert_eq!(Parameter::new(info)?.get(), 0.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_enabled_by_names_the_toggle() {
+        let info = ParameterInfo::new("negative ceiling", -48.0, 24.0, 0.0);
+        assert_eq!(info.enabled_by, None);
+        let info = info.with_enabled_by("asymmetric");
+        assert_eq!(info.enabled_by.as_deref(), Some("asymmetric"));
     }
 
     #[test]

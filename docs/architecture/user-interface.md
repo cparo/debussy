@@ -54,19 +54,21 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
   [display](effect-displays.md#effect-displays): ungrouped parameters in a row,
   then one strip per group in a horizontal scroll whose scrollbar has its own row below the
-  strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
-  integer one a slider in whole steps, and a choice a pick list,
-  each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz
-  from 1000 up as kilohertz. A toggle is one button, lit while on and unlit while off, with no
-  separate label; it shows the name of its current state if the parameter names its states, else
-  the parameter's name; in a group's strip, its unlit background is the
-  pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
-  control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
+  strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm (with 0,
+  its far left 4 % is 0 then `min`, shown as "0 ms"), an integer one a slider in whole steps, and
+  a choice a pick list, each under its name. A slider shows its value and unit only as a tooltip
+  while hovered, hertz from 1000 up as kilohertz. A toggle is one button, lit while on and unlit
+  while off, with no separate label; it shows the name of its current state if the parameter names
+  its states, else the parameter's name; in a group's strip, its unlit background is the pick
+  lists' background. A stopped-only parameter shows "Stop to change" in place of its control while
+  playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)). While the
+  toggle enabling a parameter is off, its label and slider are greyed and it ignores pointer,
+  arrows and Space but can take the focus ([ADR-0105](../adrs/0105-parameters-may-be-logarithmic-with-zero-and.md)).
   Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
   keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
-  1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a
-  choice by one option, each press one step; right and left step a focused slider the same way;
-  Space or Enter flips a focused toggle
+  1 % of its range, a logarithmic one by 1 % of its logarithm's range (with 0, between 0 and `min`
+  below `min`), an integer by one and a choice by one option, each press one step; right and left
+  step a focused slider the same way; Space or Enter flips a focused toggle
   ([ADR-0096](../adrs/0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow

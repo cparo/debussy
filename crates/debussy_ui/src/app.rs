@@ -272,6 +272,8 @@ pub enum Message {
     },
     /// The slider being dragged was released: record the value as one undo step.
     Release,
+    /// Nothing: what a disabled control sends.
+    Ignore,
     /// Move the open dialog's keyboard focus to its next control (Tab).
     FocusNext,
     /// Move the open dialog's keyboard focus to its previous control (Shift-Tab).
@@ -1107,6 +1109,7 @@ impl App {
                 Err(message) => self.status = Some(message),
             },
             Message::RefreshDevices => self.refresh_devices(),
+            Message::Ignore => {}
             Message::Device(choice) => {
                 if self.engine.is_playing() {
                     self.status =
@@ -1221,12 +1224,30 @@ impl App {
         let Some(info) = infos.get(index) else {
             return;
         };
+        if !self.parameter_enabled(node, infos, info) {
+            return;
+        }
         let current = self.parameter_value(node, &info.name);
         let Some(value) = effect_panel::stepped(info, current, delta) else {
             return;
         };
         let name = info.name.clone();
         self.update(Message::SetParameter { node, name, value });
+    }
+
+    /// Whether parameter `info` of effect `node`, one of `infos`, responds now
+    /// ([`effect_panel::is_enabled`]).
+    pub(crate) fn parameter_enabled(
+        &self,
+        node: NodeId,
+        infos: &[ParameterInfo],
+        info: &ParameterInfo,
+    ) -> bool {
+        let values: Vec<f32> = infos
+            .iter()
+            .map(|i| self.parameter_value(node, &i.name))
+            .collect();
+        effect_panel::is_enabled(info, infos, &values)
     }
 
     /// Flips the focused effect control if it is a toggle, as one undo step.
@@ -1237,6 +1258,9 @@ impl App {
         let Some(info) = infos.get(index).filter(|i| i.scale == Scale::Toggle) else {
             return;
         };
+        if !self.parameter_enabled(node, infos, info) {
+            return;
+        }
         let on = self.parameter_value(node, &info.name) >= 0.5;
         let name = info.name.clone();
         let value = if on { 0.0 } else { 1.0 };

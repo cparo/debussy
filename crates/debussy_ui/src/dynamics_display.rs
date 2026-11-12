@@ -9,7 +9,7 @@ use crate::effect_display::{
 use crate::raster::Raster;
 use crate::response_display::db_label;
 use crate::stroke::Mask;
-use crate::theme::{self, GRID, GRID_ZERO, LABEL};
+use crate::theme::{self, GRID, GRID_ZERO, LABEL, ZERO_DB_LINE};
 use crate::typeface::{StrokeFont, Typeface};
 
 /// The input and output range of the curve plot, in dB.
@@ -47,10 +47,10 @@ struct Settings {
     release_exponent: f32,
     lookahead: f32,
     preamp: f32,
-    makeup: f32,
     asymmetric: bool,
-    /// Steepness, curve exponent and ceiling (dB) for positive, then negative, samples.
-    curves: [(f32, f32, f32); 2],
+    /// Steepness, exponent, output gain (dB) and ceiling (dB) for positive, then negative,
+    /// samples.
+    curves: [(f32, f32, f32, f32); 2],
 }
 
 impl Settings {
@@ -65,14 +65,16 @@ impl Settings {
         use DynamicsControl as C;
         let asymmetric = get(C::Asymmetric, 0.0) >= 0.5;
         let positive = (
-            get(C::Steepness, 1.0),
-            get(C::CurveExponent, 1.0),
-            get(C::Ceiling, 0.0),
+            get(C::PositiveSteepness, 1.0),
+            get(C::PositiveExponent, 1.0),
+            get(C::PositiveOutputGain, 0.0),
+            get(C::PositiveCeiling, 0.0),
         );
         let negative = if asymmetric {
             (
                 get(C::NegativeSteepness, 1.0),
-                get(C::NegativeCurveExponent, 1.0),
+                get(C::NegativeExponent, 1.0),
+                get(C::NegativeOutputGain, 0.0),
                 get(C::NegativeCeiling, 0.0),
             )
         } else {
@@ -85,7 +87,6 @@ impl Settings {
             release_exponent: get(C::ReleaseExponent, 1.0),
             lookahead: get(C::Lookahead, 0.0),
             preamp: get(C::Preamp, 0.0),
-            makeup: get(C::Makeup, 0.0),
             asymmetric,
             curves: [positive, negative],
         }
@@ -105,13 +106,13 @@ impl Settings {
     /// The output level in dB for an input level of `db`, for positive (`side` 0) or negative
     /// samples.
     fn output_db(&self, db: f32, side: usize) -> f32 {
-        let (steepness, exponent, ceiling) = self.curves[side];
+        let (steepness, exponent, output_gain, ceiling) = self.curves[side];
         let level = static_output(
             10.0_f32.powf(db / 20.0),
             self.preamp,
             steepness,
             exponent,
-            self.makeup,
+            output_gain,
             ceiling,
         );
         20.0 * level.max(1e-12).log10()
@@ -321,8 +322,9 @@ fn draw_envelope(
     }
 }
 
-/// The static transfer curve, input dB across and output dB up, both −96 to +12 dB. When
-/// asymmetric, the negative samples' curve is drawn inverted below a centre line at −96 dB.
+/// The static transfer curve, input dB across and output dB up, both −96 to +12 dB, with red
+/// lines at 0 dB in and out. When asymmetric, the negative samples' curve is drawn inverted below
+/// a centre line at −96 dB.
 #[allow(clippy::too_many_arguments)] // the frame, its settings and the three layers it draws on
 fn draw_transfer(
     raster: &mut Raster,
@@ -353,8 +355,7 @@ fn draw_transfer(
     };
     let mut db = BOTTOM_DB;
     while db <= TOP_DB {
-        let color = if db == 0.0 { GRID_ZERO } else { GRID };
-        vertical(raster, frame, x_of(db), color);
+        vertical(raster, frame, x_of(db), GRID);
         label_under(labels, frame, face, &db_label(db), x_of(db));
         db += INPUT_STEP;
     }
@@ -366,14 +367,18 @@ fn draw_transfer(
     for &side in halves {
         let mut db = TOP_DB;
         while db >= BOTTOM_DB {
-            let color = if db == 0.0 { GRID_ZERO } else { GRID };
-            horizontal(raster, frame, y_of(db, side), color);
+            horizontal(raster, frame, y_of(db, side), GRID);
             // The shared centre line is labelled once.
             if !(side == 1 && db == BOTTOM_DB) {
                 label_beside(labels, frame, face, &db_label(db), y_of(db, side));
             }
             db -= step;
         }
+    }
+    // Over the grid: 0 dB in, and 0 dB out on each curve's half.
+    vertical(raster, frame, x_of(0.0), ZERO_DB_LINE);
+    for &side in halves {
+        horizontal(raster, frame, y_of(0.0, side), ZERO_DB_LINE);
     }
     // A few thousand points at most.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -420,8 +425,8 @@ mod tests {
         DynamicsDisplay.draw(&parameters, &context)
     }
 
-    /// The `(column, row)` of every pixel tinted like the curves: grid and labels are greys.
-    fn accent(pixels: &Pixels) -> Vec<(usize, usize)> {
+    /// The `(column, row)` of every pixel matching `keep`.
+    fn pixels_where(pixels: &Pixels, keep: impl Fn(&[u8; 4]) -> bool) -> Vec<(usize, usize)> {
         let width = pixels.width() as usize;
         pixels
             .rgba()
@@ -429,9 +434,52 @@ mod tests {
             .0
             .iter()
             .enumerate()
-            .filter(|(_, p)| p[3] > 0 && p[0] != p[2])
+            .filter(|(_, p)| keep(p))
             .map(|(i, _)| (i % width, i / width))
             .collect()
+    }
+
+    /// Whether `p` is the 0 dB lines' red, alone or blended with the grey grid: green and blue
+    /// equal, red above them.
+    fn is_zero_line(p: &[u8; 4]) -> bool {
+        p[3] > 0 && p[1].abs_diff(p[2]) <= 2 && p[0] > p[1].saturating_add(16)
+    }
+
+    /// The `(column, row)` of every pixel tinted like the curves: grid and labels are greys, and
+    /// the 0 dB lines red.
+    fn accent(pixels: &Pixels) -> Vec<(usize, usize)> {
+        pixels_where(pixels, |p| p[3] > 0 && p[0] != p[2] && !is_zero_line(p))
+    }
+
+    #[test]
+    fn test_draw_marks_zero_db_in_red() -> Result<(), Box<dyn std::error::Error>> {
+        let frame = Frame::half((800.0 + GAP) / 2.0, 800.0);
+        let range = TOP_DB - BOTTOM_DB;
+        let x = frame.left + -BOTTOM_DB / range * frame.width;
+        let y = frame.bottom() - -BOTTOM_DB / range * frame.height;
+        let near = |a: usize, b: f32| (a as f32 - b).abs() <= 1.0;
+        let red = pixels_where(&draw(&[]).ok_or("nothing drawn")?, is_zero_line);
+        assert!(red.iter().any(|&(px, py)| near(px, x) && py > 200));
+        assert!(
+            red.iter()
+                .any(|&(px, py)| near(py, y) && px > 450 && px < 550)
+        );
+        // None in the envelope plot.
+        assert!(red.iter().all(|&(px, _)| px as f32 >= frame.left - 1.0));
+        // Asymmetric: a line on each half.
+        let red = pixels_where(
+            &draw(&[(DynamicsControl::Asymmetric, 1.0)]).ok_or("nothing drawn")?,
+            is_zero_line,
+        );
+        let centre = frame.top + frame.height / 2.0;
+        let reach = -BOTTOM_DB / range * frame.height / 2.0;
+        for row in [centre - reach, centre + reach] {
+            assert!(
+                red.iter()
+                    .any(|&(px, py)| near(py, row) && px > 450 && px < 550)
+            );
+        }
+        Ok(())
     }
 
     #[test]
@@ -489,16 +537,34 @@ mod tests {
     }
 
     #[test]
-    fn test_output_db_includes_preamp_makeup_and_ceiling() {
+    fn test_output_db_includes_output_gain_and_ceiling() {
         let settings = Settings::from(&[]);
         // The curve fixes the floor and full scale.
         assert!(settings.output_db(0.0, 0).abs() < 1e-3);
         assert!(settings.output_db(-60.0, 0) > -60.0);
         let loud = Settings {
-            makeup: 24.0,
+            curves: [(1.0, 1.0, 24.0, 0.0), (1.0, 1.0, -6.0, 0.0)],
             ..settings
         };
         assert!((loud.output_db(0.0, 0) - 0.0).abs() < 1e-3);
+        assert!((loud.output_db(0.0, 1) + 6.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_settings_negative_side_follows_asymmetric() {
+        let parameter = |control: DynamicsControl, value| DisplayParameter {
+            name: control.name(),
+            value,
+            unit: "",
+        };
+        let gain = [
+            parameter(DynamicsControl::PositiveOutputGain, 3.0),
+            parameter(DynamicsControl::NegativeOutputGain, -9.0),
+        ];
+        assert_eq!(Settings::from(&gain).curves[1].2, 3.0);
+        let mut asymmetric = gain.to_vec();
+        asymmetric.push(parameter(DynamicsControl::Asymmetric, 1.0));
+        assert_eq!(Settings::from(&asymmetric).curves[1].2, -9.0);
     }
 
     #[test]

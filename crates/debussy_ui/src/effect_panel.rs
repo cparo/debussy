@@ -24,6 +24,54 @@ const CONTROL_WIDTH: f32 = 104.0;
 /// The share of a slider's range (of its logarithm, if logarithmic) an arrow key moves it.
 const ARROW_STEP: f32 = 0.01;
 
+/// The share of a [`Scale::LogarithmicOrZero`] slider's logarithmic span added below its
+/// minimum: the lower half of it means 0, the upper half the minimum.
+const ZERO_PAD: f32 = 0.04;
+
+/// A [`Scale::LogarithmicOrZero`] slider's range, in the logarithm of the value, for `info`:
+/// from [`ZERO_PAD`] below the minimum's to the maximum's.
+fn log_or_zero_range(info: &ParameterInfo) -> (f32, f32) {
+    let (low, high) = (info.min.ln(), info.max.ln());
+    (low - ZERO_PAD * (high - low), high)
+}
+
+/// Where value `value` of [`Scale::LogarithmicOrZero`] parameter `info` sits on its slider: 0
+/// at the far left, others at their logarithm.
+pub(crate) fn log_or_zero_position(info: &ParameterInfo, value: f32) -> f32 {
+    if value < info.min {
+        log_or_zero_range(info).0
+    } else {
+        value.min(info.max).ln()
+    }
+}
+
+/// The value of [`Scale::LogarithmicOrZero`] parameter `info` at slider position `position`: 0
+/// in the lower half of the pad below the minimum, the minimum in its upper half.
+pub(crate) fn log_or_zero_value(info: &ParameterInfo, position: f32) -> f32 {
+    let (bottom, _) = log_or_zero_range(info);
+    let low = info.min.ln();
+    if position < (bottom + low) / 2.0 {
+        0.0
+    } else if position < low {
+        info.min
+    } else {
+        position.exp().min(info.max)
+    }
+}
+
+/// Whether parameter `info`, one of `infos` with values `values`, responds: always, unless it
+/// is [enabled by](ParameterInfo::enabled_by) a toggle in `infos` that is off.
+pub(crate) fn is_enabled(info: &ParameterInfo, infos: &[ParameterInfo], values: &[f32]) -> bool {
+    let Some(toggle) = &info.enabled_by else {
+        return true;
+    };
+    infos
+        .iter()
+        .position(|i| i.name == *toggle)
+        .and_then(|at| values.get(at))
+        .is_none_or(|&value| value >= 0.5)
+}
+
 /// The order an effect's controls are drawn and visited by Tab, as indices into `infos`: the
 /// ungrouped parameters, then each group's, groups in the order they first appear.
 pub(crate) fn tab_order(infos: &[ParameterInfo]) -> Vec<usize> {
@@ -64,8 +112,9 @@ pub(crate) fn moved(from: Option<usize>, order: &[usize], forward: bool) -> Opti
 
 /// Parameter `info` at `value` moved `delta` arrow presses up (positive) or down, within its
 /// range: a linear slider by [`ARROW_STEP`] of its range, a logarithmic one by that share of its
-/// logarithm's, an integer by one, a choice to the next or previous option. `None` for a toggle,
-/// which arrows leave alone.
+/// logarithm's, an integer by one, a choice to the next or previous option. A logarithmic one
+/// with 0 steps like a logarithmic one above its minimum, between 0 and the minimum below it.
+/// `None` for a toggle, which arrows leave alone.
 pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f32> {
     #[allow(clippy::cast_precision_loss)] // a handful of key presses
     let delta = delta as f32;
@@ -73,9 +122,21 @@ pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f3
     let value = match &info.scale {
         Scale::Toggle => return None,
         Scale::Linear => value + delta * ARROW_STEP * (max - min),
-        Scale::Logarithmic => {
-            let step = ARROW_STEP * (max.ln() - min.ln());
-            (value.max(min).ln() + delta * step).exp()
+        Scale::Logarithmic => log_step(min, max, value, delta),
+        Scale::LogarithmicOrZero if value < min => {
+            if delta > 0.0 {
+                min
+            } else {
+                0.0
+            }
+        }
+        Scale::LogarithmicOrZero => {
+            let moved = log_step(min, max, value, delta);
+            if delta < 0.0 && value <= min {
+                0.0
+            } else {
+                moved
+            }
         }
         Scale::Integer => value.round() + delta,
         Scale::Choice(options) => {
@@ -84,7 +145,17 @@ pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f3
             (value.round() + delta).clamp(0.0, last)
         }
     };
-    Some(value.clamp(min, max))
+    Some(if value == 0.0 && info.scale == Scale::LogarithmicOrZero {
+        0.0
+    } else {
+        value.clamp(min, max)
+    })
+}
+
+/// `value` moved `delta` arrow presses along a logarithmic slider from `min` to `max`.
+fn log_step(min: f32, max: f32, value: f32, delta: f32) -> f32 {
+    let step = ARROW_STEP * (max.ln() - min.ln());
+    (value.max(min).ln() + delta * step).exp()
 }
 
 impl App {
@@ -97,6 +168,10 @@ impl App {
         let values: Vec<f32> = infos
             .iter()
             .map(|info| self.parameter_value(id, &info.name))
+            .collect();
+        let enabled: Vec<bool> = infos
+            .iter()
+            .map(|info| is_enabled(info, infos, &values))
             .collect();
         let display = display_area(
             kind,
@@ -111,14 +186,16 @@ impl App {
         let order = tab_order(infos);
         let split = order.partition_point(|&i| infos[i].group.is_empty());
         let (ungrouped, grouped) = order.split_at(split);
-        let ungrouped = row(ungrouped.iter().map(|&i| self.control(id, infos, i))).spacing(16);
+        let control =
+            |i: usize| self.control(id, infos, i, enabled.get(i).copied().unwrap_or(true));
+        let ungrouped = row(ungrouped.iter().map(|&i| control(i))).spacing(16);
         let strips = grouped
             .chunk_by(|&a, &b| infos[a].group == infos[b].group)
             .map(|run| {
                 let group = run.first().map_or("", |&i| infos[i].group.as_str());
                 container(
                     column![text(capitalised(group)).size(13)]
-                        .extend(run.iter().map(|&i| self.control(id, infos, i)))
+                        .extend(run.iter().map(|&i| control(i)))
                         .spacing(8),
                 )
                 .padding(6)
@@ -140,19 +217,27 @@ impl App {
     }
 
     /// The control for parameter `infos[index]` of node `id`, ringed while it has the keyboard
-    /// focus and taking the focus when pressed. A pick list keeps the keyboard and wheel; a
-    /// slider or toggle leaves them to the focused control.
+    /// focus and taking the focus when pressed; greyed and unresponsive unless `enabled`. A
+    /// pick list keeps the keyboard and wheel; a slider or toggle leaves them to the focused
+    /// control.
     fn control<'a>(
         &'a self,
         id: NodeId,
         infos: &'a [ParameterInfo],
         index: usize,
+        enabled: bool,
     ) -> Element<'a, Message> {
         let info = &infos[index];
         let keys = matches!(info.scale, Scale::Choice(_));
+        let input = self.input(id, info, enabled);
+        let input = if enabled {
+            input
+        } else {
+            input.map(|_| Message::Ignore)
+        };
         ringed(
             focus_target(
-                self.input(id, info),
+                input,
                 Message::SetFocus(Some(DialogFocus::Parameter(index))),
                 keys,
             ),
@@ -162,8 +247,13 @@ impl App {
 
     /// The input for parameter `info` of node `id`. A toggle is one button named for the
     /// parameter, lit while on; any other is labelled with its name, and a slider shows its value
-    /// as a tooltip.
-    fn input<'a>(&'a self, id: NodeId, info: &'a ParameterInfo) -> Element<'a, Message> {
+    /// as a tooltip. Unless `enabled`, the label and slider are greyed.
+    fn input<'a>(
+        &'a self,
+        id: NodeId,
+        info: &'a ParameterInfo,
+        enabled: bool,
+    ) -> Element<'a, Message> {
         let value = self.parameter_value(id, &info.name);
         let (min, max) = (info.min, info.max);
         let slide = move |value: f32| Message::Slide {
@@ -177,6 +267,13 @@ impl App {
             value,
         };
         let frozen = info.stopped_only && self.engine().is_playing();
+        let style = move |theme: &iced::Theme, status| {
+            if enabled {
+                slider::default(theme, status)
+            } else {
+                theme::disabled_slider(theme, status)
+            }
+        };
         if !frozen && info.scale == Scale::Toggle {
             let on = value >= 0.5;
             return container(toggle_button(
@@ -194,16 +291,29 @@ impl App {
             Scale::Linear => slider(min..=max, value, slide)
                 .step((max - min) / 1000.0)
                 .on_release(Message::Release)
+                .style(style)
                 .into(),
             Scale::Logarithmic => slider(min.ln()..=max.ln(), value.max(min).ln(), move |v| {
                 slide(v.exp())
             })
             .step((max.ln() - min.ln()) / 1000.0)
             .on_release(Message::Release)
+            .style(style)
             .into(),
+            Scale::LogarithmicOrZero => {
+                let (bottom, top) = log_or_zero_range(info);
+                slider(bottom..=top, log_or_zero_position(info, value), move |v| {
+                    slide(log_or_zero_value(info, v))
+                })
+                .step((top - bottom) / 1000.0)
+                .on_release(Message::Release)
+                .style(style)
+                .into()
+            }
             Scale::Integer => slider(min..=max, value, slide)
                 .step(1.0_f32)
                 .on_release(Message::Release)
+                .style(style)
                 .into(),
             Scale::Choice(options) => {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small index
@@ -231,7 +341,13 @@ impl App {
         } else {
             input
         };
-        column![text(label(info)).size(12), input]
+        let name = text(label(info)).size(12);
+        let name = if enabled {
+            name
+        } else {
+            name.style(theme::disabled_text)
+        };
+        column![name, input]
             .spacing(4)
             .width(Length::Fixed(CONTROL_WIDTH))
             .into()
@@ -250,7 +366,10 @@ fn toggle_label(info: &ParameterInfo, on: bool) -> String {
 
 /// Whether a parameter of `scale` is shown as a slider.
 pub(crate) fn is_slider(scale: &Scale) -> bool {
-    matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
+    matches!(
+        scale,
+        Scale::Linear | Scale::Logarithmic | Scale::LogarithmicOrZero | Scale::Integer
+    )
 }
 
 /// `text` with its first letter in capitals.
@@ -277,6 +396,9 @@ fn format_value(info: &ParameterInfo, value: f32) -> String {
         "Hz" if value >= 1000.0 => (value / 1000.0, "kHz"),
         unit => (value, unit),
     };
+    if value == 0.0 && info.scale == Scale::LogarithmicOrZero {
+        return format!("0 {unit}").trim_end().to_owned();
+    }
     let number = if info.scale == Scale::Integer || value.abs() >= 100.0 {
         format!("{value:.0}")
     } else if value.abs() >= 10.0 {
@@ -380,8 +502,76 @@ mod tests {
         assert_eq!(stepped(&toggle, 0.0, 1), None);
     }
 
+    fn attack() -> ParameterInfo {
+        ParameterInfo::new("attack", 0.25, 100.0, 10.0)
+            .with_unit("ms")
+            .with_scale(Scale::LogarithmicOrZero)
+    }
+
+    #[test]
+    fn test_log_or_zero_slider_round_trips_and_far_left_is_zero() {
+        let info = attack();
+        let (bottom, top) = log_or_zero_range(&info);
+        assert_eq!(top, 100.0_f32.ln());
+        assert!(bottom < 0.25_f32.ln());
+        assert_eq!(log_or_zero_value(&info, bottom), 0.0);
+        assert_eq!(log_or_zero_position(&info, 0.0), bottom);
+        assert_eq!(log_or_zero_value(&info, 0.25_f32.ln() - 0.001), 0.25);
+        for value in [0.25, 1.0, 10.0, 100.0] {
+            let back = log_or_zero_value(&info, log_or_zero_position(&info, value));
+            assert!((back - value).abs() < 1e-4 * value, "{value} → {back}");
+        }
+        assert_eq!(log_or_zero_value(&info, top), 100.0);
+    }
+
+    #[test]
+    fn test_stepped_log_or_zero_crosses_zero() {
+        let info = attack();
+        assert_eq!(stepped(&info, 0.0, 1), Some(0.25));
+        assert_eq!(stepped(&info, 0.0, -1), Some(0.0));
+        assert_eq!(stepped(&info, 0.25, -1), Some(0.0));
+        let up = stepped(&info, 0.25, 1).unwrap_or_default();
+        assert!(up > 0.25 && up < 0.3, "{up}");
+        // Down from just above the minimum stops at the minimum.
+        assert_eq!(stepped(&info, 0.251, -1), Some(0.25));
+        assert_eq!(stepped(&info, 100.0, 1), Some(100.0));
+    }
+
+    #[test]
+    fn test_format_value_shows_zero_ms() {
+        assert_eq!(format_value(&attack(), 0.0), "0 ms");
+        assert_eq!(format_value(&attack(), 0.25), "0.25 ms");
+    }
+
+    #[test]
+    fn test_is_enabled_follows_the_named_toggle() {
+        let infos = [
+            ParameterInfo::new("asymmetric", 0.0, 1.0, 0.0).with_scale(Scale::Toggle),
+            ParameterInfo::new("negative ceiling", -48.0, 24.0, 0.0).with_enabled_by("asymmetric"),
+            ParameterInfo::new("preamp", -24.0, 48.0, 0.0),
+            ParameterInfo::new("orphan", 0.0, 1.0, 0.0).with_enabled_by("missing"),
+        ];
+        assert!(!is_enabled(&infos[1], &infos, &[0.0, 0.0, 0.0, 0.0]));
+        assert!(is_enabled(&infos[1], &infos, &[1.0, 0.0, 0.0, 0.0]));
+        assert!(is_enabled(&infos[2], &infos, &[0.0, 0.0, 0.0, 0.0]));
+        assert!(is_enabled(&infos[3], &infos, &[0.0, 0.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn test_label_names_dynamics_controls() -> Result<(), Box<dyn std::error::Error>> {
+        let infos = audio_effects::parameter_infos("dynamics").ok_or("no dynamics")?;
+        let labels: Vec<String> = infos
+            .iter()
+            .filter(|i| i.group == "negative")
+            .map(label)
+            .collect();
+        assert_eq!(labels, ["Steepness", "Exponent", "Output gain", "Ceiling"]);
+        Ok(())
+    }
+
     #[test]
     fn test_is_slider_covers_the_numeric_scales() {
+        assert!(is_slider(&Scale::LogarithmicOrZero));
         assert!(is_slider(&Scale::Linear) && is_slider(&Scale::Logarithmic));
         assert!(is_slider(&Scale::Integer));
         assert!(!is_slider(&Scale::Toggle) && !is_slider(&Scale::Choice(Vec::new())));

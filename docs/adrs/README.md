@@ -127,4 +127,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0101](0101-the-dynamics-display-shows-the-envelope-window.md) | The dynamics display shows the envelope window beside the transfer curve | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
 | [ADR-0102](0102-the-dynamics-curve-maps-normalised-db-levels.md) | The dynamics curve maps normalised dB levels through tanh | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
 | [ADR-0103](0103-the-dynamics-envelope-plot-has-one-linear-time.md) | The dynamics envelope plot has one linear time axis | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
+| [ADR-0104](0104-the-dynamics-controls-mirror-the-positive-and.md) | The dynamics controls mirror the positive and negative curves | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
+| [ADR-0105](0105-parameters-may-be-logarithmic-with-zero-and.md) | Parameters may be logarithmic with zero and enabled by a toggle | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 

@@ -5,8 +5,8 @@
 //! RMS over a window of 0.5 ms blocks, recomputed once per block, and the gain the transfer curve
 //! gives for that level is interpolated across the next block. The curve works on levels in dB,
 //! normalised so the noise floor (−96 dB) is 0 and full scale is 1 (ADR-0102). With attack and release both zero
-//! the level is each sample's own magnitude, which makes the curve a waveshaper. Shaping, the DC
-//! blocker, makeup and the clip run oversampled.
+//! the level is each sample's own magnitude, which makes the curve a waveshaper. Shaping with the
+//! output gain, the DC blocker and the clip run oversampled.
 
 use audio_buffers::Layout;
 use dsp::{OnePole, OnePoleCoefficients, Oversampler, db_to_gain, gain_to_db};
@@ -19,6 +19,12 @@ pub const MAX_ATTACK_MS: f32 = 100.0;
 
 /// The longest release, in ms.
 pub const MAX_RELEASE_MS: f32 = 5_000.0;
+
+/// The shortest attack or release other than 0, in ms.
+pub const MIN_WINDOW_MS: f32 = 0.25;
+
+/// The smallest transfer curve exponent; the largest is its reciprocal.
+pub const MIN_CURVE_EXPONENT: f32 = 1.0 / 16.0;
 
 /// The longest lookahead, in ms.
 pub const MAX_LOOKAHEAD_MS: f32 = 100.0;
@@ -53,21 +59,23 @@ pub enum DynamicsControl {
     ReleaseExponent,
     /// How far ahead the window reaches, in ms: the effect's delay; stopped-only.
     Lookahead,
-    /// How sharp the transfer curve's shoulder is: a multiplier inside it.
-    Steepness,
-    /// The transfer curve's exponent.
-    CurveExponent,
-    /// Gain after the transfer curve, in dB.
-    Makeup,
-    /// The clip level, in dB.
-    Ceiling,
-    /// Whether negative samples use their own curve and ceiling.
+    /// Whether negative samples use their own curve, output gain and ceiling.
     Asymmetric,
-    /// [`DynamicsControl::Steepness`] for negative samples.
+    /// How sharp the transfer curve's shoulder is: a multiplier inside it.
+    PositiveSteepness,
+    /// The transfer curve's exponent.
+    PositiveExponent,
+    /// Gain applied with the transfer curve's, in dB.
+    PositiveOutputGain,
+    /// The clip level, in dB.
+    PositiveCeiling,
+    /// [`DynamicsControl::PositiveSteepness`] for negative samples, while asymmetric.
     NegativeSteepness,
-    /// [`DynamicsControl::CurveExponent`] for negative samples.
-    NegativeCurveExponent,
-    /// [`DynamicsControl::Ceiling`] for negative samples.
+    /// [`DynamicsControl::PositiveExponent`] for negative samples, while asymmetric.
+    NegativeExponent,
+    /// [`DynamicsControl::PositiveOutputGain`] for negative samples, while asymmetric.
+    NegativeOutputGain,
+    /// [`DynamicsControl::PositiveCeiling`] for negative samples, while asymmetric.
     NegativeCeiling,
     /// The oversampling factor, as an index into [`OVERSAMPLING_FACTORS`]; stopped-only.
     Oversampling,
@@ -75,7 +83,7 @@ pub enum DynamicsControl {
 
 impl DynamicsControl {
     /// Every control, in declaration order.
-    pub const ALL: [DynamicsControl; 16] = [
+    pub const ALL: [DynamicsControl; 17] = [
         DynamicsControl::Preamp,
         DynamicsControl::LinkChannels,
         DynamicsControl::Attack,
@@ -83,13 +91,14 @@ impl DynamicsControl {
         DynamicsControl::Release,
         DynamicsControl::ReleaseExponent,
         DynamicsControl::Lookahead,
-        DynamicsControl::Steepness,
-        DynamicsControl::CurveExponent,
-        DynamicsControl::Makeup,
-        DynamicsControl::Ceiling,
         DynamicsControl::Asymmetric,
+        DynamicsControl::PositiveSteepness,
+        DynamicsControl::PositiveExponent,
+        DynamicsControl::PositiveOutputGain,
+        DynamicsControl::PositiveCeiling,
         DynamicsControl::NegativeSteepness,
-        DynamicsControl::NegativeCurveExponent,
+        DynamicsControl::NegativeExponent,
+        DynamicsControl::NegativeOutputGain,
         DynamicsControl::NegativeCeiling,
         DynamicsControl::Oversampling,
     ];
@@ -105,13 +114,14 @@ impl DynamicsControl {
             DynamicsControl::Release => "release",
             DynamicsControl::ReleaseExponent => "release exponent",
             DynamicsControl::Lookahead => "lookahead",
-            DynamicsControl::Steepness => "steepness",
-            DynamicsControl::CurveExponent => "curve exponent",
-            DynamicsControl::Makeup => "makeup",
-            DynamicsControl::Ceiling => "ceiling",
             DynamicsControl::Asymmetric => "asymmetric",
+            DynamicsControl::PositiveSteepness => "positive steepness",
+            DynamicsControl::PositiveExponent => "positive exponent",
+            DynamicsControl::PositiveOutputGain => "positive output gain",
+            DynamicsControl::PositiveCeiling => "positive ceiling",
             DynamicsControl::NegativeSteepness => "negative steepness",
-            DynamicsControl::NegativeCurveExponent => "negative curve exponent",
+            DynamicsControl::NegativeExponent => "negative exponent",
+            DynamicsControl::NegativeOutputGain => "negative output gain",
             DynamicsControl::NegativeCeiling => "negative ceiling",
             DynamicsControl::Oversampling => "oversampling",
         }
@@ -125,9 +135,10 @@ impl DynamicsControl {
                 .with_unit("dB")
                 .with_group(group)
         };
-        let ms = |max, default| {
-            ParameterInfo::new(name, 0.0, max, default)
+        let ms = |min, max, default, scale| {
+            ParameterInfo::new(name, min, max, default)
                 .with_unit("ms")
+                .with_scale(scale)
                 .with_group("envelope")
                 .stopped_only()
         };
@@ -141,30 +152,33 @@ impl DynamicsControl {
                 .with_scale(Scale::Logarithmic)
                 .with_group(group)
         };
-        let curve_exponent = |group| ParameterInfo::new(name, 0.0, 16.0, 1.0).with_group(group);
+        let negative =
+            |info: ParameterInfo| info.with_enabled_by(DynamicsControl::Asymmetric.name());
+        let window = Scale::LogarithmicOrZero;
         match self {
             DynamicsControl::Preamp => db(-24.0, 48.0, "input"),
             DynamicsControl::LinkChannels => ParameterInfo::new(name, 0.0, 1.0, 1.0)
                 .with_scale(Scale::Toggle)
                 .with_state_labels("Linked", "Unlinked")
                 .with_group("envelope"),
-            DynamicsControl::Attack => ms(MAX_ATTACK_MS, 10.0),
-            DynamicsControl::Release => ms(MAX_RELEASE_MS, 100.0),
+            DynamicsControl::Attack => ms(MIN_WINDOW_MS, MAX_ATTACK_MS, 10.0, window),
+            DynamicsControl::Release => ms(MIN_WINDOW_MS, MAX_RELEASE_MS, 100.0, window),
             DynamicsControl::AttackExponent | DynamicsControl::ReleaseExponent => {
                 exponent(0.1, "envelope").stopped_only()
             }
-            DynamicsControl::Lookahead => ms(MAX_LOOKAHEAD_MS, 0.0),
-            DynamicsControl::Steepness => steepness("curve"),
-            DynamicsControl::CurveExponent => curve_exponent("curve"),
-            DynamicsControl::Makeup => db(-24.0, 24.0, "curve"),
-            DynamicsControl::Ceiling => db(-48.0, 24.0, "curve"),
+            DynamicsControl::Lookahead => ms(0.0, MAX_LOOKAHEAD_MS, 0.0, Scale::Linear),
             DynamicsControl::Asymmetric => ParameterInfo::new(name, 0.0, 1.0, 0.0)
                 .with_scale(Scale::Toggle)
                 .with_state_labels("Asymmetric", "Symmetric")
-                .with_group("negative"),
-            DynamicsControl::NegativeSteepness => steepness("negative"),
-            DynamicsControl::NegativeCurveExponent => curve_exponent("negative"),
-            DynamicsControl::NegativeCeiling => db(-48.0, 24.0, "negative"),
+                .with_group("gain function"),
+            DynamicsControl::PositiveSteepness => steepness("positive"),
+            DynamicsControl::PositiveExponent => exponent(MIN_CURVE_EXPONENT, "positive"),
+            DynamicsControl::PositiveOutputGain => db(-24.0, 24.0, "positive"),
+            DynamicsControl::PositiveCeiling => db(-48.0, 24.0, "positive"),
+            DynamicsControl::NegativeSteepness => negative(steepness("negative")),
+            DynamicsControl::NegativeExponent => negative(exponent(MIN_CURVE_EXPONENT, "negative")),
+            DynamicsControl::NegativeOutputGain => negative(db(-24.0, 24.0, "negative")),
+            DynamicsControl::NegativeCeiling => negative(db(-48.0, 24.0, "negative")),
             DynamicsControl::Oversampling => ParameterInfo::new(name, 0.0, 3.0, 0.0)
                 .with_scale(Scale::Choice(
                     ["1×", "2×", "4×", "8×"].map(String::from).to_vec(),
@@ -228,18 +242,18 @@ fn curve_gain(level: f32, steepness: f32, exponent: f32) -> f32 {
 }
 
 /// The static curve the display plots: the output level for a steady input level `input`
-/// (linear), through the preamp, transfer curve, makeup and clip. The gains are in dB; the
+/// (linear), through the preamp, transfer curve, output gain and clip. The gains are in dB; the
 /// steepness and exponent are as [`transfer_db`] takes them.
 pub fn static_output(
     input: f32,
     preamp_db: f32,
     steepness: f32,
     curve_exponent: f32,
-    makeup_db: f32,
+    output_gain_db: f32,
     ceiling_db: f32,
 ) -> f32 {
     let level = input * db_to_gain(preamp_db);
-    let shaped = level * curve_gain(level, steepness, curve_exponent) * db_to_gain(makeup_db);
+    let shaped = level * curve_gain(level, steepness, curve_exponent) * db_to_gain(output_gain_db);
     shaped.min(db_to_gain(ceiling_db))
 }
 
@@ -398,8 +412,8 @@ struct Live {
 /// Every ramped value: linear gains and the curve exponents.
 struct Ramps {
     preamp: Ramp,
-    makeup: Ramp,
     /// For positive, then negative, samples.
+    output_gain: [Ramp; 2],
     steepness: [Ramp; 2],
     exponent: [Ramp; 2],
     ceiling: [Ramp; 2],
@@ -409,7 +423,7 @@ struct Ramps {
 #[derive(Debug, Clone, Copy)]
 struct Step {
     preamp: f32,
-    makeup: f32,
+    output_gain: [f32; 2],
     steepness: [f32; 2],
     exponent: [f32; 2],
     ceiling: [f32; 2],
@@ -420,7 +434,7 @@ impl Ramps {
         let pair = |r: &mut [Ramp; 2]| [r[0].next_value(), r[1].next_value()];
         Step {
             preamp: self.preamp.next_value(),
-            makeup: self.makeup.next_value(),
+            output_gain: pair(&mut self.output_gain),
             steepness: pair(&mut self.steepness),
             exponent: pair(&mut self.exponent),
             ceiling: pair(&mut self.ceiling),
@@ -474,7 +488,7 @@ impl Running {
             normaliser,
             ramps: Ramps {
                 preamp: ramp(targets.preamp),
-                makeup: ramp(targets.makeup),
+                output_gain: pair(targets.output_gain),
                 steepness: pair(targets.steepness),
                 exponent: pair(targets.exponent),
                 ceiling: pair(targets.ceiling),
@@ -500,8 +514,8 @@ impl Running {
     /// Sets the ramps' targets.
     fn set(&mut self, targets: &Targets) {
         self.ramps.preamp.set_target(targets.preamp);
-        self.ramps.makeup.set_target(targets.makeup);
         for side in 0..2 {
+            self.ramps.output_gain[side].set_target(targets.output_gain[side]);
             self.ramps.steepness[side].set_target(targets.steepness[side]);
             self.ramps.exponent[side].set_target(targets.exponent[side]);
             self.ramps.ceiling[side].set_target(targets.ceiling[side]);
@@ -561,11 +575,14 @@ impl Running {
             channel.oversampler.up(delayed, &mut self.high);
             for sample in self.high.iter_mut() {
                 let side = side_of(*sample);
-                let shaped = if instantaneous {
-                    *sample * curve_gain(sample.abs(), step.steepness[side], step.exponent[side])
+                let gain = if instantaneous {
+                    curve_gain(sample.abs(), step.steepness[side], step.exponent[side])
                 } else {
-                    *sample * channel.gain[side]
+                    channel.gain[side]
                 };
+                // The output gain goes in before the DC blocker, which removes the offset an
+                // asymmetric one adds.
+                let shaped = *sample * gain * step.output_gain[side];
                 let blocked = if asymmetric {
                     channel.dc_blocker.process(shaped, &dc)
                 } else {
@@ -573,7 +590,7 @@ impl Running {
                 };
                 // Ceilings are linear gains, so positive; the negative one equals the positive
                 // one unless asymmetric.
-                *sample = (blocked * step.makeup).clamp(-step.ceiling[1], step.ceiling[0]);
+                *sample = blocked.clamp(-step.ceiling[1], step.ceiling[0]);
             }
             *out = channel.oversampler.down(&self.high);
             for side in 0..2 {
@@ -596,7 +613,7 @@ impl Running {
 /// The parameter values a block works towards, as linear values.
 struct Targets {
     preamp: f32,
-    makeup: f32,
+    output_gain: [f32; 2],
     steepness: [f32; 2],
     exponent: [f32; 2],
     ceiling: [f32; 2],
@@ -657,18 +674,21 @@ impl Dynamics {
         let negative = |own: C, positive: C| self.get(if asymmetric { own } else { positive });
         Targets {
             preamp: db_to_gain(self.get(C::Preamp)),
-            makeup: db_to_gain(self.get(C::Makeup)),
+            output_gain: [
+                db_to_gain(self.get(C::PositiveOutputGain)),
+                db_to_gain(negative(C::NegativeOutputGain, C::PositiveOutputGain)),
+            ],
             steepness: [
-                self.get(C::Steepness),
-                negative(C::NegativeSteepness, C::Steepness),
+                self.get(C::PositiveSteepness),
+                negative(C::NegativeSteepness, C::PositiveSteepness),
             ],
             exponent: [
-                self.get(C::CurveExponent),
-                negative(C::NegativeCurveExponent, C::CurveExponent),
+                self.get(C::PositiveExponent),
+                negative(C::NegativeExponent, C::PositiveExponent),
             ],
             ceiling: [
-                db_to_gain(self.get(C::Ceiling)),
-                db_to_gain(negative(C::NegativeCeiling, C::Ceiling)),
+                db_to_gain(self.get(C::PositiveCeiling)),
+                db_to_gain(negative(C::NegativeCeiling, C::PositiveCeiling)),
             ],
             live: Live {
                 linked: self.get(C::LinkChannels) >= 0.5,
@@ -811,6 +831,76 @@ mod tests {
     }
 
     #[test]
+    fn test_parameters_are_grouped_and_scaled() -> Result<(), Error> {
+        let infos: Vec<ParameterInfo> = Dynamics::new()?
+            .parameters()
+            .iter()
+            .map(|p| p.info().clone())
+            .collect();
+        let groups: Vec<(&str, &str)> = infos
+            .iter()
+            .map(|i| (i.group.as_str(), i.name.as_str()))
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("input", "preamp"),
+                ("envelope", "link channels"),
+                ("envelope", "attack"),
+                ("envelope", "attack exponent"),
+                ("envelope", "release"),
+                ("envelope", "release exponent"),
+                ("envelope", "lookahead"),
+                ("gain function", "asymmetric"),
+                ("positive", "positive steepness"),
+                ("positive", "positive exponent"),
+                ("positive", "positive output gain"),
+                ("positive", "positive ceiling"),
+                ("negative", "negative steepness"),
+                ("negative", "negative exponent"),
+                ("negative", "negative output gain"),
+                ("negative", "negative ceiling"),
+                ("quality", "oversampling"),
+            ]
+        );
+        let enabled: Vec<&str> = infos
+            .iter()
+            .filter(|i| i.enabled_by.as_deref() == Some("asymmetric"))
+            .map(|i| i.name.as_str())
+            .collect();
+        assert_eq!(
+            enabled,
+            [
+                "negative steepness",
+                "negative exponent",
+                "negative output gain",
+                "negative ceiling"
+            ]
+        );
+        for info in infos.iter().filter(|i| i.name.ends_with(" exponent")) {
+            assert_eq!(info.scale, Scale::Logarithmic, "{}", info.name);
+        }
+        for info in infos
+            .iter()
+            .filter(|i| i.group == "positive" || i.group == "negative")
+            .filter(|i| i.name.ends_with(" exponent"))
+        {
+            assert_eq!((info.min, info.max, info.default), (1.0 / 16.0, 16.0, 1.0));
+        }
+        for info in infos
+            .iter()
+            .filter(|i| ["attack", "release"].contains(&i.name.as_str()))
+        {
+            assert_eq!(info.scale, Scale::LogarithmicOrZero);
+            assert_eq!(info.min, 0.25);
+        }
+        let negative_gain = &infos[14];
+        assert_eq!((negative_gain.min, negative_gain.max), (-24.0, 24.0));
+        assert_eq!(negative_gain.unit, "dB");
+        Ok(())
+    }
+
+    #[test]
     fn test_window_weight_shapes_each_side() {
         assert_eq!(window_weight(0.0, 10.0, 2.0, 100.0, 1.0), 1.0);
         assert!((window_weight(5.0, 10.0, 1.0, 100.0, 1.0) - 0.5).abs() < 1e-6);
@@ -899,7 +989,7 @@ mod tests {
 
     #[test]
     fn test_process_gates_quiet_signal_with_high_exponent() -> TestResult {
-        let mut dynamics = effect(&[(DynamicsControl::CurveExponent, 4.0)])?;
+        let mut dynamics = effect(&[(DynamicsControl::PositiveExponent, 4.0)])?;
         let (mut left, mut right) = (square(0.01, 24_000), square(0.01, 24_000));
         run(&mut dynamics, &mut left, &mut right);
         // −40 dB in comes out below −80 dB.
@@ -912,8 +1002,8 @@ mod tests {
         let mut dynamics = effect(&[
             (DynamicsControl::Attack, 0.0),
             (DynamicsControl::Release, 0.0),
-            (DynamicsControl::Steepness, 4.0),
-            (DynamicsControl::CurveExponent, 0.5),
+            (DynamicsControl::PositiveSteepness, 4.0),
+            (DynamicsControl::PositiveExponent, 0.5),
         ])?;
         let input: Vec<f32> = (0..1_000).map(|i| (i as f32 * 0.01).sin()).collect();
         let (mut left, mut right) = (input.clone(), input.clone());
@@ -943,8 +1033,8 @@ mod tests {
     #[test]
     fn test_process_clips_at_ceiling() -> TestResult {
         let mut dynamics = effect(&[
-            (DynamicsControl::Makeup, 24.0),
-            (DynamicsControl::Ceiling, -6.0),
+            (DynamicsControl::PositiveOutputGain, 24.0),
+            (DynamicsControl::PositiveCeiling, -6.0),
         ])?;
         let (mut left, mut right) = (square(1.0, 4_800), square(1.0, 4_800));
         run(&mut dynamics, &mut left, &mut right);
@@ -981,10 +1071,10 @@ mod tests {
             (DynamicsControl::Attack, 0.0),
             (DynamicsControl::Release, 0.0),
             (DynamicsControl::Asymmetric, 1.0),
-            (DynamicsControl::CurveExponent, 0.5),
-            (DynamicsControl::NegativeCurveExponent, 2.0),
+            (DynamicsControl::PositiveExponent, 0.5),
+            (DynamicsControl::NegativeExponent, 2.0),
             // Headroom, so the clip after the DC blocker does not cut the shifted peaks.
-            (DynamicsControl::Ceiling, 6.0),
+            (DynamicsControl::PositiveCeiling, 6.0),
             (DynamicsControl::NegativeCeiling, 6.0),
         ])?;
         let frames = 4 * RATE as usize;
@@ -1002,6 +1092,57 @@ mod tests {
         let asymmetry =
             (0..tail.len() - half).fold(0.0_f32, |m, i| m.max((tail[i] + tail[i + half]).abs()));
         assert!(asymmetry > 0.2, "{asymmetry}");
+        Ok(())
+    }
+
+    /// The mean of the positive and of the negative samples of a settled waveshaped sine through
+    /// an effect with `values` set.
+    fn half_means(values: &[(DynamicsControl, f32)]) -> Result<(f32, f32), Error> {
+        let mut settings = vec![
+            (DynamicsControl::Attack, 0.0),
+            (DynamicsControl::Release, 0.0),
+            (DynamicsControl::PositiveCeiling, 24.0),
+            (DynamicsControl::NegativeCeiling, 24.0),
+        ];
+        settings.extend_from_slice(values);
+        let mut dynamics = effect(&settings)?;
+        let input: Vec<f32> = (0..RATE as usize)
+            .map(|i| 0.5 * (2.0 * std::f32::consts::PI * 100.0 * i as f32 / RATE as f32).sin())
+            .collect();
+        let (mut left, mut right) = (input.clone(), input);
+        run(&mut dynamics, &mut left, &mut right);
+        let tail = &left[RATE as usize / 2..];
+        let mean = |keep: fn(f32) -> bool| {
+            let kept: Vec<f32> = tail.iter().copied().filter(|&x| keep(x)).collect();
+            kept.iter().map(|x| x.abs()).sum::<f32>() / kept.len().max(1) as f32
+        };
+        Ok((mean(|x| x > 0.0), mean(|x| x < 0.0)))
+    }
+
+    #[test]
+    fn test_process_negative_output_gain_needs_asymmetric() -> TestResult {
+        let (plain_positive, plain_negative) = half_means(&[])?;
+        // Symmetric: the negative output gain is ignored.
+        let (positive, negative) = half_means(&[(DynamicsControl::NegativeOutputGain, -12.0)])?;
+        assert!((positive - plain_positive).abs() < 1e-4);
+        assert!((negative - plain_negative).abs() < 1e-4);
+        // Asymmetric: it lowers the negative half; the DC blocker then shifts both halves, so
+        // compare their sum (the peak-to-peak size) and their difference.
+        let (positive, negative) = half_means(&[
+            (DynamicsControl::Asymmetric, 1.0),
+            (DynamicsControl::NegativeOutputGain, -12.0),
+        ])?;
+        assert!(positive + negative < 0.8 * (plain_positive + plain_negative));
+        assert!(positive > negative, "{positive} vs {negative}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_positive_output_gain_scales_both_halves_when_symmetric() -> TestResult {
+        let (plain_positive, plain_negative) = half_means(&[])?;
+        let (positive, negative) = half_means(&[(DynamicsControl::PositiveOutputGain, 6.0)])?;
+        assert!((positive / plain_positive - db_to_gain(6.0)).abs() < 1e-3);
+        assert!((negative / plain_negative - db_to_gain(6.0)).abs() < 1e-3);
         Ok(())
     }
 

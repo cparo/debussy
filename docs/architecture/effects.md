@@ -78,24 +78,26 @@ ramp time; a stage that is off passes its input through and is not processed
 
 `dynamics` is a compressor, limiter, gate or saturator by its settings. In order, a sample is
 amplified by `preamp` and delayed by `lookahead`, multiplied by a gain the transfer curve gives for
-the signal's level, passed through a DC blocker when `asymmetric` is on, amplified by `makeup`, and
-clipped at `ceiling`. The parameters are listed, and shown, in this order:
+the signal's level and by its side's output gain, passed through a DC blocker when `asymmetric` is
+on, and clipped at its side's ceiling. The parameters are listed, and shown, in this order, grouped
+as `input`, `envelope`, `gain function`, `positive`, `negative` and `quality`; each label is the
+name less its group ([ADR-0104](../adrs/0104-the-dynamics-controls-mirror-the-positive-and.md)):
 
 | Name | Range | Default | Meaning |
 |---|---|---|---|
 | `preamp` | −24 to +48 | 0 | Input gain in dB |
 | `link channels` | off (0) or on (1) | on | Whether left and right share one level |
-| `attack` | 0 to 100 | 10 | The window's future side, in ms; stopped-only |
+| `attack` | 0, or 0.25 to 100 logarithmic | 10 | The window's future side, in ms; stopped-only |
 | `attack exponent` | 0.1 to 16, logarithmic | 1 | Shape of the attack side; stopped-only |
-| `release` | 0 to 5 000 | 100 | The window's past side, in ms; stopped-only |
+| `release` | 0, or 0.25 to 5 000 logarithmic | 100 | The window's past side, in ms; stopped-only |
 | `release exponent` | 0.1 to 16, logarithmic | 1 | Shape of the release side; stopped-only |
 | `lookahead` | 0 to 100 | 0 | The window's reach ahead and the effect's delay, in ms; stopped-only |
-| `steepness` | 0.01 to 10, logarithmic | 1 | Sharpness of the curve's shoulder |
-| `curve exponent` | 0 to 16 | 1 | Below 1 raises quiet levels, above 1 lowers them |
-| `makeup` | −24 to +24 | 0 | Gain after the curve, in dB |
-| `ceiling` | −48 to +24 | 0 | Clip level in dB |
 | `asymmetric` | off (0) or on (1) | off | Whether negative samples use the `negative` values |
-| `negative steepness`, `negative curve exponent`, `negative ceiling` | as the positive ones | as the positive ones | The curve and clip for negative samples |
+| `positive steepness` | 0.01 to 10, logarithmic | 1 | Sharpness of the curve's shoulder |
+| `positive exponent` | 1/16 to 16, logarithmic | 1 | Below 1 raises quiet levels, above 1 lowers them |
+| `positive output gain` | −24 to +24 | 0 | Gain applied with the curve's, in dB |
+| `positive ceiling` | −48 to +24 | 0 | Clip level in dB |
+| `negative steepness`, `negative exponent`, `negative output gain`, `negative ceiling` | as the positive ones | as the positive ones | The same for negative samples; enabled by `asymmetric` |
 | `oversampling` | 1× (0), 2× (1), 4× (2), 8× (3) | 1× | Rate of the stages from the gain to the clip; stopped-only |
 
 - **Level.** The level is a weighted RMS of the preamplified input. With time `t` in ms relative
@@ -112,20 +114,22 @@ clipped at `ceiling`. The parameters are listed, and shown, in this order:
   −96 dB, and at silence, the level passes unchanged. The gain is the output level less the input
   level ([ADR-0102](../adrs/0102-the-dynamics-curve-maps-normalised-db-levels.md)). The gain moves linearly from its previous value to the new
   one over the block after it is computed. When asymmetric, a negative sample takes the gain of
-  the `negative` steepness and exponent from the same level.
+  the `negative` steepness and exponent from the same level. Each side's output gain multiplies
+  the sample with its curve gain, before the DC blocker; unless asymmetric, both sides use the
+  positive one.
 - **Waveshaper.** With `attack` and `release` both 0, each sample of each channel is its own
   level, so a sample's magnitude is mapped through the curve and its sign kept; `link channels`
   has no effect.
 - **DC blocker.** A one-pole high-pass at 7 Hz, cleared when `asymmetric` is turned on.
-- **Clip.** The output is held between `−negative ceiling` and `+ceiling` (both `ceiling` unless
-  asymmetric), each as a linear gain. Oversampled, the down-sampling filter may ring slightly past
+- **Clip.** The output is held between `−negative ceiling` and `+positive ceiling` (both
+  `positive ceiling` unless asymmetric), each as a linear gain. Oversampled, the down-sampling filter may ring slightly past
   it.
-- **Oversampling.** The delayed signal is up-sampled by `dsp::Oversampler`, the gain, DC blocker,
-  makeup and clip run at the higher rate, and it is filtered back down. Each direction is a
+- **Oversampling.** The delayed signal is up-sampled by `dsp::Oversampler`, the gain and output
+  gain, DC blocker and clip run at the higher rate, and it is filtered back down. Each direction is a
   linear-phase Kaiser-windowed sinc cut off at half the base rate, 80 dB down, delaying 16 base
   frames.
 - **Latency** is `lookahead` in frames, plus 32 frames when oversampled.
-- `preamp`, `makeup`, both steepnesses, exponents and ceilings ramp over the parameter ramp time;
+- `preamp`, both steepnesses, exponents, output gains and ceilings ramp over the parameter ramp time;
   `link channels` and `asymmetric` take effect at once. The stopped-only parameters are read when
   the node is prepared.
 

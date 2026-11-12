@@ -53,9 +53,10 @@ displays", and the curves in the tone's audio colour:
   labels under the plot give the oldest sample's age at the left, the lookahead at the right and
   `0ms` at the current sample when there is room, such as `−110ms` and `+10ms`.
 - **Transfer curve**, on the right: the steady-state output level for each input level, through
-  the preamp, curve, makeup and ceiling (`audio_effects::static_output`), with input from −96 to
-  +12 dB across and output from −96 to +12 dB up, grid lines every 24 dB across and every 12 dB
-  up, 0 dB brighter. When `asymmetric` is on, the plot is split by a centre line at −96 dB: the
+  the preamp, curve, output gain and ceiling (`audio_effects::static_output`), with input from −96
+  to +12 dB across and output from −96 to +12 dB up, grid lines every 24 dB across and every 12 dB
+  up, and 1-pixel red lines over the grid at 0 dB in and 0 dB out (on each half when asymmetric)
+  ([ADR-0104](../adrs/0104-the-dynamics-controls-mirror-the-positive-and.md)). When `asymmetric` is on, the plot is split by a centre line at −96 dB: the
   positive samples' curve rises above it to +12 dB at the top and the negative samples' curve
   falls below it to +12 dB at the bottom, with grid lines every 36 dB in each half
 

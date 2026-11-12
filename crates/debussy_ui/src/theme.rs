@@ -2,7 +2,7 @@
 //! [`Theme`] for each, and the widget styles built from them (`docs/architecture/
 //! user-interface.md` "Layout").
 
-use iced::widget::{button, container, svg};
+use iced::widget::{button, container, slider, svg, text};
 use iced::{Background, Border, Color, Theme, border};
 
 /// The playhead: the lane cursor and the position bar.
@@ -24,6 +24,9 @@ pub const GRID: Color = Color::from_rgb8(0x3C, 0x3C, 0x3C);
 
 /// An equaliser display's 0 dB line, a little brighter than the rest of the grid.
 pub const GRID_ZERO: Color = Color::from_rgb8(0x58, 0x58, 0x58);
+
+/// A dynamics display's 0 dB lines: red, as the playhead.
+pub const ZERO_DB_LINE: Color = CURSOR;
 
 /// An equaliser display's axis labels, light grey in both tones.
 pub const LABEL: Color = Color::from_rgb8(0x9C, 0x9C, 0x9C);
@@ -260,6 +263,27 @@ fn tool_colours(t: &Tokens, selected: bool, accent: Accent) -> (Color, Color) {
 /// A disabled toolbar button's ink.
 fn disabled_ink(ink: Color) -> Color {
     Color { a: 0.45, ..ink }
+}
+
+/// A disabled control's label: the chrome's text, faded as a disabled button's.
+pub fn disabled_text(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(disabled_ink(tokens(tone_of(theme)).text)),
+    }
+}
+
+/// A disabled slider: rail and handle greyed towards the background, the same in every status.
+pub fn disabled_slider(theme: &Theme, _status: slider::Status) -> slider::Style {
+    let palette = theme.extended_palette();
+    let (background, ink) = (palette.background.base.color, tokens(tone_of(theme)).text);
+    let mut style = slider::default(theme, slider::Status::Active);
+    style.rail.backgrounds = (
+        mix(background, ink, 0.3).into(),
+        palette.background.strong.color.into(),
+    );
+    style.handle.background = mix(background, ink, 0.45).into();
+    style.handle.border_color = mix(background, ink, 0.3);
+    style
 }
 
 /// A toolbar button's icon: tinted with the ink its text label would have, or greyed out

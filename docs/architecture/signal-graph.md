@@ -77,10 +77,13 @@ reports its latency, declares its ports, and exposes its parameters through the 
 third-party plugin wrapper would implement. Third-party plugins are not hosted ([ADR-0019](../adrs/0019-only-built-in-effects-for-now-behind-a-plugin.md)).
 
 Each parameter declares, besides its name, range and default, a unit (possibly empty), a scale
-(linear, logarithmic, integer, choice of named options by index, or toggle) and a group (possibly
-empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
+(linear, logarithmic, logarithmic with 0, integer, choice of named options by index, or toggle) and
+a group (possibly empty). Logarithmic with 0 holds 0 or `min` (above 0) to `max`; a value below
+`min / 2` is held as 0, one from there up to `min` as `min`
+([ADR-0105](../adrs/0105-parameters-may-be-logarithmic-with-zero-and.md)). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
 stopped-only: it changes only while playback is stopped or paused, and no automation drives it. A
-toggle may name its on and off states, for display only. The
+toggle may name its on and off states, and a parameter may name a toggle of its node that enables
+it, both for display only ([ADR-0105](../adrs/0105-parameters-may-be-logarithmic-with-zero-and.md)). The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)). A change to a stopped-only value replaces
