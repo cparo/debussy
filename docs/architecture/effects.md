@@ -16,6 +16,7 @@ state.
 | `dynamics` | Dynamics | "Dynamics" |
 | `amplifier` | Amplifier | "Amplifier" |
 | `delay` | Delay | `docs/architecture/delay-and-reverb.md` "Delay" |
+| `reverb` | Reverb | `docs/architecture/delay-and-reverb.md` "Reverb" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 

@@ -25,4 +25,8 @@ Butterworth DC filter, and 2× or 4× oversampling around the shaper with the po
 ([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)), and the
 delay: whole-frame taps, tempo-synced times, crossfaded tap changes, stereo and ping-pong
 feedback, and the low-pass and saturation in the feedback path
-([ADR-0112](../adrs/0112-the-delay-reads-whole-frame-taps-from-a-4-second.md)).
+([ADR-0112](../adrs/0112-the-delay-reads-whole-frame-taps-from-a-4-second.md)), and the
+reverb: the fixed-length eight-line Hadamard feedback delay network with outputs taken before the
+matrix, and Dattorro's plate with linear-interpolated modulated allpasses, with no size control and
+no crossfade between them
+([ADR-0113](../adrs/0113-the-reverb-is-a-fixed-length-feedback-delay.md)).

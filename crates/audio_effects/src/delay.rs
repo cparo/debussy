@@ -6,6 +6,8 @@ use std::f32::consts::FRAC_1_SQRT_2;
 
 use audio_buffers::Layout;
 use dsp::{FOLD_DOWN_GAIN, Svf, SvfCoefficients, TapDelay};
+
+use crate::tap::{Tap, to_tap};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
@@ -122,60 +124,6 @@ pub(crate) fn synced_frames(frames_per_whole_note: f64, note: f32, feel: f32) ->
 /// The whole-note length when none is given: 120 BPM in 4/4, two seconds.
 fn default_whole_note(sample_rate: u32) -> f64 {
     2.0 * f64::from(sample_rate)
-}
-
-/// A number of frames as a whole-frame tap, from 1 up to `max`.
-fn to_tap(frames: f64, max: usize) -> usize {
-    // Clamped to a range that fits `usize` first.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
-    let tap = frames.round().clamp(1.0, max as f64) as usize;
-    tap
-}
-
-/// One channel's tap, crossfading linearly from the old tap to the new over the ramp time when it
-/// changes. A change during a fade waits for it to finish.
-struct Tap {
-    sample_rate: u32,
-    /// The tap being faded to, or held.
-    current: usize,
-    /// The tap being faded from.
-    previous: usize,
-    /// The tap asked for, taken up when no fade is running.
-    wanted: usize,
-    /// How much of `current` is heard: ramps from 0 to 1 after a change.
-    fade: Ramp,
-}
-
-impl Tap {
-    fn new(tap: usize, sample_rate: u32) -> Self {
-        Tap {
-            sample_rate,
-            current: tap,
-            previous: tap,
-            wanted: tap,
-            fade: Ramp::new(1.0, sample_rate),
-        }
-    }
-
-    /// The sample `line` gives for the next frame.
-    fn read(&mut self, line: &TapDelay) -> f32 {
-        if !self.fade.is_ramping() && self.wanted != self.current {
-            self.previous = self.current;
-            self.current = self.wanted;
-            self.fade = Ramp::new(0.0, self.sample_rate);
-            self.fade.set_target(1.0);
-        }
-        let fade = self.fade.next_value();
-        if fade >= 1.0 {
-            line.read(self.current)
-        } else {
-            line.read(self.previous) * (1.0 - fade) + line.read(self.current) * fade
-        }
-    }
 }
 
 /// One channel's feedback-path filter state.

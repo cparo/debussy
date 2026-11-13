@@ -9,6 +9,7 @@ use crate::delay::Delay;
 use crate::dynamics::{self, Dynamics};
 use crate::filters::{self, Butterworth, Response};
 use crate::parametric::{self, ParametricEq};
+use crate::reverb::Reverb;
 
 /// A built-in effect kind.
 #[derive(Debug, Clone, Copy)]
@@ -61,6 +62,12 @@ pub const EFFECTS: &[EffectKind] = &[
         id: "delay",
         name: "Delay",
         build: build_delay,
+        curve: None,
+    },
+    EffectKind {
+        id: "reverb",
+        name: "Reverb",
+        build: build_reverb,
         curve: None,
     },
 ];
@@ -217,6 +224,11 @@ fn build_amplifier() -> Option<Box<dyn Node>> {
 /// A new delay.
 fn build_delay() -> Option<Box<dyn Node>> {
     Some(Box::new(Delay::new().ok()?))
+}
+
+/// A new reverb.
+fn build_reverb() -> Option<Box<dyn Node>> {
+    Some(Box::new(Reverb::new().ok()?))
 }
 
 /// The built-in effect of stable kind id `kind`, ready to add to a graph, or `None` for an id

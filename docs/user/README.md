@@ -139,6 +139,12 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   left. Turn on the **Low-pass** to make each repeat darker than the last, and **Saturation** to
   let loud repeats distort gently instead of growing. **Mix** sets how loud the repeats are
   against the original. Presets: Slapback, Ping-pong and Dub echo.
+- **Reverb** adds a sense of space. **Algorithm** picks **room**, dense and natural, or
+  **plate**, smooth and bright; it can only be changed while stopped or paused, and the change
+  starts the new one silent. **Pre-delay** holds the reverb back a moment after the sound.
+  **Decay** is how long the reverb takes to die away, and **Damping** makes high frequencies die
+  sooner: lower it for a darker, softer space. **Mix** sets how loud the reverb is against the
+  original.
 
 Effect settings are saved with the project.
 
@@ -157,4 +163,4 @@ Export renders the whole project and exits without opening the window.
 
 ## Not yet available
 
-Punch-in and loop recording, editing clips in the window, automation, and reverb.
+Punch-in and loop recording, editing clips in the window, and automation.

@@ -16,6 +16,9 @@
 //!   oversampling, and [`ShaperCurve`], its curve (`docs/architecture/effects.md` "Amplifier").
 //! - `delay`: [`Delay`], a whole-frame tap delay, free or tempo-synced, in stereo or ping-pong
 //!   (`docs/architecture/delay-and-reverb.md` "Delay").
+//! - `reverb`: [`Reverb`], a feedback delay network or Dattorro's plate behind a pre-delay
+//!   (`docs/architecture/delay-and-reverb.md` "Reverb").
+//! - `tap`: a whole-frame tap that crossfades when it changes, for `delay` and `reverb`.
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id, and [`PRESETS`], named starting values for them.
@@ -37,6 +40,8 @@ mod mixer;
 mod parametric;
 mod registry;
 mod response;
+mod reverb;
+mod tap;
 mod utility;
 
 pub use amplifier::{Amplifier, Shape, ShaperCurve};
@@ -58,4 +63,5 @@ pub use registry::{
     preset, presets,
 };
 pub use response::FrequencyResponse;
+pub use reverb::{MAX_PRE_DELAY_MS, Reverb};
 pub use utility::{Bus, Pick, Place, Silence};
