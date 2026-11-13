@@ -8,7 +8,7 @@ use audio_buffers::Layout;
 use project_model::{ConnectionId, Side, Tempo};
 use signal_graph::{ConnectionId as GraphConnectionId, Graph, Node, NodeId as GraphNodeId};
 
-use crate::target::{ConnectionTarget, Key, NodeTarget, Shape, Target, frames_per_whole_note};
+use crate::target::{ConnectionTarget, Key, NodeTarget, Shape, Target};
 
 /// Why the mirror could not make the graph hold a target.
 #[derive(Debug)]
@@ -214,10 +214,11 @@ impl Mirror {
             tempo: target.tempo,
             ..Mirror::default()
         };
-        graph.set_tempo(frames_per_whole_note(
-            &target.tempo,
-            graph.config().sample_rate,
-        ));
+        graph.set_tempo(
+            target
+                .tempo
+                .frames_per_whole_note(graph.config().sample_rate),
+        );
         for (key, node) in &target.nodes {
             let id = add(graph, node)?;
             mirror.nodes.insert(
@@ -365,7 +366,7 @@ impl Mirror {
             return Ok(());
         }
         self.tempo = tempo;
-        let users = graph.set_tempo(frames_per_whole_note(&tempo, graph.config().sample_rate));
+        let users = graph.set_tempo(tempo.frames_per_whole_note(graph.config().sample_rate));
         for node in self.nodes.values().filter(|n| users.contains(&n.id)) {
             if let Some(processor) = processor(&node.target.shape) {
                 // Same kind, so the same ports: no connection is dropped. Values carry over by

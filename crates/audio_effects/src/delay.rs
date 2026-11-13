@@ -9,6 +9,7 @@ use crate::tap::{Tap, to_tap};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
+use crate::impulse::{ImpulseCurve, SPAN_DB};
 
 /// The longest delay time, in milliseconds.
 pub const MAX_DELAY_MS: f32 = 4000.0;
@@ -37,7 +38,7 @@ enum Control {
 }
 
 /// How many parameters there are.
-const CONTROLS: usize = 11;
+pub(crate) const CONTROLS: usize = 11;
 
 /// Every control, in declaration order.
 const ALL: [Control; CONTROLS] = [
@@ -116,9 +117,94 @@ pub(crate) fn synced_frames(frames_per_whole_note: f64, note: f32, feel: f32) ->
     frames_per_whole_note * fraction * feel
 }
 
-/// The whole-note length when none is given: 120 BPM in 4/4, two seconds.
-fn default_whole_note(sample_rate: u32) -> f64 {
-    2.0 * f64::from(sample_rate)
+/// The whole-note length to run at for `frames_per_whole_note` at `sample_rate`: the length
+/// itself if it is positive, or 120 BPM in 4/4, two seconds, if it is not or none is given.
+fn whole_note(frames_per_whole_note: Option<f64>, sample_rate: u32) -> f64 {
+    frames_per_whole_note
+        .filter(|f| f.is_finite() && *f > 0.0)
+        .unwrap_or(2.0 * f64::from(sample_rate))
+}
+
+/// The longest delay time at `sample_rate`, in frames.
+fn max_time(sample_rate: u32) -> f64 {
+    (f64::from(sample_rate) * f64::from(MAX_DELAY_MS) / 1000.0)
+        .round()
+        .max(1.0)
+}
+
+/// The delay time `value` asks for, before the offset, in frames at `sample_rate`, for a whole
+/// note of `frames_per_whole_note` frames; clamped to between 1 frame and the longest.
+fn base_frames(
+    value: &impl Fn(Control) -> f32,
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> f64 {
+    let frames = if value(Control::Sync) >= 0.5 {
+        synced_frames(
+            frames_per_whole_note,
+            value(Control::Note),
+            value(Control::Feel),
+        )
+    } else {
+        f64::from(value(Control::Time)) * f64::from(sample_rate) / 1000.0
+    };
+    frames.clamp(1.0, max_time(sample_rate))
+}
+
+/// The curve of a `delay` effect whose parameters stand at `values`, in declaration order (see
+/// [`crate::CurveFn`]): its impulse response, simulated when it is read.
+pub(crate) fn impulse_curve(
+    values: &[f32],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> Option<crate::Curve> {
+    let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
+    let whole = whole_note(Some(frames_per_whole_note), sample_rate);
+    Some(crate::Curve::Impulse(ImpulseCurve::delay(
+        *values,
+        sample_rate,
+        whole,
+    )))
+}
+
+/// The time for a delay at `values` to fall [`SPAN_DB`] after an impulse, in seconds, unclamped:
+/// as many echoes as its feedback takes to fall that far (one with none), and one more, of the
+/// longer channel's time.
+pub(crate) fn impulse_span(
+    values: &[f32; CONTROLS],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> f32 {
+    let value = |control: Control| values[control as usize];
+    let rate = f64::from(sample_rate);
+    let offset = f64::from(value(Control::Offset).max(0.0)) * rate / 1000.0;
+    let seconds = (base_frames(&value, sample_rate, frames_per_whole_note) + offset) / rate;
+    let feedback = value(Control::Feedback) / 100.0;
+    let echoes = if feedback <= 0.0 {
+        1.0
+    } else if feedback >= 1.0 {
+        // Echoes that never fall.
+        f32::INFINITY
+    } else {
+        (SPAN_DB / (-20.0 * feedback.log10())).ceil()
+    };
+    // A span of seconds.
+    #[allow(clippy::cast_possible_truncation)]
+    let seconds = seconds as f32;
+    (echoes + 1.0) * seconds
+}
+
+/// A delay at `values` from silence, at `sample_rate` for a whole note of
+/// `frames_per_whole_note` frames: each call runs one frame of input through it. Allocates.
+pub(crate) fn impulse_response(
+    values: &[f32; CONTROLS],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> impl FnMut(f32, f32) -> (f32, f32) {
+    let mut running = Running::new(sample_rate, Some(frames_per_whole_note), |control| {
+        values[control as usize]
+    });
+    move |left, right| running.frame(left, right)
 }
 
 /// One channel's feedback-path filter state.
@@ -129,9 +215,7 @@ struct Channel {
 
 /// A prepared delay: the lines, taps, filters and ramps.
 struct Running {
-    sample_rate: f32,
-    /// The longest delay time, in frames.
-    max_time: f64,
+    sample_rate: u32,
     /// The whole-note length, in frames.
     frames_per_whole_note: f64,
     lines: [TapDelay; 2],
@@ -153,23 +237,56 @@ struct Running {
 }
 
 impl Running {
-    /// The delay time `value` asks for, before the offset, in frames, clamped to the longest.
-    fn base_frames(&self, value: &impl Fn(Control) -> f32) -> f64 {
-        let frames = if value(Control::Sync) >= 0.5 {
-            synced_frames(
-                self.frames_per_whole_note,
-                value(Control::Note),
-                value(Control::Feel),
-            )
-        } else {
-            f64::from(value(Control::Time)) * f64::from(self.sample_rate) / 1000.0
+    /// A delay at `sample_rate` for a whole note of `frames_per_whole_note` frames (120 BPM in
+    /// 4/4 if none, or not a positive length), its parameters at `value`'s values, with no ramp or
+    /// crossfade in. Allocates.
+    fn new(
+        sample_rate: u32,
+        frames_per_whole_note: Option<f64>,
+        value: impl Fn(Control) -> f32,
+    ) -> Running {
+        let rate = f64::from(sample_rate);
+        let max_offset = (rate * f64::from(MAX_OFFSET_MS) / 1000.0).ceil();
+        let max_tap = to_tap(max_time(sample_rate) + max_offset, usize::MAX);
+        let frames_per_whole_note = whole_note(frames_per_whole_note, sample_rate);
+        #[allow(clippy::cast_precision_loss)] // audio rates are exact in f32
+        let sample_rate_f32 = sample_rate as f32;
+        let ramp = |value| Ramp::new(value, sample_rate);
+        let mut running = Running {
+            sample_rate,
+            frames_per_whole_note,
+            lines: [TapDelay::new(max_tap), TapDelay::new(max_tap)],
+            taps: [Tap::new(1, sample_rate), Tap::new(1, sample_rate)],
+            channels: [Channel::default(), Channel::default()],
+            ping_pong: ramp(0.0),
+            feedback: ramp(0.0),
+            low_pass_share: ramp(0.0),
+            low_pass_log: ramp(0.0),
+            coefficients: OnePoleCoefficients::low_pass(20_000.0, sample_rate_f32),
+            saturation: ramp(0.0),
+            mix: ramp(0.0),
         };
-        frames.clamp(1.0, self.max_time)
+        running.set(&value);
+        // Start at the values, with no ramp or crossfade in.
+        running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
+        for ramp in [
+            &mut running.ping_pong,
+            &mut running.feedback,
+            &mut running.low_pass_share,
+            &mut running.low_pass_log,
+            &mut running.saturation,
+            &mut running.mix,
+        ] {
+            *ramp = Ramp::new(ramp.target(), sample_rate);
+        }
+        let hz = value(Control::LowPass);
+        running.coefficients = OnePoleCoefficients::low_pass(hz, sample_rate_f32);
+        running
     }
 
     /// Takes the parameter values, once per block.
-    fn set(&mut self, value: impl Fn(Control) -> f32) {
-        let base = self.base_frames(&value);
+    fn set(&mut self, value: &impl Fn(Control) -> f32) {
+        let base = base_frames(value, self.sample_rate, self.frames_per_whole_note);
         let offset = f64::from(value(Control::Offset)) * f64::from(self.sample_rate) / 1000.0;
         let max_tap = self.lines[1].max_tap();
         self.taps[0].wanted = to_tap(base, max_tap);
@@ -187,7 +304,9 @@ impl Running {
     fn frame(&mut self, left: f32, right: f32) -> (f32, f32) {
         if self.low_pass_log.is_ramping() {
             let hz = self.low_pass_log.next_value().exp2();
-            self.coefficients = OnePoleCoefficients::low_pass(hz, self.sample_rate);
+            #[allow(clippy::cast_precision_loss)] // audio rates are exact in f32
+            let rate = self.sample_rate as f32;
+            self.coefficients = OnePoleCoefficients::low_pass(hz, rate);
         }
         let low_pass = self.low_pass_share.next_value();
         let saturation = self.saturation.next_value();
@@ -251,11 +370,6 @@ impl Delay {
             running: None,
         })
     }
-
-    /// The current value of `control`.
-    fn get(&self, control: Control) -> f32 {
-        self.parameters[control as usize].get()
-    }
 }
 
 impl Node for Delay {
@@ -280,49 +394,12 @@ impl Node for Delay {
     }
 
     fn prepare(&mut self, sample_rate: u32, _max_frames: usize) {
-        let rate = f64::from(sample_rate);
-        let max_time = (rate * f64::from(MAX_DELAY_MS) / 1000.0).round().max(1.0);
-        let max_offset = (rate * f64::from(MAX_OFFSET_MS) / 1000.0).ceil();
-        let max_tap = to_tap(max_time + max_offset, usize::MAX);
-        let frames_per_whole_note = self
-            .frames_per_whole_note
-            .filter(|f| f.is_finite() && *f > 0.0)
-            .unwrap_or_else(|| default_whole_note(sample_rate));
-        #[allow(clippy::cast_precision_loss)] // audio rates are exact in f32
-        let sample_rate_f32 = sample_rate as f32;
-        let ramp = |value| Ramp::new(value, sample_rate);
-        let mut running = Running {
-            sample_rate: sample_rate_f32,
-            max_time,
-            frames_per_whole_note,
-            lines: [TapDelay::new(max_tap), TapDelay::new(max_tap)],
-            taps: [Tap::new(1, sample_rate), Tap::new(1, sample_rate)],
-            channels: [Channel::default(), Channel::default()],
-            ping_pong: ramp(0.0),
-            feedback: ramp(0.0),
-            low_pass_share: ramp(0.0),
-            low_pass_log: ramp(0.0),
-            coefficients: OnePoleCoefficients::low_pass(20_000.0, sample_rate_f32),
-            saturation: ramp(0.0),
-            mix: ramp(0.0),
-        };
         let parameters = &self.parameters;
-        running.set(|control| parameters[control as usize].get());
-        // Start at the values, with no ramp or crossfade in.
-        running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
-        for ramp in [
-            &mut running.ping_pong,
-            &mut running.feedback,
-            &mut running.low_pass_share,
-            &mut running.low_pass_log,
-            &mut running.saturation,
-            &mut running.mix,
-        ] {
-            *ramp = Ramp::new(ramp.target(), sample_rate);
-        }
-        let hz = self.get(Control::LowPass);
-        running.coefficients = OnePoleCoefficients::low_pass(hz, sample_rate_f32);
-        self.running = Some(running);
+        self.running = Some(Running::new(
+            sample_rate,
+            self.frames_per_whole_note,
+            |control| parameters[control as usize].get(),
+        ));
     }
 
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
@@ -333,7 +410,7 @@ impl Node for Delay {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(|control| parameters[control as usize].get());
+        running.set(&|control: Control| parameters[control as usize].get());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);

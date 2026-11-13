@@ -8,6 +8,7 @@ use dsp::{FOLD_DOWN_GAIN, OnePole, OnePoleCoefficients, TapDelay};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
+use crate::impulse::{ImpulseCurve, SPAN_DB};
 use crate::tap::{Tap, to_tap};
 
 /// The longest pre-delay, in milliseconds.
@@ -25,7 +26,7 @@ enum Control {
 }
 
 /// How many parameters there are.
-const CONTROLS: usize = 5;
+pub(crate) const CONTROLS: usize = 5;
 
 /// Every control, in declaration order.
 const ALL: [Control; CONTROLS] = [
@@ -553,8 +554,39 @@ struct Running {
 }
 
 impl Running {
+    /// A silent reverb at `sample_rate`, its parameters at `value`'s values, with no ramp or
+    /// crossfade in. Allocates.
+    fn new(sample_rate: u32, value: impl Fn(Control) -> f32) -> Running {
+        #[allow(clippy::cast_precision_loss)] // audio rates are exact in f32
+        let rate = sample_rate as f32;
+        let max_pre = to_tap(
+            (f64::from(sample_rate) * f64::from(MAX_PRE_DELAY_MS) / 1000.0).ceil(),
+            usize::MAX,
+        );
+        let ramp = |value: f32| Ramp::new(value, sample_rate);
+        let decay = value(Control::Decay);
+        let damping = value(Control::Damping);
+        let mut running = Running {
+            sample_rate: rate,
+            pre_delay: [TapDelay::new(max_pre), TapDelay::new(max_pre)],
+            taps: [Tap::new(1, sample_rate), Tap::new(1, sample_rate)],
+            algorithm: Algorithm::from_value(value(Control::Algorithm)),
+            room: Room::new(sample_rate),
+            plate: Plate::new(sample_rate),
+            decay_log: ramp(decay.log2()),
+            damping_log: ramp(damping.log2()),
+            damping: OnePoleCoefficients::low_pass(damping, rate),
+            mix: ramp(value(Control::Mix) / 100.0),
+        };
+        running.set_decay(decay);
+        running.set(&value);
+        // Start at the pre-delay, with no crossfade in.
+        running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
+        running
+    }
+
     /// Takes the parameter values, once per block.
-    fn set(&mut self, value: impl Fn(Control) -> f32) {
+    fn set(&mut self, value: &impl Fn(Control) -> f32) {
         let frames = f64::from(value(Control::PreDelay)) * f64::from(self.sample_rate) / 1000.0;
         let max = self.pre_delay[0].max_tap();
         for tap in &mut self.taps {
@@ -611,6 +643,48 @@ impl Running {
     }
 }
 
+/// How many frames the impulse simulation runs between renormalisations of the plate's LFO, as
+/// a block of processing would.
+const IMPULSE_BLOCK: usize = 256;
+
+/// The curve of a `reverb` effect whose parameters stand at `values`, in declaration order (see
+/// [`crate::CurveFn`]): its impulse response, simulated when it is read.
+pub(crate) fn impulse_curve(
+    values: &[f32],
+    sample_rate: u32,
+    _frames_per_whole_note: f64,
+) -> Option<crate::Curve> {
+    let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
+    Some(crate::Curve::Impulse(ImpulseCurve::reverb(
+        *values,
+        sample_rate,
+    )))
+}
+
+/// The time for a reverb at `values` to fall [`SPAN_DB`] after an impulse, in seconds,
+/// unclamped: the pre-delay, then the decay (the time to fall 60 dB) scaled to that depth.
+pub(crate) fn impulse_span(values: &[f32; CONTROLS]) -> f32 {
+    let value = |control: Control| values[control as usize];
+    value(Control::PreDelay) / 1000.0 + value(Control::Decay) * SPAN_DB / 60.0
+}
+
+/// A reverb at `values` from silence, at `sample_rate`: each call runs one frame of input
+/// through it. Allocates.
+pub(crate) fn impulse_response(
+    values: &[f32; CONTROLS],
+    sample_rate: u32,
+) -> impl FnMut(f32, f32) -> (f32, f32) {
+    let mut running = Running::new(sample_rate, |control| values[control as usize]);
+    let mut frame = 0_usize;
+    move |left, right| {
+        if frame.is_multiple_of(IMPULSE_BLOCK) {
+            running.plate.renormalise();
+        }
+        frame = frame.wrapping_add(1);
+        running.frame(left, right)
+    }
+}
+
 /// A reverb: a pre-delay, then a feedback delay network ("room") or Dattorro's plate ("plate").
 /// One stereo input and one stereo output.
 ///
@@ -643,11 +717,6 @@ impl Reverb {
             running: None,
         })
     }
-
-    /// The current value of `control`.
-    fn get(&self, control: Control) -> f32 {
-        self.parameters[control as usize].get()
-    }
 }
 
 impl Node for Reverb {
@@ -664,33 +733,10 @@ impl Node for Reverb {
     }
 
     fn prepare(&mut self, sample_rate: u32, _max_frames: usize) {
-        #[allow(clippy::cast_precision_loss)] // audio rates are exact in f32
-        let rate = sample_rate as f32;
-        let max_pre = to_tap(
-            (f64::from(sample_rate) * f64::from(MAX_PRE_DELAY_MS) / 1000.0).ceil(),
-            usize::MAX,
-        );
-        let ramp = |value: f32| Ramp::new(value, sample_rate);
-        let decay = self.get(Control::Decay);
-        let damping = self.get(Control::Damping);
-        let mut running = Running {
-            sample_rate: rate,
-            pre_delay: [TapDelay::new(max_pre), TapDelay::new(max_pre)],
-            taps: [Tap::new(1, sample_rate), Tap::new(1, sample_rate)],
-            algorithm: Algorithm::from_value(self.get(Control::Algorithm)),
-            room: Room::new(sample_rate),
-            plate: Plate::new(sample_rate),
-            decay_log: ramp(decay.log2()),
-            damping_log: ramp(damping.log2()),
-            damping: OnePoleCoefficients::low_pass(damping, rate),
-            mix: ramp(self.get(Control::Mix) / 100.0),
-        };
-        running.set_decay(decay);
         let parameters = &self.parameters;
-        running.set(|control| parameters[control as usize].get());
-        // Start at the pre-delay, with no crossfade in.
-        running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
-        self.running = Some(running);
+        self.running = Some(Running::new(sample_rate, |control| {
+            parameters[control as usize].get()
+        }));
     }
 
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
@@ -701,7 +747,7 @@ impl Node for Reverb {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(|control| parameters[control as usize].get());
+        running.set(&|control: Control| parameters[control as usize].get());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);

@@ -84,3 +84,29 @@ origin. The DC filter's response and oversampling are not shown.
 - Labels are shown only at ±1 (`0dB`) and at the axes' edges (`+3dB`), on both axes.
 - An undefined output is drawn at 0
   ([ADR-0103](../adrs/0103-the-amplifier-display-plots-the-recentred-static.md)).
+
+## Impulse response display
+
+An `Impulse` curve, which `delay` and `reverb` give, is drawn by
+`crates/debussy_ui/src/impulse_display.rs`. It plots the node's output after a unit impulse into
+both channels at frame 0, from silence: the dry impulse at `1 − mix` at time 0 and the wet
+response scaled by `mix`. `ImpulseCurve::peak_levels` computes it by running the effect's own
+per-frame processing, at its values with no ramps, at the project's sample rate and, for `delay`,
+the project tempo's whole note. Building the curve copies the values; the simulation runs only
+when the picture is drawn.
+
+- The span, in seconds, is fitted to the values and clamped to 0.05 to 20: for `reverb`,
+  `pre-delay + decay × 96/60`; for `delay`, `(n + 1) × t`, where `t` is the base time plus any
+  positive offset and `n` is the number of echoes the feedback takes to fall 96 dB (1 with no
+  feedback, unbounded at 100 %).
+- Two lanes stack in the plot, left channel above right, each half the plot's height less half
+  of an 8-logical-pixel gap. The gutter beside each lane carries its tag, `L` or `R`, at −24 dB.
+- Each lane's vertical axis runs from 0 dB at the top to −96 dB at the bottom, with grey lines
+  every 24 dB, the 0 dB line brighter, and labels `0dB`, `−48dB` and `−96dB`.
+- Time runs linearly from 0 to the span across both lanes. Marks fall every 1, 2 or 5 × 10ᵏ
+  seconds, the smallest step giving at most 8 marks; each draws a vertical line in both lanes and
+  is labelled below the bottom lane only, as `0`, `250ms`, `1s` or `1.5s`.
+- The curve is drawn as in "Display plots": the plot's columns are equal slices of the span, each
+  point the slice's peak absolute output in dB at the slice's middle; silence and undefined
+  values lie on the bottom edge
+  ([ADR-0115](../adrs/0115-delay-and-reverb-displays-plot-a-simulated-impulse.md)).

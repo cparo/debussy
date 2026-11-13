@@ -43,8 +43,9 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
 }
 
 /// The display and controls of the effect whose parameters are `parameters`, with the control
-/// at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate` and
-/// `scale` physical pixels per logical pixel, comes first; then the preset picker, if the kind
+/// at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate`, for a
+/// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
+/// pixel, comes first; then the preset picker, if the kind
 /// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
 /// horizontally.
 pub(crate) fn effect_panel<'a>(
@@ -52,13 +53,21 @@ pub(crate) fn effect_panel<'a>(
     focus: Option<usize>,
     tone: Tone,
     sample_rate: u32,
+    frames_per_whole_note: f64,
     scale: f32,
 ) -> Element<'a, Message> {
     let Some(kind) = parameters.kind() else {
         return Space::new().into();
     };
     let infos = parameters.infos();
-    let display = display_area(kind, &parameters.values(), tone, sample_rate, scale);
+    let display = display_area(
+        kind,
+        &parameters.values(),
+        tone,
+        sample_rate,
+        frames_per_whole_note,
+        scale,
+    );
     // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's run
     // as a strip.
     let order = tab_order(infos);

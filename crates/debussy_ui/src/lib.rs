@@ -21,6 +21,7 @@
 //! - `equal_heights`: a row whose children all take its tallest child's height.
 //! - `reveal`: scrolling the node dialog's focused control into view.
 //! - `response_display`: the equalisers' display, their frequency response.
+//! - `impulse_display`: the delay's and reverb's display, their impulse response.
 //! - `plot`: the effect displays' plot toolkit: frame, axes, grid, labels and curve.
 //! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
 //! - `typeface`: the `Typeface` seam and the in-house stroke font behind it.
@@ -52,6 +53,7 @@ mod equal_heights;
 mod focus_target;
 mod grid;
 mod icon;
+mod impulse_display;
 mod launcher;
 mod menu;
 mod mixer_strip;

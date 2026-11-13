@@ -5,11 +5,11 @@ use signal_graph::{Node, ParameterInfo};
 
 use crate::amplifier::{self, Amplifier};
 use crate::curve::CurveFn;
-use crate::delay::Delay;
+use crate::delay::{self, Delay};
 use crate::dynamics::{self, Dynamics};
 use crate::filters::{self, Butterworth, Response};
 use crate::parametric::{self, ParametricEq};
-use crate::reverb::Reverb;
+use crate::reverb::{self, Reverb};
 
 /// A built-in effect kind.
 #[derive(Debug, Clone, Copy)]
@@ -62,13 +62,13 @@ pub const EFFECTS: &[EffectKind] = &[
         id: "delay",
         name: "Delay",
         build: build_delay,
-        curve: None,
+        curve: Some(delay::impulse_curve),
     },
     EffectKind {
         id: "reverb",
         name: "Reverb",
         build: build_reverb,
-        curve: None,
+        curve: Some(reverb::impulse_curve),
     },
 ];
 

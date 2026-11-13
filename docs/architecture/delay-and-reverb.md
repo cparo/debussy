@@ -23,7 +23,8 @@ value × feel (straight ×1, dotted ×1.5, triplet ×2/3) of a whole note, given
 `docs/architecture/signal-graph.md` "Effect nodes"). `feedback`, `mix` and the low-pass cutoff
 (in its logarithm) ramp; the mode, `low-pass enabled` and `saturation` crossfade their shares
 linearly over the ramp time. The low-pass and `tanh` run whether or not they are heard. Latency
-is 0, and there is no curve.
+is 0. Its curve is an `Impulse` (`docs/architecture/effect-displays.md` "Impulse response
+display").
 
 | Name | Group | Range | Default |
 |---|---|---|---|
@@ -73,7 +74,8 @@ are allocated when the node is prepared, under 4 MB at 192 kHz.
 
 `decay` and `damping` ramp in their logarithms, recomputing gains and filter coefficients each
 frame while they move. `algorithm` is stopped-only: a change switches engines at once, clearing
-both, and the two never run together. Latency is 0, and there is no curve.
+both, and the two never run together. Latency is 0. Its curve is an
+`Impulse` (`docs/architecture/effect-displays.md` "Impulse response display").
 
 | Name | Group | Range | Default |
 |---|---|---|---|

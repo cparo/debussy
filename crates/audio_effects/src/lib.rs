@@ -24,6 +24,8 @@
 //!   effects by kind id, and [`PRESETS`], named starting values for them.
 //! - `curve`: [`Curve`] and [`curve`], the curve an effect kind's parameter values ask for, for
 //!   display (`docs/architecture/effects.md` "Effect curves").
+//! - `impulse`: [`ImpulseCurve`], the impulse response a delay's or reverb's parameters ask
+//!   for, simulated by their own processing.
 //! - `response`: [`FrequencyResponse`], the magnitude response an equaliser's parameters ask
 //!   for.
 //! - `error`: [`Error`].
@@ -36,6 +38,7 @@ mod delay;
 mod dynamics;
 mod error;
 mod filters;
+mod impulse;
 mod mixer;
 mod parametric;
 mod registry;
@@ -50,6 +53,7 @@ pub use delay::{Delay, MAX_DELAY_MS, MAX_OFFSET_MS};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
+pub use impulse::ImpulseCurve;
 pub use mixer::{
     Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, mixer_parameter_infos,
     parameter_name,

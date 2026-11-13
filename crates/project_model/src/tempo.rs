@@ -80,6 +80,12 @@ impl Tempo {
         60.0 * f64::from(rate) / self.bpm
     }
 
+    /// The length of a whole note at `rate` Hz, in frames: what the graph gives nodes that use
+    /// the tempo, and what a synced delay's note values are fractions of.
+    pub fn frames_per_whole_note(&self, rate: u32) -> f64 {
+        self.frames_per_beat(rate) * f64::from(self.beat_unit)
+    }
+
     /// The frame beat `index` falls on at `rate` Hz.
     pub fn beat_frame(&self, index: i64, rate: u32) -> i64 {
         (index as f64 * self.frames_per_beat(rate)).round() as i64
@@ -136,6 +142,17 @@ mod tests {
     use super::*;
 
     const RATE: u32 = 48_000;
+
+    #[test]
+    fn test_frames_per_whole_note_scales_by_the_beat_unit() {
+        assert_eq!(Tempo::default().frames_per_whole_note(RATE), 96_000.0);
+        let six_eight = Tempo {
+            bpm: 120.0,
+            beats_per_bar: 6,
+            beat_unit: 8,
+        };
+        assert_eq!(six_eight.frames_per_whole_note(RATE), 192_000.0);
+    }
 
     #[test]
     fn test_check_accepts_limits_and_refuses_outside() {

@@ -145,6 +145,10 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   **Decay** is how long the reverb takes to die away, and **Damping** makes high frequencies die
   sooner: lower it for a darker, softer space. **Mix** sets how loud the reverb is against the
   original.
+- The **Delay** and **Reverb** pictures show what you would hear after a single click: its
+  level over time, left channel on top and right below, from full level down to −96 dB. The
+  spike at the start is the original sound; the delay's repeats are spikes after it and the
+  reverb's tail is a falling slope. The time across fits the settings.
 
 Effect settings are saved with the project.
 

@@ -79,7 +79,7 @@ mod tests {
     fn draw(changes: &[(&str, f32)]) -> Option<Pixels> {
         let values = values_with("parametric-eq", changes)?;
         let Some(Curve::Response(response)) =
-            audio_effects::curve("parametric-eq", &values, 48_000)
+            audio_effects::curve("parametric-eq", &values, 48_000, 96_000.0)
         else {
             return None;
         };

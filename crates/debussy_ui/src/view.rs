@@ -731,6 +731,10 @@ impl App {
                     self.effect_focus(),
                     self.tone(),
                     self.sample_rate(),
+                    self.session()
+                        .state()
+                        .tempo
+                        .frames_per_whole_note(self.sample_rate()),
                     self.scale_factor(),
                 ),
                 None => Space::new().into(),

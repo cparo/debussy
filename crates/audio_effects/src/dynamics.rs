@@ -128,7 +128,7 @@ impl TransferCurve {
 /// The steady-state curve of a `dynamics` effect whose parameters stand at `values`, in
 /// declaration order (see [`crate::CurveFn`]). Read through [`Control`] and built by the same
 /// mapping as processing, so a display of it cannot differ.
-pub(crate) fn curve(values: &[f32], _sample_rate: u32) -> Option<crate::Curve> {
+pub(crate) fn curve(values: &[f32], _sample_rate: u32, _whole_note: f64) -> Option<crate::Curve> {
     let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
     let value = |control: Control| values[control as usize];
     let curve = Curve {
@@ -426,7 +426,7 @@ mod tests {
     /// The transfer curve at the defaults with `changes` by name.
     fn transfer(changes: &[(&str, f32)]) -> Result<TransferCurve, Box<dyn std::error::Error>> {
         let values = crate::curve::values_with("dynamics", changes).ok_or("unknown kind")?;
-        match curve(&values, 48_000) {
+        match curve(&values, 48_000, 96_000.0) {
             Some(crate::Curve::Transfer(transfer)) => Ok(transfer),
             other => Err(format!("not a transfer curve: {other:?}").into()),
         }

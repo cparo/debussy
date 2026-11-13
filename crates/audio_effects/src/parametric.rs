@@ -180,7 +180,7 @@ fn pass_index(response: Response, control: PassControl) -> usize {
 /// The curve of a `parametric-eq` effect whose parameters stand at `values`, in declaration order
 /// (see [`crate::CurveFn`]): the response of an enabled high-pass, each enabled band, and an
 /// enabled low-pass, designed as processing designs them.
-pub(crate) fn curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+pub(crate) fn curve(values: &[f32], sample_rate: u32, _whole_note: f64) -> Option<Curve> {
     let values = <&[f32; PARAMETERS]>::try_from(values).ok()?;
     // Sample rates are exact in `f32` well past any audio rate.
     #[allow(clippy::cast_precision_loss)]
@@ -605,7 +605,7 @@ mod tests {
     /// The equaliser's response at its defaults with `changes` by name.
     fn response(changes: &[(&str, f32)]) -> Result<FrequencyResponse, Box<dyn std::error::Error>> {
         let values = crate::curve::values_with("parametric-eq", changes).ok_or("unknown kind")?;
-        match curve(&values, 48_000) {
+        match curve(&values, 48_000, 96_000.0) {
             Some(Curve::Response(response)) => Ok(response),
             other => Err(format!("not a response: {other:?}").into()),
         }

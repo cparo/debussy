@@ -45,7 +45,9 @@ mod tests {
     /// The display at the `dynamics` defaults, with `changes` by name, 600 pixels wide at scale 1.
     fn draw(changes: &[(&str, f32)]) -> Option<Pixels> {
         let values = values_with("dynamics", changes)?;
-        let Some(Curve::Transfer(curve)) = audio_effects::curve("dynamics", &values, 48_000) else {
+        let Some(Curve::Transfer(curve)) =
+            audio_effects::curve("dynamics", &values, 48_000, 96_000.0)
+        else {
             return None;
         };
         let context = DisplayContext {

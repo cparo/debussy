@@ -122,12 +122,12 @@ fn curve(response: Response, values: &[f32], sample_rate: u32) -> Option<Curve> 
 }
 
 /// The curve of a `high-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
-pub(crate) fn high_pass_curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+pub(crate) fn high_pass_curve(values: &[f32], sample_rate: u32, _whole_note: f64) -> Option<Curve> {
     curve(Response::HighPass, values, sample_rate)
 }
 
 /// The curve of a `low-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
-pub(crate) fn low_pass_curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+pub(crate) fn low_pass_curve(values: &[f32], sample_rate: u32, _whole_note: f64) -> Option<Curve> {
     curve(Response::LowPass, values, sample_rate)
 }
 
@@ -287,7 +287,8 @@ mod tests {
             for order in 1..=8 {
                 #[allow(clippy::cast_precision_loss)] // a small order
                 let values = [cutoff, order as f32];
-                let Some(Curve::Response(response)) = crate::curve(kind, &values, 48_000) else {
+                let Some(Curve::Response(response)) = crate::curve(kind, &values, 48_000, 96_000.0)
+                else {
                     return Err("no response".into());
                 };
                 let at = response.magnitude_db(cutoff).ok_or("above Nyquist")?;
