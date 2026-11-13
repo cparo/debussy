@@ -2,10 +2,10 @@
 //! optional low-pass and saturation in the feedback path (`docs/architecture/delay-and-reverb.md`
 //! "Delay").
 
-use std::f32::consts::FRAC_1_SQRT_2;
-
 use audio_buffers::Layout;
-use dsp::{FOLD_DOWN_GAIN, Svf, SvfCoefficients, TapDelay};
+use dsp::{FOLD_DOWN_GAIN, OnePole, OnePoleCoefficients, TapDelay};
+
+use crate::tap::{Tap, to_tap};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
@@ -18,9 +18,6 @@ const MIN_DELAY_MS: f32 = 1.0;
 
 /// The largest offset of the right channel's time, either way, in milliseconds.
 pub const MAX_OFFSET_MS: f32 = 50.0;
-
-/// The low-pass's resonance: Butterworth, with no peak.
-const LOW_PASS_Q: f32 = FRAC_1_SQRT_2;
 
 /// The parameters, in the order the effect declares them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,64 +121,10 @@ fn default_whole_note(sample_rate: u32) -> f64 {
     2.0 * f64::from(sample_rate)
 }
 
-/// A number of frames as a whole-frame tap, from 1 up to `max`.
-fn to_tap(frames: f64, max: usize) -> usize {
-    // Clamped to a range that fits `usize` first.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
-    let tap = frames.round().clamp(1.0, max as f64) as usize;
-    tap
-}
-
-/// One channel's tap, crossfading linearly from the old tap to the new over the ramp time when it
-/// changes. A change during a fade waits for it to finish.
-struct Tap {
-    sample_rate: u32,
-    /// The tap being faded to, or held.
-    current: usize,
-    /// The tap being faded from.
-    previous: usize,
-    /// The tap asked for, taken up when no fade is running.
-    wanted: usize,
-    /// How much of `current` is heard: ramps from 0 to 1 after a change.
-    fade: Ramp,
-}
-
-impl Tap {
-    fn new(tap: usize, sample_rate: u32) -> Self {
-        Tap {
-            sample_rate,
-            current: tap,
-            previous: tap,
-            wanted: tap,
-            fade: Ramp::new(1.0, sample_rate),
-        }
-    }
-
-    /// The sample `line` gives for the next frame.
-    fn read(&mut self, line: &TapDelay) -> f32 {
-        if !self.fade.is_ramping() && self.wanted != self.current {
-            self.previous = self.current;
-            self.current = self.wanted;
-            self.fade = Ramp::new(0.0, self.sample_rate);
-            self.fade.set_target(1.0);
-        }
-        let fade = self.fade.next_value();
-        if fade >= 1.0 {
-            line.read(self.current)
-        } else {
-            line.read(self.previous) * (1.0 - fade) + line.read(self.current) * fade
-        }
-    }
-}
-
 /// One channel's feedback-path filter state.
 #[derive(Default)]
 struct Channel {
-    low_pass: Svf,
+    low_pass: OnePole,
 }
 
 /// A prepared delay: the lines, taps, filters and ramps.
@@ -202,7 +145,7 @@ struct Running {
     low_pass_share: Ramp,
     /// The low-pass cutoff, as log2 of hertz.
     low_pass_log: Ramp,
-    coefficients: SvfCoefficients,
+    coefficients: OnePoleCoefficients,
     /// The share of saturation in the feedback path.
     saturation: Ramp,
     /// The wet share of the output, 0 to 1.
@@ -244,7 +187,7 @@ impl Running {
     fn frame(&mut self, left: f32, right: f32) -> (f32, f32) {
         if self.low_pass_log.is_ramping() {
             let hz = self.low_pass_log.next_value().exp2();
-            self.coefficients = SvfCoefficients::low_pass(hz, LOW_PASS_Q, self.sample_rate);
+            self.coefficients = OnePoleCoefficients::low_pass(hz, self.sample_rate);
         }
         let low_pass = self.low_pass_share.next_value();
         let saturation = self.saturation.next_value();
@@ -359,7 +302,7 @@ impl Node for Delay {
             feedback: ramp(0.0),
             low_pass_share: ramp(0.0),
             low_pass_log: ramp(0.0),
-            coefficients: SvfCoefficients::identity(),
+            coefficients: OnePoleCoefficients::low_pass(20_000.0, sample_rate_f32),
             saturation: ramp(0.0),
             mix: ramp(0.0),
         };
@@ -378,7 +321,7 @@ impl Node for Delay {
             *ramp = Ramp::new(ramp.target(), sample_rate);
         }
         let hz = self.get(Control::LowPass);
-        running.coefficients = SvfCoefficients::low_pass(hz, LOW_PASS_Q, sample_rate_f32);
+        running.coefficients = OnePoleCoefficients::low_pass(hz, sample_rate_f32);
         self.running = Some(running);
     }
 
