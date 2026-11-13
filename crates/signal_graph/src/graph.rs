@@ -36,6 +36,8 @@ pub(crate) struct Entry {
     pub(crate) outputs: Vec<Port>,
     pub(crate) latency: usize,
     pub(crate) parameters: Vec<Parameter>,
+    /// Whether the node reads the project tempo.
+    pub(crate) uses_tempo: bool,
 }
 
 /// A connection from a node's output to another node's input.
@@ -65,6 +67,8 @@ pub struct Graph {
     live: Vec<NodeId>,
     /// The latency of the last plan sent.
     latency: usize,
+    /// The project tempo, as the length of a whole note in frames.
+    frames_per_whole_note: f64,
     plans: Producer<Box<Plan>>,
     retired: Consumer<Box<Plan>>,
 }
@@ -97,6 +101,7 @@ impl Graph {
             next_id: 0,
             live: Vec::new(),
             latency: 0,
+            frames_per_whole_note: default_whole_note(config.sample_rate),
             plans,
             retired,
         };
@@ -106,6 +111,30 @@ impl Graph {
     /// The graph's settings.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// The project tempo processors are given, as the length of a whole note in frames. Until
+    /// [`Graph::set_tempo`], 120 BPM in 4/4: two seconds.
+    pub fn tempo(&self) -> f64 {
+        self.frames_per_whole_note
+    }
+
+    /// Sets the project tempo, as the length of a whole note in frames, for processors added from
+    /// now on. Returns the processors already in the graph that use the tempo, for the caller to
+    /// replace with [`Graph::replace_node`] so they are prepared at it; empty if the tempo is
+    /// unchanged or not a positive finite length.
+    pub fn set_tempo(&mut self, frames_per_whole_note: f64) -> Vec<NodeId> {
+        if !(frames_per_whole_note.is_finite() && frames_per_whole_note > 0.0)
+            || frames_per_whole_note == self.frames_per_whole_note
+        {
+            return Vec::new();
+        }
+        self.frames_per_whole_note = frames_per_whole_note;
+        self.nodes
+            .iter()
+            .filter(|(_, entry)| entry.uses_tempo)
+            .map(|(&id, _)| id)
+            .collect()
     }
 
     /// Adds a processor, preparing it for the graph's rate and block size.
@@ -165,8 +194,10 @@ impl Graph {
                 parameter.set(old.get());
             }
         }
+        node.set_tempo(self.frames_per_whole_note);
         node.prepare(self.config.sample_rate, self.config.max_frames);
         Entry {
+            uses_tempo: node.uses_tempo(),
             inputs: node.inputs(),
             outputs: node.outputs(),
             latency: node.latency(),
@@ -189,6 +220,7 @@ impl Graph {
             outputs: vec![Port::audio("out", layout)],
             latency: 0,
             parameters: Vec::new(),
+            uses_tempo: false,
         }))
     }
 
@@ -217,6 +249,7 @@ impl Graph {
             outputs: vec![Port::audio("out", layout)],
             latency: 0,
             parameters: Vec::new(),
+            uses_tempo: false,
         })
     }
 
@@ -228,6 +261,7 @@ impl Graph {
             outputs: Vec::new(),
             latency: 0,
             parameters: Vec::new(),
+            uses_tempo: false,
         })
     }
 
@@ -413,6 +447,11 @@ impl Graph {
     fn entry_mut(&mut self, id: NodeId) -> Result<&mut Entry, Error> {
         self.nodes.get_mut(&id).ok_or(Error::UnknownNode(id))
     }
+}
+
+/// The length of a whole note at 120 BPM in 4/4 at `sample_rate`: two seconds.
+fn default_whole_note(sample_rate: u32) -> f64 {
+    2.0 * f64::from(sample_rate)
 }
 
 /// Checks a feedback-delay time is finite and within the longest allowed.

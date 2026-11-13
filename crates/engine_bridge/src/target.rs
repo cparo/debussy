@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use audio_buffers::Layout;
-use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State, TrackId};
+use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State, Tempo, TrackId};
 
 /// A model element that becomes a graph node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -98,6 +98,13 @@ impl ConnectionTarget {
 pub(crate) struct Target {
     pub nodes: BTreeMap<Key, NodeTarget>,
     pub connections: BTreeMap<ConnectionId, ConnectionTarget>,
+    /// The project tempo, which nodes that use it are prepared at.
+    pub tempo: Tempo,
+}
+
+/// The length of a whole note at `tempo` and `rate` Hz, in frames: what the graph gives nodes.
+pub(crate) fn frames_per_whole_note(tempo: &Tempo, rate: u32) -> f64 {
+    tempo.frames_per_beat(rate) * f64::from(tempo.beat_unit)
 }
 
 impl Target {
@@ -180,6 +187,10 @@ impl Target {
                 },
             );
         }
-        Target { nodes, connections }
+        Target {
+            nodes,
+            connections,
+            tempo: state.tempo,
+        }
     }
 }

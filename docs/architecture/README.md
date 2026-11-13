@@ -73,6 +73,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 - [Crates](crates.md)
   - [Crate map](crates.md#crate-map)
   - [Dependency rules](crates.md#dependency-rules)
+- [Delay and Reverb](delay-and-reverb.md)
+  - [Delay](delay-and-reverb.md#delay)
 - [Effect Displays](effect-displays.md)
   - [Effect displays](effect-displays.md#effect-displays-1)
   - [Display plots](effect-displays.md#display-plots)

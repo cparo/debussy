@@ -330,6 +330,57 @@ fn test_lookahead_change_replaces_the_node_and_its_latency() -> Result<(), Box<d
     Ok(())
 }
 
+#[test]
+fn test_tempo_change_replaces_only_nodes_that_use_it() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let add = |bridge: &mut Bridge, session: &mut Session, kind: &str| {
+        bridge.edit(session, |s| {
+            s.add_node(NodeKind::Effect {
+                kind: kind.to_owned(),
+                parameters: BTreeMap::new(),
+            })
+        })
+    };
+    let delay = add(&mut bridge, &mut session, "delay")?;
+    let amplifier = add(&mut bridge, &mut session, "amplifier")?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(delay), 0, Endpoint::Node(amplifier), 0)
+    })?;
+    // 120 BPM in 4/4 at 48 kHz: a whole note of two seconds.
+    assert_eq!(bridge.graph().tempo(), 96_000.0);
+    // Handles from before the change: a replaced node's new handles no longer share them.
+    let old_mix = bridge.parameter(delay, "mix").ok_or("no mix")?.clone();
+    let old_drive = bridge
+        .parameter(amplifier, "drive")
+        .ok_or("no drive")?
+        .clone();
+    let delay_node = bridge.node(Endpoint::Node(delay));
+    bridge.edit(&mut session, |s| {
+        s.set_tempo(project_model::Tempo {
+            bpm: 90.0,
+            beats_per_bar: 6,
+            beat_unit: 8,
+        })
+    })?;
+    // 90 eighth notes a minute: 32 000 frames each, 256 000 a whole note.
+    assert_eq!(bridge.graph().tempo(), 256_000.0);
+    old_mix.set(77.0);
+    old_drive.set(7.0);
+    assert_eq!(bridge.parameter(delay, "mix").map(|p| p.get()), Some(30.0));
+    assert_eq!(
+        bridge.parameter(amplifier, "drive").map(|p| p.get()),
+        Some(7.0)
+    );
+    // The same graph node, still connected.
+    assert_eq!(bridge.node(Endpoint::Node(delay)), delay_node);
+    assert_in_step(&bridge, session.state())?;
+    assert!(bridge.undo(&mut session)?);
+    assert_eq!(bridge.graph().tempo(), 96_000.0);
+    assert_in_step(&bridge, session.state())?;
+    Ok(())
+}
+
 /// Stored audio in memory.
 struct Memory(Arc<BTreeMap<String, Vec<f32>>>, Vec<String>);
 

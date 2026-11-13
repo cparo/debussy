@@ -3,10 +3,12 @@
 mod support;
 
 use std::error::Error as StdError;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use audio_buffers::Layout;
 use realtime_guard::GuardAllocator;
-use signal_graph::{Config, Error, Graph};
+use signal_graph::{Config, Error, Graph, Inputs, Node, Outputs, Port};
 use support::{Counter, Gain, Latency};
 
 #[global_allocator]
@@ -225,5 +227,62 @@ fn test_replace_node_refuses_non_processors() -> TestResult {
         graph.replace_node(sink, Box::new(Gain::new(1.0)?)),
         Err(Error::UnknownNode(sink))
     );
+    Ok(())
+}
+
+/// A node that reads the tempo, recording the whole-note length it holds when prepared.
+struct Tempo {
+    given: f64,
+    prepared: Arc<AtomicU64>,
+}
+
+impl Node for Tempo {
+    fn inputs(&self) -> Vec<Port> {
+        Vec::new()
+    }
+
+    fn outputs(&self) -> Vec<Port> {
+        Vec::new()
+    }
+
+    fn uses_tempo(&self) -> bool {
+        true
+    }
+
+    fn set_tempo(&mut self, frames_per_whole_note: f64) {
+        self.given = frames_per_whole_note;
+    }
+
+    fn prepare(&mut self, _sample_rate: u32, _max_frames: usize) {
+        self.prepared.store(self.given.to_bits(), Ordering::Relaxed);
+    }
+
+    fn process(&mut self, _inputs: &Inputs<'_>, _outputs: &mut Outputs<'_>) {}
+}
+
+#[test]
+fn test_set_tempo_reaches_prepare_and_names_only_tempo_users() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    // 120 BPM in 4/4 until set: two seconds at 48 kHz.
+    assert_eq!(graph.tempo(), 96_000.0);
+    let prepared = Arc::new(AtomicU64::new(0));
+    let reader = || {
+        Box::new(Tempo {
+            given: 0.0,
+            prepared: Arc::clone(&prepared),
+        })
+    };
+    let user = graph.add_node(reader());
+    assert_eq!(f64::from_bits(prepared.load(Ordering::Relaxed)), 96_000.0);
+    graph.add_node(Box::new(Gain::new(1.0)?));
+    assert_eq!(graph.set_tempo(72_000.0), [user]);
+    assert_eq!(graph.tempo(), 72_000.0);
+    // Unchanged, or not a length: nothing to replace.
+    assert!(graph.set_tempo(72_000.0).is_empty());
+    assert!(graph.set_tempo(f64::NAN).is_empty());
+    assert!(graph.set_tempo(0.0).is_empty());
+    assert_eq!(graph.tempo(), 72_000.0);
+    graph.replace_node(user, reader())?;
+    assert_eq!(f64::from_bits(prepared.load(Ordering::Relaxed)), 72_000.0);
     Ok(())
 }

@@ -16,12 +16,14 @@
 //!   [`butterworth_q`].
 //! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
 //!   or limiter, and [`DelayLine`] for lookahead (ADR-0099).
+//! - `delay`: [`TapDelay`], a delay line read at any whole-frame tap.
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `oversample`: [`Oversampler`], 2× or 4× oversampling around a nonlinearity (ADR-0102).
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
+mod delay;
 mod dither;
 mod dynamics;
 mod error;
@@ -32,6 +34,7 @@ mod noise;
 mod oversample;
 mod resample;
 
+pub use delay::TapDelay;
 pub use dither::{Depth, Ditherer};
 pub use dynamics::{
     Ballistics, Ceiling, Curve, DelayLine, FLOOR_DB, ceiling_gain_db, curve_gain_db,

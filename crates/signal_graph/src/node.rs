@@ -9,7 +9,8 @@ use crate::types::Port;
 /// A processor in the graph. Built-in effects implement it, and a third-party plugin wrapper
 /// could: nothing here assumes the node is built in.
 ///
-/// The graph calls [`Node::parameters`], then [`Node::prepare`], then [`Node::inputs`],
+/// The graph calls [`Node::parameters`], then [`Node::set_tempo`], then [`Node::prepare`], then
+/// [`Node::inputs`],
 /// [`Node::outputs`] and [`Node::latency`], once each, off the real-time thread, when the node is
 /// added; between the first two it may set parameter values (see `Graph::replace_node`). The
 /// answers are fixed for as long as the node is in the graph. A node whose ports, latency or
@@ -31,6 +32,18 @@ pub trait Node: Send {
     /// The node's parameters, which the UI sets through the handles the graph keeps.
     fn parameters(&self) -> Vec<Parameter> {
         Vec::new()
+    }
+
+    /// Whether the node reads the project tempo. The graph replaces a node that does when the
+    /// tempo changes (see `Graph::set_tempo`), so it is prepared again at the new tempo.
+    fn uses_tempo(&self) -> bool {
+        false
+    }
+
+    /// Gives the project tempo as the length of a whole note, in frames at the graph's rate.
+    /// Called before [`Node::prepare`], off the real-time thread.
+    fn set_tempo(&mut self, frames_per_whole_note: f64) {
+        let _ = frames_per_whole_note;
     }
 
     /// Prepares to run at `sample_rate` with blocks of up to `max_frames`. May allocate.

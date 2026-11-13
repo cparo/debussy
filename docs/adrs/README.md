@@ -134,4 +134,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0108](0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md) | A node dialog's Delete button is in its Tab cycle and only its confirmation deletes a node | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0109](0109-moving-a-node-dialog-s-focus-with-tab-scrolls-the.md) | Moving a node dialog's focus with Tab scrolls the focused control into view | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0110](0110-a-parameter-may-declare-its-step-the-mixer-strip.md) | A parameter may declare its step; the mixer strip reads its controls from ParameterInfo | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0111](0111-nodes-receive-the-project-tempo-before-they-are.md) | Nodes receive the project tempo before they are prepared; a tempo change replaces the nodes that use it | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
+| [ADR-0112](0112-the-delay-reads-whole-frame-taps-from-a-4-second.md) | The delay reads whole-frame taps from a 4-second line, free or tempo-synced, with a crossfade on time change and an optional low-pass and saturation in its feedback | Accepted | [Delay](../architecture/delay-and-reverb.md#delay) |
 

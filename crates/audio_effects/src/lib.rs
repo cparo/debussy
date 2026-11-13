@@ -14,6 +14,8 @@
 //!   [`TransferCurve`], its curve (`docs/architecture/effects.md` "Dynamics").
 //! - `amplifier`: [`Amplifier`], a pre-amp, waveshaper and DC filter with optional
 //!   oversampling, and [`ShaperCurve`], its curve (`docs/architecture/effects.md` "Amplifier").
+//! - `delay`: [`Delay`], a whole-frame tap delay, free or tempo-synced, in stereo or ping-pong
+//!   (`docs/architecture/delay-and-reverb.md` "Delay").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id, and [`PRESETS`], named starting values for them.
@@ -27,6 +29,7 @@
 
 mod amplifier;
 mod curve;
+mod delay;
 mod dynamics;
 mod error;
 mod filters;
@@ -38,6 +41,7 @@ mod utility;
 
 pub use amplifier::{Amplifier, Shape, ShaperCurve};
 pub use curve::{Curve, CurveFn, curve};
+pub use delay::{Delay, MAX_DELAY_MS, MAX_OFFSET_MS};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};

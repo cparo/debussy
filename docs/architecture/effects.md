@@ -15,6 +15,7 @@ state.
 | `parametric-eq` | Parametric EQ | "Parametric equaliser" |
 | `dynamics` | Dynamics | "Dynamics" |
 | `amplifier` | Amplifier | "Amplifier" |
+| `delay` | Delay | `docs/architecture/delay-and-reverb.md` "Delay" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 

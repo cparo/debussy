@@ -22,4 +22,7 @@ delay, without a windowed-peak limiter path
 ([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)), and the amplifier:
 pre-amp gain and bias, the atan, tanh and hard-clip shapes with a crossfade between them, the
 Butterworth DC filter, and 2× or 4× oversampling around the shaper with the polyphase resampler
-([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)).
+([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)), and the
+delay: whole-frame taps, tempo-synced times, crossfaded tap changes, stereo and ping-pong
+feedback, and the low-pass and saturation in the feedback path
+([ADR-0112](../adrs/0112-the-delay-reads-whole-frame-taps-from-a-4-second.md)).
