@@ -14,6 +14,7 @@ state.
 | `low-pass` | Low-pass filter | "High-pass and low-pass filters" |
 | `parametric-eq` | Parametric EQ | "Parametric equaliser" |
 | `dynamics` | Dynamics | "Dynamics" |
+| `amplifier` | Amplifier | "Amplifier" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
@@ -139,3 +140,34 @@ parameter (see `docs/architecture/signal-graph.md` "Effect nodes").
 Presets: **Compressor** (the defaults); **Expander** (threshold −40, ratio below 2, ratio above 1);
 **Gate** (threshold −50, ratio below 100, ratio above 1, range 80, attack 0.1, hold 50, release
 100); **Limiter** (ratio above 1, ceiling on at −1, lookahead 5, attack 0.2, release 100).
+
+## Amplifier
+
+`amplifier` is a memoryless waveshaper between a pre-amp and an output gain, per channel. Per frame:
+
+1. **Pre-amp.** `u = drive·x + bias`, with `drive` as a linear gain.
+2. **Shape.** `f(u)`, one of: warm `(2/π)·atan((π/2)·u)`, crunched `tanh(u)`, harsh `u` clamped to
+   ±1. Each has slope 1 at 0 and is bounded by ±1. `audio_effects::Shape::apply` is the function.
+3. **Makeup.** Multiply by `makeup` as a linear gain.
+4. **DC filter.** A 4th-order Butterworth high-pass at 20 Hz, at the graph's rate.
+
+With `oversampling` on, steps 1 and 2 run at 2 or 4 times the graph's rate inside a
+`dsp::Oversampler`: the `Quality::Device` resampler up, the shaper on every sub-sample, the same
+resampler down. Its delay is a whole number of base frames and is the node's latency; at factor 1
+there is no filtering and no latency. `drive` and `makeup` ramp in dB and `bias` ramps linearly,
+per base frame, held over its sub-samples. A change of `shape` crossfades linearly from the mix of
+shapes heard at that moment to the new shape over the parameter ramp time, so a change during a
+fade does not jump.
+
+| Name | Group | Range | Default |
+|---|---|---|---|
+| `drive` | pre-amp | −12 to +36 dB | 0 |
+| `bias` | pre-amp | −1 to +1 | 0 |
+| `shape` | shaper | warm (0), crunched (1), harsh (2) | warm |
+| `makeup` | output | −36 to +12 dB | 0 |
+| `oversampling` | output | off (0), 2× (1), 4× (2); sets latency | off |
+
+`oversampling` is a latency-setting parameter (see `docs/architecture/signal-graph.md`
+"Effect nodes"). `audio_effects::amplifier_curve` gives the static curve
+`makeup·(f(drive·x + bias) − f(bias))` for display. There are no presets
+([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)).

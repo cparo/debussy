@@ -125,4 +125,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0099](0099-dynamics-is-one-feed-forward-effect-with-level.md) | Dynamics is one feed-forward effect with level ballistics, a soft ceiling and presets, and no windowed-peak limiter path | Accepted | [Dynamics](../architecture/effects.md#dynamics) |
 | [ADR-0100](0100-a-latency-setting-parameter-replaces-its-node-when.md) | A latency-setting parameter replaces its node when it changes | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 | [ADR-0101](0101-the-dynamics-display-plots-the-steady-state.md) | The dynamics display plots the steady-state transfer curve on fixed dBFS axes with red full-scale lines | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
+| [ADR-0102](0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md) | The amplifier is a memoryless waveshaper with pre-amp bias, a Butterworth DC filter and optional polyphase oversampling | Accepted | [Amplifier](../architecture/effects.md#amplifier) |
+| [ADR-0103](0103-the-amplifier-display-plots-the-recentred-static.md) | The amplifier display plots the recentred static curve on linear ±3 dBFS axes | Accepted | [Amplifier display](../architecture/effect-displays.md#amplifier-display) |
 

@@ -6,6 +6,9 @@ pub enum Error {
     /// A sample rate of zero.
     #[error("sample rates must be positive")]
     ZeroRate,
+    /// A base rate too high to oversample: the oversampled rate does not fit in a `u32`.
+    #[error("{0} Hz is too high a rate to oversample")]
+    RateTooHigh(u32),
     /// The ratio between the rates needs more filter phases than [`crate::MAX_PHASES`].
     #[error("converting {from} Hz to {to} Hz needs {phases} filter phases, over the limit")]
     RatioTooComplex {

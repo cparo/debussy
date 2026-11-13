@@ -17,6 +17,7 @@
 //! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
 //!   or limiter, and [`DelayLine`] for lookahead (ADR-0099).
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
+//! - `oversample`: [`Oversampler`], 2× or 4× oversampling around a nonlinearity (ADR-0102).
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -28,6 +29,7 @@ mod fft;
 mod filter;
 mod level;
 mod noise;
+mod oversample;
 mod resample;
 
 pub use dither::{Depth, Ditherer};
@@ -46,4 +48,5 @@ pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
 pub use noise::Noise;
+pub use oversample::{Factor, MAX_FACTOR as MAX_OVERSAMPLING, Oversampler};
 pub use resample::{MAX_PHASES, Quality, Resampler};

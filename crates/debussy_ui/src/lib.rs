@@ -35,6 +35,7 @@
 
 #![forbid(unsafe_code)]
 
+mod amplifier_display;
 mod app;
 mod click;
 mod device;

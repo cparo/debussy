@@ -52,3 +52,17 @@ same mapping processing uses. Ballistics, lookahead and the detector mode are no
   place of the brighter 0 dB grey.
 - Output levels beyond the axes, such as a gate's floor, are drawn on the plot's edge
   ([ADR-0101](../adrs/0101-the-dynamics-display-plots-the-steady-state.md)).
+
+## Amplifier display
+
+`amplifier` has `AmplifierDisplay` (`crates/debussy_ui/src/amplifier_display.rs`), which plots the
+static curve its parameter values ask for, as `audio_effects::amplifier_curve` gives it (see
+`docs/architecture/effects.md` "Amplifier"): output over input sample, passing through the origin. The DC filter's response and oversampling are not shown.
+
+- Both axes are linear in sample value, from −10^(3/20) to +10^(3/20) (±3 dBFS). Gutters, label
+  size and curve are as in "Equaliser displays".
+- Grey lines run through 0 on both axes. Lines at ±1 (0 dBFS) on both axes are 1 logical pixel wide
+  and red (`#D03030`), as in "Dynamics display".
+- Labels are shown only at ±1 (`0dB`) and at the axes' edges (`+3dB`), on both axes.
+- Outputs beyond the axes are drawn on the plot's edge
+  ([ADR-0103](../adrs/0103-the-amplifier-display-plots-the-recentred-static.md)).

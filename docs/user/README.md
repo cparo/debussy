@@ -126,6 +126,12 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   the effect reacts, **Detector** follows peaks or the average (RMS), and **Makeup** adds gain
   back. **Lookahead** lets it react before a peak arrives, delaying the sound by that much; it can
   only be changed while stopped or paused.
+- **Amplifier** adds distortion. **Drive** pushes the sound into the **Shape**: **warm** rounds the
+  peaks off gently, **crunched** a little harder, and **harsh** clips them flat. **Bias** makes the
+  distortion lopsided, which adds a richer, tube-like tone. **Makeup** sets the output level. The
+  picture shows how input becomes output, with red lines at full scale. **Oversampling** (2× or 4×)
+  reduces harsh, out-of-tune overtones at high drive, at the cost of more CPU and a short delay; it
+  can only be changed while stopped or paused.
 
 Effect settings are saved with the project.
 

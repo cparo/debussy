@@ -10,6 +10,7 @@ use iced::widget::{canvas, container};
 use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use signal_graph::ParameterInfo;
 
+use crate::amplifier_display::AmplifierDisplay;
 use crate::app::Message;
 use crate::raster::draw_tiled;
 use crate::response_display::ResponseDisplay;
@@ -103,6 +104,7 @@ const DISPLAYS: &[(&str, &dyn EffectDisplay)] = &[
     ("low-pass", &ResponseDisplay),
     ("parametric-eq", &ResponseDisplay),
     ("dynamics", &TransferDisplay),
+    ("amplifier", &AmplifierDisplay),
 ];
 
 /// The display registered for effects of `kind`, if any.
@@ -316,7 +318,13 @@ mod tests {
         assert!(find(TEST_DISPLAYS, "flat").is_some());
         assert!(find(TEST_DISPLAYS, "eq").is_none());
         assert!(display_for("").is_none());
-        for kind in ["high-pass", "low-pass", "parametric-eq", "dynamics"] {
+        for kind in [
+            "high-pass",
+            "low-pass",
+            "parametric-eq",
+            "dynamics",
+            "amplifier",
+        ] {
             assert!(display_for(kind).is_some(), "{kind}");
         }
     }
