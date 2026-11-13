@@ -115,12 +115,17 @@ pub const PRESETS: &[Preset] = &[
 ];
 
 impl Preset {
-    /// The value parameter `info` takes under this preset: the preset's, else the default.
-    pub fn value(&self, info: &ParameterInfo) -> f32 {
+    /// The value this preset names for parameter `name`; `None` if it leaves it at its default.
+    pub fn get(&self, name: &str) -> Option<f32> {
         self.values
             .iter()
-            .find(|(name, _)| *name == info.name)
-            .map_or(info.default, |&(_, value)| value)
+            .find(|(n, _)| *n == name)
+            .map(|&(_, value)| value)
+    }
+
+    /// The value parameter `info` takes under this preset: the preset's, else the default.
+    pub fn value(&self, info: &ParameterInfo) -> f32 {
+        self.get(&info.name).unwrap_or(info.default)
     }
 }
 
@@ -237,6 +242,8 @@ mod tests {
             assert_eq!(matching_preset("dynamics", &infos, changed), None);
         }
         assert_eq!(presets("low-pass").count(), 0);
+        let gate = preset("Gate").ok_or("no gate")?;
+        assert_eq!((gate.get("range"), gate.get("knee")), (Some(80.0), None));
         Ok(())
     }
 }

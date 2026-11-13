@@ -17,12 +17,13 @@ use engine_bridge::Bridge;
 use project_model::{
     Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
 };
-use signal_graph::{ParameterInfo, Scale};
+use signal_graph::ParameterInfo;
 
 use crate::click::Click;
 use crate::effect_panel;
 use crate::menu::Menu;
 use crate::mixer_strip::{GAIN_STEP_DB, MixerFocus, PAN_STEP, toggled};
+use crate::node_parameters::{Live, NodeParameters, tab_order};
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
 use crate::recording::{Arming, InputChoice, Pass};
@@ -319,14 +320,6 @@ pub enum Message {
     },
 }
 
-/// A parameter being dragged: applied to the graph, not yet recorded.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Live {
-    pub node: NodeId,
-    pub name: String,
-    pub value: f32,
-}
-
 /// The interface's state.
 pub struct App {
     pub(crate) session: Session,
@@ -408,6 +401,9 @@ pub struct App {
     pub(crate) click: Click,
     /// Each built-in effect kind's parameters, read once at launch.
     effect_parameters: BTreeMap<&'static str, Vec<ParameterInfo>>,
+    /// The parameters of a mixer of the most channels; a mixer of fewer has the first three per
+    /// channel.
+    mixer_parameters: Vec<ParameterInfo>,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -479,6 +475,7 @@ impl App {
                 .iter()
                 .filter_map(|e| Some((e.id, audio_effects::parameter_infos(e.id)?)))
                 .collect(),
+            mixer_parameters: audio_effects::mixer_parameter_infos(audio_effects::MAX_CHANNELS),
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -1047,8 +1044,8 @@ impl App {
                 let forward = matches!(message, Message::FocusNext);
                 let next = if let Some((_, channels)) = self.dialog_mixer() {
                     DialogFocus::Mixer(MixerFocus::moved(self.mixer_focus(), channels, forward))
-                } else if let Some((_, infos)) = self.dialog_effect() {
-                    let order = effect_panel::tab_order(infos);
+                } else if let Some(parameters) = self.dialog_effect() {
+                    let order = tab_order(parameters.infos());
                     match effect_panel::moved(self.effect_focus(), &order, forward) {
                         Some(i) => DialogFocus::Parameter(i),
                         None => return,
@@ -1070,8 +1067,9 @@ impl App {
             }
             Message::FocusSlide(delta) => {
                 let slider = self.dialog_effect().zip(self.effect_focus()).is_some_and(
-                    |((_, infos), index)| {
-                        infos
+                    |(parameters, index)| {
+                        parameters
+                            .infos()
                             .get(index)
                             .is_some_and(|i| effect_panel::is_slider(&i.scale))
                     },
@@ -1131,7 +1129,7 @@ impl App {
             Message::ApplyPreset { node, preset } => self.apply_preset(node, preset),
             Message::Slide { node, ref name, .. }
             | Message::SetParameter { node, ref name, .. }
-                if self.engine.is_playing() && self.is_stopped_only(node, name) =>
+                if self.parameters(node).is_some_and(|p| p.refuses(name)) =>
             {
                 self.status = Some(format!("Pause or stop playback to change the {name}."));
             }
@@ -1174,16 +1172,42 @@ impl App {
         }
     }
 
-    /// The selected node and its kind's parameters, if it is a built-in effect this build
-    /// knows: the effect whose dialog is open.
-    pub(crate) fn dialog_effect(&self) -> Option<(NodeId, &[ParameterInfo])> {
+    /// The selected node's parameters as shown, if it is a built-in effect this build knows:
+    /// the effect whose dialog is open.
+    pub(crate) fn dialog_effect(&self) -> Option<NodeParameters<'_>> {
         let Some(Selection::Node(id)) = self.selection else {
             return None;
         };
-        match &self.session.state().node(id)?.kind {
-            NodeKind::Effect { kind, .. } => self.effect_parameters(kind).map(|infos| (id, infos)),
-            _ => None,
-        }
+        self.parameters(id).filter(|p| p.kind().is_some())
+    }
+
+    /// Node `node`'s parameters as its dialog shows them; `None` unless it is a mixer or a
+    /// built-in effect this build knows.
+    pub(crate) fn parameters(&self, node: NodeId) -> Option<NodeParameters<'_>> {
+        let (kind, infos, stored) = match &self.session.state().node(node)?.kind {
+            NodeKind::Effect { kind, parameters } => (
+                Some(kind.as_str()),
+                self.effect_parameters.get(kind.as_str())?.as_slice(),
+                parameters,
+            ),
+            NodeKind::Mixer {
+                channels,
+                parameters,
+            } => (
+                None,
+                self.mixer_parameters.get(..channels.saturating_mul(3))?,
+                parameters,
+            ),
+            _ => return None,
+        };
+        Some(NodeParameters::new(
+            node,
+            kind,
+            infos,
+            stored,
+            self.live.as_ref(),
+            self.engine.is_playing(),
+        ))
     }
 
     /// The open dialog's control with the keyboard focus, if any.
@@ -1222,34 +1246,30 @@ impl App {
     }
 
     /// Steps the focused effect control by `delta` presses, as one undo step
-    /// ([`effect_panel::stepped`]).
+    /// ([`NodeParameters::stepped`]).
     fn adjust_parameter_focus(&mut self, delta: i32) {
-        let (Some((node, infos)), Some(index)) = (self.dialog_effect(), self.effect_focus()) else {
+        let Some(index) = self.effect_focus() else {
             return;
         };
-        let Some(info) = infos.get(index) else {
-            return;
-        };
-        let current = self.parameter_value(node, &info.name);
-        let Some(value) = effect_panel::stepped(info, current, delta) else {
-            return;
-        };
-        let name = info.name.clone();
-        self.update(Message::SetParameter { node, name, value });
+        let edit = self
+            .dialog_effect()
+            .and_then(|p| Some((p.node(), p.stepped(index, delta)?)));
+        if let Some((node, (name, value))) = edit {
+            self.update(Message::SetParameter { node, name, value });
+        }
     }
 
     /// Flips the focused effect control if it is a toggle, as one undo step.
     fn press_parameter_focus(&mut self) {
-        let (Some((node, infos)), Some(index)) = (self.dialog_effect(), self.effect_focus()) else {
+        let Some(index) = self.effect_focus() else {
             return;
         };
-        let Some(info) = infos.get(index).filter(|i| i.scale == Scale::Toggle) else {
-            return;
-        };
-        let on = self.parameter_value(node, &info.name) >= 0.5;
-        let name = info.name.clone();
-        let value = if on { 0.0 } else { 1.0 };
-        self.update(Message::SetParameter { node, name, value });
+        let edit = self
+            .dialog_effect()
+            .and_then(|p| Some((p.node(), p.pressed(index)?)));
+        if let Some((node, (name, value))) = edit {
+            self.update(Message::SetParameter { node, name, value });
+        }
     }
 
     /// Sets mixer `node`'s channel `channel` to `mode`, or back to playing if it is already, as
@@ -1371,81 +1391,32 @@ impl App {
         self.report(result.map_err(|e| e.to_string()));
     }
 
-    /// The parameters of built-in effect kind `kind`, or `None` for a kind this build does not
-    /// know.
-    pub(crate) fn effect_parameters(&self, kind: &str) -> Option<&[ParameterInfo]> {
-        self.effect_parameters.get(kind).map(Vec::as_slice)
-    }
-
     /// Sets every parameter of effect node `node` to preset `name`'s value or its default, as
-    /// one undo step. Refused while playing if it would change a stopped-only value.
+    /// one undo step. Refused while playing if it would change a stopped-only value; ignored if
+    /// the preset is for another kind.
     fn apply_preset(&mut self, node: NodeId, name: &str) {
         let Some(preset) = audio_effects::preset(name) else {
             return;
         };
-        let Some(infos) = self.effect_parameters(preset.kind) else {
+        let Some(edits) = self.parameters(node).map(|p| p.preset_edits(preset)) else {
             return;
         };
-        let blocked = self.engine.is_playing()
-            && infos.iter().any(|info| {
-                info.stopped_only
-                    && info.constrain(preset.value(info))
-                        != Some(self.parameter_value(node, &info.name))
-            });
-        if blocked {
-            self.status = Some(format!(
-                "Pause or stop playback to choose the {} preset.",
-                preset.name
-            ));
-            return;
+        match edits {
+            Err(refusal) => self.status = Some(refusal),
+            Ok(edits) if edits.is_empty() => {}
+            Ok(edits) => {
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.apply(Edit::Batch(edits)));
+                self.report(result.map_err(|e| e.to_string()));
+            }
         }
-        let edits = infos
-            .iter()
-            .map(|info| Edit::SetParameter {
-                node,
-                name: info.name.clone(),
-                value: preset
-                    .values
-                    .iter()
-                    .find(|(n, _)| *n == info.name)
-                    .map(|&(_, value)| value),
-            })
-            .collect();
-        let result = self
-            .bridge
-            .edit(&mut self.session, |s| s.apply(Edit::Batch(edits)));
-        self.report(result.map_err(|e| e.to_string()));
     }
 
-    /// Whether parameter `name` of node `node` may change only while playback is stopped or
-    /// paused (ADR-0088).
-    pub(crate) fn is_stopped_only(&self, node: NodeId, name: &str) -> bool {
-        self.bridge
-            .parameter(node, name)
-            .is_some_and(|p| p.info().stopped_only)
-    }
-
-    /// A mixer or effect parameter's value as shown: the one being dragged, else the model's,
-    /// else the running parameter's default, else 0.
+    /// A mixer or effect parameter's value as shown ([`NodeParameters::value`]); 0 for a node
+    /// with no parameters.
     pub fn parameter_value(&self, node: NodeId, name: &str) -> f32 {
-        if let Some(live) = self
-            .live
-            .as_ref()
-            .filter(|l| l.node == node && l.name == name)
-        {
-            return live.value;
-        }
-        self.session
-            .state()
-            .node(node)
-            .and_then(|n| match &n.kind {
-                NodeKind::Mixer { parameters, .. } | NodeKind::Effect { parameters, .. } => {
-                    parameters.get(name).copied()
-                }
-                _ => None,
-            })
-            .or_else(|| self.bridge.parameter(node, name).map(|p| p.info().default))
-            .unwrap_or(0.0)
+        self.parameters(node).map_or(0.0, |p| p.value(name))
     }
 
     fn play(&mut self) {

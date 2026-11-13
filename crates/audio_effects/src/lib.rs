@@ -4,7 +4,8 @@
 //! # Modules
 //!
 //! - `mixer`: [`Mixer`], channels of gain, pan and mute/solo summed to stereo
-//!   (`docs/architecture/signal-graph.md` "Mixer").
+//!   (`docs/architecture/signal-graph.md` "Mixer"), and [`mixer_parameter_infos`], a mixer's
+//!   parameters declared without building one.
 //! - `filters`: [`Butterworth`], the high-pass and low-pass filters
 //!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
 //! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
@@ -40,7 +41,10 @@ pub use curve::{Curve, CurveFn, curve};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
-pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};
+pub use mixer::{
+    Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, mixer_parameter_infos,
+    parameter_name,
+};
 pub use parametric::{
     BANDS, BandControl, BandType, MAX_BAND_GAIN_DB, ParametricEq, PassControl, band_parameter_name,
     pass_parameter_name,

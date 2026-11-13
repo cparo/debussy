@@ -1,5 +1,5 @@
 //! [`AppLauncher`]: opening and creating projects for the window, from the projects folder or
-//! through file dialogs (`docs/architecture/user-interface.md` "Application startup",
+//! through file dialogs (`docs/architecture/startup.md` "Application startup",
 //! `docs/architecture/project.md` "Projects folder").
 
 use std::path::{Path, PathBuf};
