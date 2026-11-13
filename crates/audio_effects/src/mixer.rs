@@ -86,8 +86,10 @@ fn channel_infos(index: usize) -> [ParameterInfo; 3] {
     };
     let modes = ["play", "mute", "solo"].map(String::from).to_vec();
     [
-        parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB).with_unit("dB"),
-        parameter(Control::Pan, -1.0, 1.0),
+        parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB)
+            .with_unit("dB")
+            .with_step(1.0),
+        parameter(Control::Pan, -1.0, 1.0).with_step(0.01),
         parameter(Control::Mode, 0.0, 2.0).with_scale(Scale::Choice(modes)),
     ]
 }
@@ -270,6 +272,14 @@ mod tests {
         let mode = mixer.parameters()[2].info().clone();
         assert!(matches!(mode.scale, Scale::Choice(ref o) if o.len() == 3));
         Ok(())
+    }
+
+    #[test]
+    fn test_channel_infos_declare_whole_db_gain_and_hundredth_pan_steps() {
+        let [gain, pan, mode] = channel_infos(0);
+        assert_eq!(gain.step, Some(1.0));
+        assert_eq!(pan.step, Some(0.01));
+        assert_eq!(mode.step, None);
     }
 
     #[test]

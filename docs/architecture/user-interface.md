@@ -72,6 +72,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   choice by one option, each press one step; right and left step a focused slider the same way;
   Space or Enter flips a focused toggle
   ([ADR-0096](../adrs/0096-effect-dialogs-share-the-mixer-s-keyboard-focus.md)).
+  A parameter that declares a step replaces those steps with its own: an arrow press snaps the
+  value to that grid and moves it one step, a linear slider drags in that step, and its value
+  text has the step's decimal places
+  ([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)).
 - **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
   past the highest connected input (at least 1) to 128 and applied as one step, above narrow
   strips in a horizontal scroll whose scrollbar has its own row below the strips. A strip shows,
@@ -84,6 +88,10 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   arrows step the focused field or slider (1 channel, 1 dB, 1 % pan with up to the left), each
   press one step, never the hovered slider; Space or Enter presses a focused button
   ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
+  The gain and pan sliders take their range, step, tic position (the default) and the gain's
+  end labels and value text from their parameters' metadata, and arrow presses step them as any
+  parameter with a declared step; gain declares 1 dB and pan 0.01
+  ([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)).
   In any node dialog, Tab or Shift-Tab scrolls the newly focused control into view, by the
   least that shows it whole with a 12-pixel margin; the body keeps room on its right for its
   vertical scrollbar, which never covers a control ([ADR-0109](../adrs/0109-moving-a-node-dialog-s-focus-with-tab-scrolls-the.md)).

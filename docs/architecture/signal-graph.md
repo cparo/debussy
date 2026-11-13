@@ -85,7 +85,8 @@ Each parameter declares, besides its name, range and default, a unit (possibly e
 empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked
 stopped-only: it changes only while playback is stopped or paused, and no automation drives it. A
 toggle may name its on and off states, and any parameter may name a label for its maximum (such as
-∞), for display only. The
+∞) and a step for its controls' grid, for display only
+([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)). The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).

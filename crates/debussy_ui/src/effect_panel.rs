@@ -174,7 +174,7 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
         // Shown, not offered, until playback stops (ADR-0088).
         _ if frozen => text("Stop to change").size(11).into(),
         Scale::Linear => slider(min..=max, value, slide)
-            .step((max - min) / 1000.0)
+            .step(info.step.unwrap_or((max - min) / 1000.0))
             .on_release(Message::Dialog(DialogMessage::Release))
             .into(),
         Scale::Logarithmic => slider(min.ln()..=max.ln(), value.max(min).ln(), move |v| {
@@ -255,9 +255,10 @@ fn label(info: &ParameterInfo) -> String {
     capitalised(name)
 }
 
-/// `value` with its unit, to a precision that suits its size; hertz from 1000 up as kilohertz;
-/// the parameter's maximum label, if it has one, at the maximum.
-fn format_value(info: &ParameterInfo, value: f32) -> String {
+/// `value` with its unit, to the decimal places of the parameter's declared step if it has one,
+/// else to a precision that suits its size; hertz from 1000 up as kilohertz; the parameter's
+/// maximum label, if it has one, at the maximum.
+pub(crate) fn format_value(info: &ParameterInfo, value: f32) -> String {
     if let Some(label) = info.max_label.as_ref().filter(|_| value >= info.max) {
         return label.clone();
     }
@@ -265,7 +266,9 @@ fn format_value(info: &ParameterInfo, value: f32) -> String {
         "Hz" if value >= 1000.0 => (value / 1000.0, "kHz"),
         unit => (value, unit),
     };
-    let number = if info.scale == Scale::Integer || value.abs() >= 100.0 {
+    let number = if let Some(places) = info.step.and_then(step_places) {
+        format!("{value:.places$}")
+    } else if info.scale == Scale::Integer || value.abs() >= 100.0 {
         format!("{value:.0}")
     } else if value.abs() >= 10.0 {
         format!("{value:.1}")
@@ -277,6 +280,22 @@ fn format_value(info: &ParameterInfo, value: f32) -> String {
     } else {
         format!("{number} {unit}")
     }
+}
+
+/// The decimal places a step of `step` needs: the fewest, up to 6, that write it exactly, such
+/// as 0 for 1, 1 for 0.5 and 2 for 0.01 or 0.25; `None` unless it is positive and finite.
+fn step_places(step: f32) -> Option<usize> {
+    if !(step.is_finite() && step > 0.0) {
+        return None;
+    }
+    let mut scaled = f64::from(step);
+    for places in 0..6 {
+        if (scaled - scaled.round()).abs() < 1e-4 * scaled.max(1.0) {
+            return Some(places);
+        }
+        scaled *= 10.0;
+    }
+    Some(6)
 }
 
 #[cfg(test)]
@@ -310,6 +329,23 @@ mod tests {
         let ratio = ParameterInfo::new("ratio", 1.0, 100.0, 4.0).with_max_label("∞");
         assert_eq!(format_value(&ratio, 4.0), "4.00");
         assert_eq!(format_value(&ratio, 100.0), "∞");
+    }
+
+    #[test]
+    fn test_format_value_takes_precision_from_a_declared_step() {
+        let gain = ParameterInfo::new("gain", -96.0, 12.0, 0.0)
+            .with_unit("dB")
+            .with_step(1.0);
+        assert_eq!(format_value(&gain, -3.0), "-3 dB");
+        assert_eq!(format_value(&gain, -2.6), "-3 dB");
+        let pan = ParameterInfo::new("pan", -1.0, 1.0, 0.0).with_step(0.01);
+        assert_eq!(format_value(&pan, 0.35), "0.35");
+        let coarse = ParameterInfo::new("time", 0.0, 500.0, 0.0).with_step(0.5);
+        assert_eq!(format_value(&coarse, 12.5), "12.5");
+        assert_eq!(step_places(0.0), None);
+        assert_eq!(step_places(10.0), Some(0));
+        assert_eq!(step_places(0.25), Some(2));
+        assert_eq!(step_places(0.01), Some(2));
     }
 
     #[test]

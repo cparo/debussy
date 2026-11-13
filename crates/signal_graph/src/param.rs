@@ -66,6 +66,9 @@ pub struct ParameterInfo {
     /// Text shown in place of the value when it is at the maximum, such as `"∞"` for a ratio
     /// whose top value acts as infinite; `None` to show the number. Display only: not saved.
     pub max_label: Option<String>,
+    /// The grid a control snaps to and an arrow press moves by; `None` for the scale's own step.
+    /// Display only: not saved.
+    pub step: Option<f32>,
 }
 
 impl ParameterInfo {
@@ -84,6 +87,7 @@ impl ParameterInfo {
             sets_latency: false,
             state_labels: None,
             max_label: None,
+            step: None,
         }
     }
 
@@ -138,6 +142,15 @@ impl ParameterInfo {
     pub fn with_max_label(self, label: impl Into<String>) -> Self {
         ParameterInfo {
             max_label: Some(label.into()),
+            ..self
+        }
+    }
+
+    /// This, snapping to and stepping by `step` (see [`step`](Self::step)).
+    #[must_use]
+    pub fn with_step(self, step: f32) -> Self {
+        ParameterInfo {
+            step: Some(step),
             ..self
         }
     }

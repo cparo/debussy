@@ -201,6 +201,12 @@ impl<'a> NodeParameters<'a> {
         Some((info.name.clone(), value))
     }
 
+    /// The value `delta` arrow presses give parameter `name` ([`stepped`]); `None` if the node
+    /// has no such parameter, or for a toggle.
+    pub(crate) fn stepped_named(&self, name: &str, delta: i32) -> Option<f32> {
+        stepped(self.info(name)?, self.value(name), delta)
+    }
+
     /// The parameter name and value a press gives parameter `infos[index]`: a toggle flipped;
     /// `None` past the end, or for any other scale.
     pub(crate) fn pressed(&self, index: usize) -> Option<(String, f32)> {
@@ -229,22 +235,24 @@ pub(crate) fn tab_order(infos: &[ParameterInfo]) -> Vec<usize> {
 }
 
 /// Parameter `info` at `value` moved `delta` arrow presses up (positive) or down, within its
-/// range: a linear slider by [`ARROW_STEP`] of its range, a logarithmic one by that share of its
-/// logarithm's, an integer by one, a choice to the next or previous option. `None` for a toggle,
-/// which arrows leave alone.
+/// range. A parameter that declares a [`step`](ParameterInfo::step) snaps to that grid and moves
+/// by it; otherwise a linear slider moves by [`ARROW_STEP`] of its range, a logarithmic one by
+/// that share of its logarithm's, an integer by one, a choice to the next or previous option.
+/// `None` for a toggle, which arrows leave alone.
 pub(crate) fn stepped(info: &ParameterInfo, value: f32, delta: i32) -> Option<f32> {
     #[allow(clippy::cast_precision_loss)] // a handful of key presses
     let delta = delta as f32;
     let (min, max) = (info.min, info.max);
-    let value = match &info.scale {
-        Scale::Toggle => return None,
-        Scale::Linear => value + delta * ARROW_STEP * (max - min),
-        Scale::Logarithmic => {
+    let value = match (&info.scale, info.step.filter(|&s| s > 0.0)) {
+        (Scale::Toggle, _) => return None,
+        (_, Some(step)) => ((value / step).round() + delta) * step,
+        (Scale::Linear, None) => value + delta * ARROW_STEP * (max - min),
+        (Scale::Logarithmic, None) => {
             let step = ARROW_STEP * (max.ln() - min.ln());
             (value.max(min).ln() + delta * step).exp()
         }
-        Scale::Integer => value.round() + delta,
-        Scale::Choice(options) => {
+        (Scale::Integer, None) => value.round() + delta,
+        (Scale::Choice(options), None) => {
             #[allow(clippy::cast_precision_loss)] // a handful of options
             let last = options.len().saturating_sub(1) as f32;
             (value.round() + delta).clamp(0.0, last)
@@ -438,5 +446,38 @@ mod tests {
         assert_eq!(stepped(&choice, 0.0, -1), Some(0.0));
         let toggle = ParameterInfo::new("on", 0.0, 1.0, 0.0).with_scale(Scale::Toggle);
         assert_eq!(stepped(&toggle, 0.0, 1), None);
+    }
+
+    #[test]
+    fn test_stepped_snaps_to_a_declared_step_and_clamps() {
+        let gain = ParameterInfo::new("gain", -96.0, 12.0, 0.0).with_step(1.0);
+        assert_eq!(stepped(&gain, 0.0, 1), Some(1.0));
+        assert_eq!(stepped(&gain, -7.4, 1), Some(-6.0));
+        assert_eq!(stepped(&gain, -7.6, -1), Some(-9.0));
+        assert_eq!(stepped(&gain, 11.8, 3), Some(12.0));
+        assert_eq!(stepped(&gain, -95.5, -1), Some(-96.0));
+        let pan = ParameterInfo::new("pan", -1.0, 1.0, 0.0).with_step(0.01);
+        assert_eq!(stepped(&pan, 0.0, -1), Some(-0.01));
+        assert_eq!(stepped(&pan, 1.0, 1), Some(1.0));
+        let toggle = ParameterInfo::new("on", 0.0, 1.0, 0.0)
+            .with_scale(Scale::Toggle)
+            .with_step(1.0);
+        assert_eq!(stepped(&toggle, 0.0, 1), None);
+    }
+
+    #[test]
+    fn test_stepped_without_a_step_keeps_the_one_percent_rule() {
+        let linear = ParameterInfo::new("pan", -1.0, 1.0, 0.0);
+        assert_eq!(linear.step, None);
+        assert_eq!(stepped(&linear, 0.0, 1), Some(0.02));
+    }
+
+    #[test]
+    fn test_stepped_named_steps_by_name() {
+        let infos = [ParameterInfo::new("gain", -96.0, 12.0, 0.0).with_step(1.0)];
+        let stored = stored(&[("gain", -3.2)]);
+        let view = NodeParameters::new(NODE, None, &infos, &stored, None, false);
+        assert_eq!(view.stepped_named("gain", 1), Some(-2.0));
+        assert_eq!(view.stepped_named("missing", 1), None);
     }
 }
