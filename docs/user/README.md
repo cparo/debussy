@@ -132,6 +132,13 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   picture shows how input becomes output, with red lines at full scale. **Oversampling** (2× or 4×)
   reduces harsh, out-of-tune overtones at high drive, at the cost of more CPU and a short delay; it
   can only be changed while stopped or paused.
+- **Delay** repeats the sound. Set the **Time** in milliseconds, or turn on **Sync** to pick a
+  **Note** length (with a **Feel** of straight, dotted or triplet) that follows the project tempo.
+  **Feedback** sets how much of each repeat comes back again. In **ping-pong** mode the repeats
+  bounce between left and right; **Offset** delays the right side a little more or less than the
+  left. Turn on the **Low-pass** to make each repeat darker than the last, and **Saturation** to
+  let loud repeats distort gently instead of growing. **Mix** sets how loud the repeats are
+  against the original. Presets: Slapback, Ping-pong and Dub echo.
 
 Effect settings are saved with the project.
 
@@ -150,5 +157,4 @@ Export renders the whole project and exits without opening the window.
 
 ## Not yet available
 
-Punch-in and loop recording, editing clips in the window, automation, and effects beyond the
-filters, equaliser and dynamics.
+Punch-in and loop recording, editing clips in the window, automation, and reverb.

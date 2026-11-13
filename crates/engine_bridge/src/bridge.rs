@@ -142,7 +142,10 @@ impl Bridge {
     /// [`Error::Refused`]; [`Error::Graph`].
     pub fn sync(&mut self, state: &State) -> Result<(), Error> {
         let target = Target::of(state);
-        if target.nodes == self.target_nodes() && target.connections == self.target_connections() {
+        if target.nodes == self.target_nodes()
+            && target.connections == self.target_connections()
+            && target.tempo == self.mirror.tempo
+        {
             return self.commit();
         }
         // Check it all in a scratch graph first, so the running graph changes only if it will

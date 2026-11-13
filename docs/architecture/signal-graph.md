@@ -96,6 +96,12 @@ stopped-only. A recorded change to it replaces the node in place, keeping its gr
 connections, with one prepared at the new value, so the next plan delay-compensates the new
 latency ([ADR-0100](../adrs/0100-a-latency-setting-parameter-replaces-its-node-when.md)).
 
+A node may declare that it uses the project tempo. The graph gives every processor the tempo, as
+the length of a whole note in frames (frames per beat × the meter's beat unit), before preparing
+it; until the bridge sets it, it is 120 BPM in 4/4. A tempo change replaces each node that uses
+it in place, keeping its graph id, connections and values, with one prepared at the new tempo
+([ADR-0111](../adrs/0111-nodes-receive-the-project-tempo-before-they-are.md)).
+
 ## Port types
 
 Every port and connection has a type. Audio is the only type; connections between ports of

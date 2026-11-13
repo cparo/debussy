@@ -5,10 +5,10 @@
 use std::collections::BTreeMap;
 
 use audio_buffers::Layout;
-use project_model::{ConnectionId, Side};
+use project_model::{ConnectionId, Side, Tempo};
 use signal_graph::{ConnectionId as GraphConnectionId, Graph, Node, NodeId as GraphNodeId};
 
-use crate::target::{ConnectionTarget, Key, NodeTarget, Shape, Target};
+use crate::target::{ConnectionTarget, Key, NodeTarget, Shape, Target, frames_per_whole_note};
 
 /// Why the mirror could not make the graph hold a target.
 #[derive(Debug)]
@@ -53,6 +53,8 @@ pub(crate) struct MirroredConnection {
 pub(crate) struct Mirror {
     pub nodes: BTreeMap<Key, MirroredNode>,
     pub connections: BTreeMap<ConnectionId, MirroredConnection>,
+    /// The tempo the graph was last given.
+    pub tempo: Tempo,
 }
 
 /// The processor for a shape; `None` for sources, sinks and delays, which the graph makes.
@@ -208,7 +210,14 @@ fn remove_connection(graph: &mut Graph, connection: &MirroredConnection) {
 impl Mirror {
     /// Makes `graph` (empty of the model's elements) hold `target`.
     pub(crate) fn build(graph: &mut Graph, target: &Target) -> Result<Mirror, MirrorError> {
-        let mut mirror = Mirror::default();
+        let mut mirror = Mirror {
+            tempo: target.tempo,
+            ..Mirror::default()
+        };
+        graph.set_tempo(frames_per_whole_note(
+            &target.tempo,
+            graph.config().sample_rate,
+        ));
         for (key, node) in &target.nodes {
             let id = add(graph, node)?;
             mirror.nodes.insert(
@@ -229,6 +238,8 @@ impl Mirror {
     /// Changes `graph` from what this mirror holds to `target`. `target` must already have been
     /// built successfully into a scratch graph, so every call here succeeds.
     pub(crate) fn sync(&mut self, graph: &mut Graph, target: &Target) -> Result<(), MirrorError> {
+        self.sync_tempo(graph, target.tempo)?;
+
         // Connections that go or change ports.
         let stale: Vec<ConnectionId> = self
             .connections
@@ -342,6 +353,24 @@ impl Mirror {
                     let mirrored = connect(graph, &self.nodes, new)?;
                     self.connections.insert(*id, mirrored);
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Gives `graph` the tempo `tempo` and replaces each node that uses it, as the tempo changes
+    /// only while stopped (ADR-0082). Nodes added after this are prepared at it.
+    fn sync_tempo(&mut self, graph: &mut Graph, tempo: Tempo) -> Result<(), MirrorError> {
+        if tempo == self.tempo {
+            return Ok(());
+        }
+        self.tempo = tempo;
+        let users = graph.set_tempo(frames_per_whole_note(&tempo, graph.config().sample_rate));
+        for node in self.nodes.values().filter(|n| users.contains(&n.id)) {
+            if let Some(processor) = processor(&node.target.shape) {
+                // Same kind, so the same ports: no connection is dropped. Values carry over by
+                // name.
+                graph.replace_node(node.id, processor)?;
             }
         }
         Ok(())

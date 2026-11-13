@@ -5,6 +5,7 @@ use signal_graph::{Node, ParameterInfo};
 
 use crate::amplifier::{self, Amplifier};
 use crate::curve::CurveFn;
+use crate::delay::Delay;
 use crate::dynamics::{self, Dynamics};
 use crate::filters::{self, Butterworth, Response};
 use crate::parametric::{self, ParametricEq};
@@ -55,6 +56,12 @@ pub const EFFECTS: &[EffectKind] = &[
         name: "Amplifier",
         build: build_amplifier,
         curve: Some(amplifier::curve),
+    },
+    EffectKind {
+        id: "delay",
+        name: "Delay",
+        build: build_delay,
+        curve: None,
     },
 ];
 
@@ -110,6 +117,35 @@ pub const PRESETS: &[Preset] = &[
             ("lookahead", 5.0),
             ("attack", 0.2),
             ("release", 100.0),
+        ],
+    },
+    Preset {
+        name: "Slapback",
+        kind: "delay",
+        values: &[("time", 110.0), ("feedback", 10.0), ("mix", 35.0)],
+    },
+    Preset {
+        name: "Ping-pong",
+        kind: "delay",
+        values: &[
+            ("sync", 1.0),
+            ("note", 2.0),
+            ("feel", 1.0),
+            ("mode", 1.0),
+            ("feedback", 45.0),
+        ],
+    },
+    Preset {
+        name: "Dub echo",
+        kind: "delay",
+        values: &[
+            ("sync", 1.0),
+            ("note", 3.0),
+            ("feedback", 70.0),
+            ("low-pass enabled", 1.0),
+            ("low-pass", 2_000.0),
+            ("saturation", 1.0),
+            ("mix", 40.0),
         ],
     },
 ];
@@ -178,6 +214,11 @@ fn build_amplifier() -> Option<Box<dyn Node>> {
     Some(Box::new(Amplifier::new().ok()?))
 }
 
+/// A new delay.
+fn build_delay() -> Option<Box<dyn Node>> {
+    Some(Box::new(Delay::new().ok()?))
+}
+
 /// The built-in effect of stable kind id `kind`, ready to add to a graph, or `None` for an id
 /// this build does not know. Allocates.
 pub fn effect(kind: &str) -> Option<Box<dyn Node>> {
@@ -241,6 +282,7 @@ mod tests {
             let changed = |name: &str| if name == "knee" { 1.5 } else { value(name) };
             assert_eq!(matching_preset("dynamics", &infos, changed), None);
         }
+        assert_eq!(presets("delay").count(), 3);
         assert_eq!(presets("low-pass").count(), 0);
         let gate = preset("Gate").ok_or("no gate")?;
         assert_eq!((gate.get("range"), gate.get("knee")), (Some(80.0), None));
