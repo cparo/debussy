@@ -3,16 +3,16 @@
 ## Effect displays
 
 An effect's dialog shows a display area between its header and its controls: the dialog's width
-less its padding, 320 logical pixels tall, scrolling with the controls. An effect kind may register
-an `EffectDisplay` (`crates/debussy_ui/src/effect_display.rs`), which is given each parameter's
-name, current value (the dragged one while dragging) and unit, and a `DisplayContext`: the
-effect's kind, the tone, the project's sample rate, and the area's size in physical pixels. It
-returns non-premultiplied RGBA pixels, stretched to the area. A kind with no display, or a
-display that returns nothing, leaves the area charcoal grey (`#2B2B2B`) in both tones
-([ADR-0091](../adrs/0091-effect-displays-are-registered-per-effect-kind-and.md)). It runs on the
-interface thread only when the kind, a parameter value, the tone, the sample rate or the area's
-physical size changes, and depends on nothing else
-([ADR-0095](../adrs/0095-rasters-reach-the-gpu-in-strips-under-the-renderer.md)).
+less its padding, 320 logical pixels tall, scrolling with the controls. The area shows the picture
+of the `Curve` its parameter values (the dragged one while dragging) ask for
+(`docs/architecture/effects.md` "Effect curves"). `draw` in
+`crates/debussy_ui/src/effect_display.rs` matches on the curve's variant and calls that kind of
+curve's `render`, given a `DisplayContext`: the tone and the area's size in physical pixels. It
+returns non-premultiplied RGBA pixels, stretched to the area. A kind with no curve, or a picture
+that cannot be drawn, leaves the area charcoal grey (`#2B2B2B`) in both tones
+([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)). It runs on the
+interface thread only when the curve, the tone or the area's physical size changes, and depends
+on nothing else ([ADR-0095](../adrs/0095-rasters-reach-the-gpu-in-strips-under-the-renderer.md)).
 
 ## Display plots
 
@@ -41,10 +41,10 @@ undefined values go.
 
 ## Equaliser displays
 
-`high-pass`, `low-pass` and `parametric-eq` share one display, `ResponseDisplay`
-(`crates/debussy_ui/src/response_display.rs`), which plots the exact magnitude response their
-parameter values ask for at the project's sample rate, as `audio_effects::frequency_response`
-gives it (`docs/architecture/effects.md` "Frequency response"):
+A `Response` curve, which `high-pass`, `low-pass` and `parametric-eq` give, is drawn by
+`crates/debussy_ui/src/response_display.rs`. It plots the exact magnitude response their parameter
+values ask for at the project's sample rate (`docs/architecture/effects.md` "Frequency
+response"):
 
 - Axes are fixed: 20 Hz to 20 kHz on a log scale across, +12 dB at the top to −96 dB at the
   bottom, drawn as in "Display plots".
@@ -58,10 +58,9 @@ gives it (`docs/architecture/effects.md` "Frequency response"):
 
 ## Dynamics display
 
-`dynamics` has `TransferDisplay` (`crates/debussy_ui/src/transfer_display.rs`), which plots the
-steady-state output level over the detected input level that its parameter values ask for:
-the curve, makeup and the ceiling if it is on, as `audio_effects::dynamics_curve` gives it, the
-same mapping processing uses. Ballistics, lookahead and the detector mode are not shown.
+A `Transfer` curve, which `dynamics` gives, is drawn by `crates/debussy_ui/src/transfer_display.rs`.
+It plots the steady-state output level over the detected input level that the parameter values ask
+for: the curve, makeup and the ceiling if it is on, by the same mapping processing uses. Ballistics, lookahead and the detector mode are not shown.
 
 - Axes are fixed: input from −96 dBFS at the left to +12 dBFS at the right, output from +12 dBFS at
   the top to −96 dBFS at the bottom, drawn as in "Display plots". Grey grid lines, the same in both
@@ -73,9 +72,9 @@ same mapping processing uses. Ballistics, lookahead and the detector mode are no
 
 ## Amplifier display
 
-`amplifier` has `AmplifierDisplay` (`crates/debussy_ui/src/amplifier_display.rs`), which plots the
-static curve its parameter values ask for, as `audio_effects::amplifier_curve` gives it (see
-`docs/architecture/effects.md` "Amplifier"): output over input sample, passing through the
+A `Shaper` curve, which `amplifier` gives, is drawn by `crates/debussy_ui/src/amplifier_display.rs`.
+It plots the static curve the parameter values ask for (see `docs/architecture/effects.md`
+"Amplifier"): output over input sample, passing through the
 origin. The DC filter's response and oversampling are not shown.
 
 - Both axes are linear in sample value, from −10^(3/20) to +10^(3/20) (±3 dBFS),

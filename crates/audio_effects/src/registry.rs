@@ -3,18 +3,25 @@
 
 use signal_graph::{Node, ParameterInfo};
 
-use crate::amplifier::Amplifier;
-use crate::dynamics::Dynamics;
-use crate::filters::{Butterworth, Response};
-use crate::parametric::ParametricEq;
+use crate::amplifier::{self, Amplifier};
+use crate::curve::CurveFn;
+use crate::dynamics::{self, Dynamics};
+use crate::filters::{self, Butterworth, Response};
+use crate::parametric::{self, ParametricEq};
 
 /// A built-in effect kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct EffectKind {
     /// The stable id saved projects name it by, such as `"high-pass"`.
     pub id: &'static str,
     /// The name shown for it, such as `"High-pass filter"`.
     pub name: &'static str,
+    /// Builds a new effect of this kind at its defaults, ready to add to a graph; `None` if it
+    /// cannot be made. Allocates.
+    pub build: fn() -> Option<Box<dyn Node>>,
+    /// What builds the curve its parameter values ask for, for its display; `None` for a kind
+    /// with no display (`docs/architecture/effects.md` "Effect curves").
+    pub curve: Option<CurveFn>,
 }
 
 /// Every built-in effect kind, in the order a menu lists them.
@@ -22,22 +29,32 @@ pub const EFFECTS: &[EffectKind] = &[
     EffectKind {
         id: "high-pass",
         name: "High-pass filter",
+        build: build_high_pass,
+        curve: Some(filters::high_pass_curve),
     },
     EffectKind {
         id: "low-pass",
         name: "Low-pass filter",
+        build: build_low_pass,
+        curve: Some(filters::low_pass_curve),
     },
     EffectKind {
         id: "parametric-eq",
         name: "Parametric EQ",
+        build: build_parametric_eq,
+        curve: Some(parametric::curve),
     },
     EffectKind {
         id: "dynamics",
         name: "Dynamics",
+        build: build_dynamics,
+        curve: Some(dynamics::curve),
     },
     EffectKind {
         id: "amplifier",
         name: "Amplifier",
+        build: build_amplifier,
+        curve: Some(amplifier::curve),
     },
 ];
 
@@ -131,19 +148,35 @@ pub fn preset(name: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|p| p.name == name)
 }
 
+/// A new high-pass filter.
+fn build_high_pass() -> Option<Box<dyn Node>> {
+    Some(Box::new(Butterworth::new(Response::HighPass).ok()?))
+}
+
+/// A new low-pass filter.
+fn build_low_pass() -> Option<Box<dyn Node>> {
+    Some(Box::new(Butterworth::new(Response::LowPass).ok()?))
+}
+
+/// A new parametric equaliser.
+fn build_parametric_eq() -> Option<Box<dyn Node>> {
+    Some(Box::new(ParametricEq::new().ok()?))
+}
+
+/// A new dynamics processor.
+fn build_dynamics() -> Option<Box<dyn Node>> {
+    Some(Box::new(Dynamics::new().ok()?))
+}
+
+/// A new amplifier.
+fn build_amplifier() -> Option<Box<dyn Node>> {
+    Some(Box::new(Amplifier::new().ok()?))
+}
+
 /// The built-in effect of stable kind id `kind`, ready to add to a graph, or `None` for an id
 /// this build does not know. Allocates.
 pub fn effect(kind: &str) -> Option<Box<dyn Node>> {
-    // Each built-in effect adds an arm here, keyed by its saved kind id.
-    let node: Box<dyn Node> = match kind {
-        "high-pass" => Box::new(Butterworth::new(Response::HighPass).ok()?),
-        "low-pass" => Box::new(Butterworth::new(Response::LowPass).ok()?),
-        "parametric-eq" => Box::new(ParametricEq::new().ok()?),
-        "dynamics" => Box::new(Dynamics::new().ok()?),
-        "amplifier" => Box::new(Amplifier::new().ok()?),
-        _ => return None,
-    };
-    Some(node)
+    (EFFECTS.iter().find(|e| e.id == kind)?.build)()
 }
 
 /// The name shown for effect kind `kind`, or `None` for an id this build does not know.

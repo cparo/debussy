@@ -18,6 +18,10 @@ state.
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
+Each kind is one `EffectKind` row in `audio_effects::EFFECTS`: its kind id, its name, the function
+that builds it, and its curve function (see "Effect curves")
+([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)).
+
 ## Effect presets
 
 A preset is a name, an effect kind and values for some of its parameters. Choosing one in a node's
@@ -26,6 +30,20 @@ a preset that would change a stopped-only value is refused. The dialog shows the
 values, over the defaults, equal the node's, or "Custom" if none does: the preset is not saved, and
 a new node at its defaults shows the preset that has no values. The presets are
 `audio_effects::PRESETS` ([ADR-0099](../adrs/0099-dynamics-is-one-feed-forward-effect-with-level.md)).
+
+## Effect curves
+
+`audio_effects::curve(kind, values, sample_rate)` gives the curve an effect kind's parameter values
+ask for, for its display: a `Curve`, one of a magnitude response over frequency (`Response`), a
+steady-state level transfer (`Transfer`) or a static sample shaper (`Shaper`). The set of variants
+is closed.
+
+- Each `EffectKind` row in `EFFECTS` names its kind's curve function, or none for a kind with no
+  display. The function lives in the effect's own module and reads `values` in declaration order
+  through the same controls processing reads, building the curve by the same mapping.
+- `values` of the wrong length, or a kind with no curve, give `None`.
+- No other module dispatches on kind id to build a curve
+  ([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)).
 
 ## Filters
 
@@ -86,8 +104,8 @@ ramp time; a stage that is off passes its input through and is not processed
 
 ## Frequency response
 
-`audio_effects::frequency_response` gives the steady-state magnitude response of an effect kind at
-given parameter values and sample rate: the stages it runs, designed by the same functions as
+The `Response` curve (see "Effect curves") is the steady-state magnitude response of an effect kind
+at given parameter values and sample rate: the stages it runs, designed by the same functions as
 processing, with each stage's gain the exact response of the bilinear-transformed filter. Ramps
 and band morphs are not included. Every kind in "High-pass and low-pass filters" and "Parametric
 equaliser" has one; a band that is off adds no stage ([ADR-0092](../adrs/0092-equaliser-displays-plot-the-exact-digital.md)). The
@@ -168,6 +186,6 @@ fade does not jump.
 | `oversampling` | output | off (0), 2× (1), 4× (2); sets latency | off |
 
 `oversampling` is a latency-setting parameter (see `docs/architecture/signal-graph.md`
-"Effect nodes"). `audio_effects::amplifier_curve` gives the static curve
-`makeup·(f(drive·x + bias) − f(bias))` for display. There are no presets
+"Effect nodes"). Its `Shaper` curve (see "Effect curves") is the static curve
+`makeup·(f(drive·x + bias) − f(bias))`. There are no presets
 ([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)).

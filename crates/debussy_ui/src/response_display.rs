@@ -2,10 +2,10 @@
 //! 20 Hz to 20 kHz and +12 to −96 dB (`docs/architecture/effect-displays.md` "Equaliser
 //! displays", drawn as in "Display plots").
 
-use audio_effects::{FrequencyResponse, frequency_response};
+use audio_effects::FrequencyResponse;
 use iced::Color;
 
-use crate::effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
+use crate::effect_display::{DisplayContext, Pixels};
 use crate::plot::{Axis, BOTTOM_DB, Canvas, Plot, columns, db_lines, db_marks};
 use crate::theme::{self, GRID, GRID_ZERO};
 
@@ -28,26 +28,9 @@ fn frequencies() -> Axis {
     Axis::log(20.0, 20_000.0)
 }
 
-/// The display of every equaliser kind: its frequency response.
-pub(crate) struct ResponseDisplay;
-
-impl EffectDisplay for ResponseDisplay {
-    fn draw(
-        &self,
-        parameters: &[DisplayParameter<'_>],
-        context: &DisplayContext<'_>,
-    ) -> Option<Pixels> {
-        let values: Vec<f32> = parameters.iter().map(|p| p.value).collect();
-        // Sample rates are exact in `f32` well past any audio rate.
-        #[allow(clippy::cast_precision_loss)]
-        let response = frequency_response(context.kind, &values, context.sample_rate as f32)?;
-        render(&response, context)
-    }
-}
-
 /// `response` drawn on its grid for `context`, on a transparent background: grey lines at the
 /// marked frequencies and every 12 dB, the 0 dB line lighter.
-fn render(response: &FrequencyResponse, context: &DisplayContext<'_>) -> Option<Pixels> {
+pub(crate) fn render(response: &FrequencyResponse, context: &DisplayContext) -> Option<Pixels> {
     let mut canvas = Canvas::new(context)?;
     let plot = canvas.plot(frequencies(), Axis::decibels());
     let verticals: Vec<(f32, Color)> = FREQUENCY_LINES.iter().map(|&(f, _)| (f, GRID)).collect();
@@ -85,45 +68,38 @@ fn points(plot: &Plot, response: &FrequencyResponse, scale: f32) -> Vec<(f32, f3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effect_display::DISPLAY_HEIGHT;
+    use audio_effects::Curve;
+
+    use crate::effect_display::{DISPLAY_HEIGHT, values_with};
     use crate::plot::{BOTTOM_GUTTER, LEFT_GUTTER};
     use crate::theme::Tone;
 
-    /// A context for `kind` at scale 1, 600 pixels wide.
-    fn context(kind: &str) -> DisplayContext<'_> {
-        DisplayContext {
-            kind,
+    /// The display of a parametric equaliser at its defaults with `changes` by name, 600 pixels
+    /// wide at scale 1.
+    fn draw(changes: &[(&str, f32)]) -> Option<Pixels> {
+        let values = values_with("parametric-eq", changes)?;
+        let Some(Curve::Response(response)) =
+            audio_effects::curve("parametric-eq", &values, 48_000)
+        else {
+            return None;
+        };
+        let context = DisplayContext {
             tone: Tone::Dark,
-            sample_rate: 48_000,
             width: 600,
             height: 320,
-        }
+        };
+        render(&response, &context)
     }
 
-    /// A parametric equaliser's parameters with band 1 a bell of `gain` dB at 1 kHz, Q 1.
-    /// The high-pass and low-pass stages are off.
-    fn bell(gain: f32) -> Vec<f32> {
-        let off = [0.0, 1_000.0, 2.0];
-        let mut values = off.to_vec();
-        values.extend_from_slice(&[1.0, 0.0, 1_000.0, gain, 1.0]);
-        for _ in 1..audio_effects::BANDS {
-            values.extend_from_slice(&[0.0, 0.0, 1_000.0, 0.0, 1.0]);
-        }
-        values.extend_from_slice(&off);
-        values
-    }
-
-    /// The display of `kind` at `values`.
-    fn draw(kind: &str, values: &[f32]) -> Option<Pixels> {
-        let parameters: Vec<DisplayParameter<'_>> = values
-            .iter()
-            .map(|&value| DisplayParameter {
-                name: "",
-                value,
-                unit: "",
-            })
-            .collect();
-        ResponseDisplay.draw(&parameters, &context(kind))
+    /// The changes that make band 1 a bell of `gain` dB at 1 kHz, Q 1.
+    fn bell(gain: f32) -> [(&'static str, f32); 5] {
+        [
+            ("band 1 enabled", 1.0),
+            ("band 1 type", 0.0),
+            ("band 1 frequency", 1_000.0),
+            ("band 1 gain", gain),
+            ("band 1 q", 1.0),
+        ]
     }
 
     /// The rows of every pixel in the plot's columns tinted like the curve: grid and labels are
@@ -146,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_draw_flat_eq_lies_on_the_0_db_row() -> Result<(), Box<dyn std::error::Error>> {
-        let pixels = draw("parametric-eq", &bell(0.0)).ok_or("no picture")?;
+        let pixels = draw(&bell(0.0)).ok_or("no picture")?;
         let zero = Plot::new(600.0, frequencies(), Axis::decibels()).y(0.0);
         let rows = accent_rows(&pixels);
         assert!(rows.len() > 500);
@@ -158,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_draw_clips_a_boost_to_the_top() -> Result<(), Box<dyn std::error::Error>> {
-        let pixels = draw("parametric-eq", &bell(24.0)).ok_or("no picture")?;
+        let pixels = draw(&bell(24.0)).ok_or("no picture")?;
         let top = accent_rows(&pixels).into_iter().min().ok_or("no curve")?;
         assert_eq!(top, 0, "the clipped curve reaches the top edge");
         Ok(())
@@ -166,21 +142,18 @@ mod tests {
 
     #[test]
     fn test_draw_notch_reaches_the_bottom() -> Result<(), Box<dyn std::error::Error>> {
-        let mut values = bell(0.0);
-        // Band 1 follows the high-pass stage's three values.
-        values[3..8].copy_from_slice(&[1.0, 3.0, 3_000.0, 0.0, 6.0]);
-        let pixels = draw("parametric-eq", &values).ok_or("no picture")?;
+        let notch = [
+            ("band 1 enabled", 1.0),
+            ("band 1 type", 3.0),
+            ("band 1 frequency", 3_000.0),
+            ("band 1 q", 6.0),
+        ];
+        let pixels = draw(&notch).ok_or("no picture")?;
         let lowest = accent_rows(&pixels).into_iter().max().ok_or("no curve")?;
         assert!(
             lowest as f32 >= DISPLAY_HEIGHT - BOTTOM_GUTTER - 1.0,
             "lowest {lowest}"
         );
         Ok(())
-    }
-
-    #[test]
-    fn test_draw_needs_an_equaliser_kind() {
-        assert!(draw("low-pass", &[1_000.0, 4.0]).is_some());
-        assert!(draw("mixer", &[1_000.0, 4.0]).is_none());
     }
 }

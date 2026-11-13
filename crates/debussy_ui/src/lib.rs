@@ -12,7 +12,8 @@
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
-//! - `effect_display`: [`EffectDisplay`], the picture above an effect's controls.
+//! - `effect_display`: [`Pixels`] and [`DisplayContext`], the picture above an effect's controls
+//!   of the curve its parameter values ask for.
 //! - `equal_heights`: a row whose children all take its tallest child's height.
 //! - `response_display`: the equalisers' display, their frequency response.
 //! - `plot`: the effect displays' plot toolkit: frame, axes, grid, labels and curve.
@@ -71,7 +72,7 @@ use std::sync::Mutex;
 use shell::Shell;
 
 pub use app::{App, DialogFocus, Message, NewNode};
-pub use effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
+pub use effect_display::{DisplayContext, Pixels};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;

@@ -1,6 +1,6 @@
 # ADR-0091 — Effect displays are registered per effect kind and draw RGBA pixels from parameter values and the tone
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0105
 - **Decided by:** agent, unratified
 - **Date:** 2026-11-10
 - **Issue:** —

@@ -5,8 +5,10 @@ use audio_buffers::Layout;
 use dsp::{Svf, SvfCoefficients};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
+use crate::curve::Curve;
 use crate::error::Error;
 use crate::filters::{self, Cascade, Response};
+use crate::response::{FrequencyResponse, Stage, butterworth_stages};
 
 /// The number of bands.
 pub const BANDS: usize = 4;
@@ -90,7 +92,7 @@ impl BandType {
     }
 }
 
-/// One of a band's controls, each a parameter.
+/// One of a band's controls, each a parameter, in the order a band declares them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BandControl {
     /// On or off; default off.
@@ -118,7 +120,8 @@ pub fn band_parameter_name(band: usize, control: BandControl) -> String {
     format!("band {} {control}", band + 1)
 }
 
-/// One of a high-pass or low-pass stage's controls, each a parameter.
+/// One of a high-pass or low-pass stage's controls, each a parameter, in the order a stage
+/// declares them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PassControl {
     /// On or off; default off.
@@ -147,6 +150,67 @@ pub fn pass_parameter_name(response: Response, control: PassControl) -> String {
         PassControl::Order => "order",
     };
     format!("{} {control}", pass_group(response))
+}
+
+/// How many parameters each band declares: one per [`BandControl`].
+const BAND_PARAMETERS: usize = 5;
+
+/// How many parameters each pass stage declares: one per [`PassControl`].
+const PASS_PARAMETERS: usize = 3;
+
+/// How many parameters the equaliser declares: the high-pass stage's, then each band's, then the
+/// low-pass stage's.
+const PARAMETERS: usize = 2 * PASS_PARAMETERS + BANDS * BAND_PARAMETERS;
+
+/// The position of `control` on band `band` (0-based) among the equaliser's parameters.
+fn band_index(band: usize, control: BandControl) -> usize {
+    PASS_PARAMETERS + band * BAND_PARAMETERS + control as usize
+}
+
+/// The position of `control` on the stage passing `response`'s side among the equaliser's
+/// parameters.
+fn pass_index(response: Response, control: PassControl) -> usize {
+    let base = match response {
+        Response::HighPass => 0,
+        Response::LowPass => PASS_PARAMETERS + BANDS * BAND_PARAMETERS,
+    };
+    base + control as usize
+}
+
+/// The curve of a `parametric-eq` effect whose parameters stand at `values`, in declaration order
+/// (see [`crate::CurveFn`]): the response of an enabled high-pass, each enabled band, and an
+/// enabled low-pass, designed as processing designs them.
+pub(crate) fn curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+    let values = <&[f32; PARAMETERS]>::try_from(values).ok()?;
+    // Sample rates are exact in `f32` well past any audio rate.
+    #[allow(clippy::cast_precision_loss)]
+    let rate = sample_rate as f32;
+    let pass = |response| {
+        let value = |control| values[pass_index(response, control)];
+        if is_on(value(PassControl::Enabled)) {
+            butterworth_stages(
+                response,
+                value(PassControl::Cutoff),
+                value(PassControl::Order),
+                sample_rate,
+            )
+        } else {
+            Vec::new()
+        }
+    };
+    let mut stages = pass(Response::HighPass);
+    stages.extend((0..BANDS).filter_map(|band| {
+        let value = |control| values[band_index(band, control)];
+        let band_type = wanted(value(BandControl::Enabled), value(BandControl::Type))?;
+        Some(Stage::Svf(band_type.design(
+            value(BandControl::Frequency),
+            value(BandControl::Q),
+            value(BandControl::Gain),
+            rate,
+        )))
+    }));
+    stages.extend(pass(Response::LowPass));
+    Some(Curve::Response(FrequencyResponse::new(sample_rate, stages)))
 }
 
 /// Whether a stage or band whose `enabled` parameter stands at `enabled` is on.
@@ -537,6 +601,124 @@ impl Node for ParametricEq {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The equaliser's response at its defaults with `changes` by name.
+    fn response(changes: &[(&str, f32)]) -> Result<FrequencyResponse, Box<dyn std::error::Error>> {
+        let values = crate::curve::values_with("parametric-eq", changes).ok_or("unknown kind")?;
+        match curve(&values, 48_000) {
+            Some(Curve::Response(response)) => Ok(response),
+            other => Err(format!("not a response: {other:?}").into()),
+        }
+    }
+
+    /// The changes that turn band `band` (0-based) on as `kind` at `frequency` Hz and `gain` dB.
+    fn band(band: usize, kind: BandType, frequency: f32, gain: f32) -> [(String, f32); 4] {
+        let name = |control| band_parameter_name(band, control);
+        [
+            (name(BandControl::Enabled), 1.0),
+            (name(BandControl::Type), kind.value()),
+            (name(BandControl::Frequency), frequency),
+            (name(BandControl::Gain), gain),
+        ]
+    }
+
+    /// `changes` with borrowed names.
+    fn borrowed(changes: &[(String, f32)]) -> Vec<(&str, f32)> {
+        changes.iter().map(|(n, v)| (n.as_str(), *v)).collect()
+    }
+
+    #[test]
+    fn test_band_and_pass_index_match_the_declared_names() -> Result<(), Error> {
+        let eq = ParametricEq::new()?;
+        let infos: Vec<ParameterInfo> = eq.parameters().iter().map(|p| p.info().clone()).collect();
+        assert_eq!(infos.len(), PARAMETERS);
+        for band in 0..BANDS {
+            for control in [
+                BandControl::Enabled,
+                BandControl::Type,
+                BandControl::Frequency,
+                BandControl::Gain,
+                BandControl::Q,
+            ] {
+                let name = band_parameter_name(band, control);
+                assert_eq!(infos[band_index(band, control)].name, name);
+            }
+        }
+        for response in [Response::HighPass, Response::LowPass] {
+            for control in [
+                PassControl::Enabled,
+                PassControl::Cutoff,
+                PassControl::Order,
+            ] {
+                let name = pass_parameter_name(response, control);
+                assert_eq!(infos[pass_index(response, control)].name, name);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_curve_flat_when_every_band_and_stage_is_off() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let response = response(&[])?;
+        for frequency in [20.0, 1_000.0, 20_000.0] {
+            assert_eq!(response.magnitude_db(frequency), Some(0.0));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_curve_enabled_bells_sum() -> Result<(), Box<dyn std::error::Error>> {
+        // Bands 1 and 2 as bells at 1 kHz, +6 and +3 dB.
+        let mut changes: Vec<(String, f32)> = band(0, BandType::Bell, 1_000.0, 6.0).into();
+        changes.extend(band(1, BandType::Bell, 1_000.0, 3.0));
+        let centre = response(&borrowed(&changes))?
+            .magnitude_db(1_000.0)
+            .ok_or("above Nyquist")?;
+        assert!((centre - 9.0).abs() < 1e-3, "{centre}");
+        // A notch on band 3 drives the centre far down.
+        changes.extend(band(2, BandType::Notch, 1_000.0, 0.0));
+        let response = response(&borrowed(&changes))?;
+        assert!(response.magnitude_db(1_000.0).is_some_and(|db| db < -60.0));
+        let zeros: Vec<f32> = response.zeros().collect();
+        assert!(
+            zeros.len() == 1 && (zeros[0] - 1_000.0).abs() < 0.1,
+            "{zeros:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_curve_includes_enabled_pass_stages() -> Result<(), Box<dyn std::error::Error>> {
+        // The high-pass at 200 Hz, order 4.
+        let name = |response, control| pass_parameter_name(response, control);
+        let mut changes = vec![
+            (name(Response::HighPass, PassControl::Enabled), 1.0),
+            (name(Response::HighPass, PassControl::Cutoff), 200.0),
+            (name(Response::HighPass, PassControl::Order), 4.0),
+        ];
+        let high_pass = response(&borrowed(&changes))?;
+        let at = high_pass.magnitude_db(200.0).ok_or("above Nyquist")?;
+        assert!((at + 3.0103).abs() < 0.01, "{at}");
+        assert!(
+            high_pass
+                .magnitude_db(5_000.0)
+                .is_some_and(|db| db.abs() < 0.01)
+        );
+        // A +6 dB bell on band 1 at 200 Hz adds to the high-pass's -3 dB.
+        changes.extend(band(0, BandType::Bell, 200.0, 6.0));
+        let at = response(&borrowed(&changes))?
+            .magnitude_db(200.0)
+            .ok_or("above Nyquist")?;
+        assert!((at - (6.0 - 3.0103)).abs() < 0.01, "{at}");
+        // The low-pass at its default 12 kHz, order 2.
+        changes.push((name(Response::LowPass, PassControl::Enabled), 1.0));
+        let at = response(&borrowed(&changes))?
+            .magnitude_db(12_000.0)
+            .ok_or("above Nyquist")?;
+        assert!((at + 3.0103).abs() < 0.01, "{at}");
+        Ok(())
+    }
 
     #[test]
     fn test_new_declares_ports_and_parameters() -> Result<(), Error> {

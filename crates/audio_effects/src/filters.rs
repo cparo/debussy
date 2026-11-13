@@ -5,7 +5,9 @@ use audio_buffers::Layout;
 use dsp::{OnePole, OnePoleCoefficients, Svf, SvfCoefficients, butterworth_q, prewarp};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
+use crate::curve::Curve;
 use crate::error::Error;
+use crate::response::{FrequencyResponse, butterworth_stages};
 
 /// The lowest cutoff, in Hz.
 pub const MIN_CUTOFF: f32 = 20.0;
@@ -109,6 +111,24 @@ impl Butterworth {
             running: None,
         })
     }
+}
+
+/// The curve of a filter passing `response`'s side whose parameters stand at `values`, in the
+/// order [`Butterworth`] declares them (cutoff, order).
+fn curve(response: Response, values: &[f32], sample_rate: u32) -> Option<Curve> {
+    let &[cutoff, order] = <&[f32; 2]>::try_from(values).ok()?;
+    let stages = butterworth_stages(response, cutoff, order, sample_rate);
+    Some(Curve::Response(FrequencyResponse::new(sample_rate, stages)))
+}
+
+/// The curve of a `high-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
+pub(crate) fn high_pass_curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+    curve(Response::HighPass, values, sample_rate)
+}
+
+/// The curve of a `low-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
+pub(crate) fn low_pass_curve(values: &[f32], sample_rate: u32) -> Option<Curve> {
+    curve(Response::LowPass, values, sample_rate)
 }
 
 /// The coefficients of an `order`-pole Butterworth filter passing `response`'s side of `cutoff`
@@ -259,6 +279,31 @@ impl Node for Butterworth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_curve_is_3db_down_at_the_cutoff_and_slopes_by_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (kind, cutoff, far) in [("low-pass", 200.0, 1_600.0), ("high-pass", 2_000.0, 250.0)] {
+            for order in 1..=8 {
+                #[allow(clippy::cast_precision_loss)] // a small order
+                let values = [cutoff, order as f32];
+                let Some(Curve::Response(response)) = crate::curve(kind, &values, 48_000) else {
+                    return Err("no response".into());
+                };
+                let at = response.magnitude_db(cutoff).ok_or("above Nyquist")?;
+                assert!((at + 3.0103).abs() < 0.01, "{kind} {order}: {at}");
+                // Three octaves from the cutoff, an octave's fall is close to 6 dB per pole.
+                let a = response.magnitude_db(far).ok_or("above Nyquist")?;
+                let b = response
+                    .magnitude_db(if far > cutoff { far * 2.0 } else { far / 2.0 })
+                    .ok_or("above Nyquist")?;
+                #[allow(clippy::cast_precision_loss)]
+                let expected = 6.02 * order as f32;
+                assert!(((a - b) / expected - 1.0).abs() < 0.12, "{kind} {order}");
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn test_new_declares_ports_and_parameters() -> Result<(), Error> {

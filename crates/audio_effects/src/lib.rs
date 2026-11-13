@@ -10,21 +10,22 @@
 //! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
 //!   stages (`docs/architecture/effects.md` "Parametric equaliser").
 //! - `dynamics`: [`Dynamics`], the compressor, expander, gate and limiter, and
-//!   [`dynamics_curve`], the curve its parameters ask for
-//!   (`docs/architecture/effects.md` "Dynamics").
+//!   [`TransferCurve`], its curve (`docs/architecture/effects.md` "Dynamics").
 //! - `amplifier`: [`Amplifier`], a pre-amp, waveshaper and DC filter with optional
-//!   oversampling, and [`amplifier_curve`], the curve its parameters ask for
-//!   (`docs/architecture/effects.md` "Amplifier").
+//!   oversampling, and [`ShaperCurve`], its curve (`docs/architecture/effects.md` "Amplifier").
 //! - `utility`: [`Bus`], [`Pick`], [`Place`] and [`Silence`].
 //! - `registry`: [`effect`], [`display_name`], [`parameter_infos`] and [`EFFECTS`], the built-in
 //!   effects by kind id, and [`PRESETS`], named starting values for them.
-//! - `response`: [`FrequencyResponse`] and [`frequency_response`], the magnitude response an
-//!   equaliser's parameters ask for, for display.
+//! - `curve`: [`Curve`] and [`curve`], the curve an effect kind's parameter values ask for, for
+//!   display (`docs/architecture/effects.md` "Effect curves").
+//! - `response`: [`FrequencyResponse`], the magnitude response an equaliser's parameters ask
+//!   for.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
 mod amplifier;
+mod curve;
 mod dynamics;
 mod error;
 mod filters;
@@ -34,8 +35,9 @@ mod registry;
 mod response;
 mod utility;
 
-pub use amplifier::{Amplifier, Shape, ShaperCurve, amplifier_curve};
-pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve, dynamics_curve};
+pub use amplifier::{Amplifier, Shape, ShaperCurve};
+pub use curve::{Curve, CurveFn, curve};
+pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use mixer::{Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, parameter_name};
@@ -47,5 +49,5 @@ pub use registry::{
     EFFECTS, EffectKind, PRESETS, Preset, display_name, effect, matching_preset, parameter_infos,
     preset, presets,
 };
-pub use response::{FrequencyResponse, frequency_response};
+pub use response::FrequencyResponse;
 pub use utility::{Bus, Pick, Place, Silence};

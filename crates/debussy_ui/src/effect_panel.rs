@@ -101,8 +101,7 @@ impl App {
             .collect();
         let display = display_area(
             kind,
-            infos,
-            values,
+            &values,
             self.tone(),
             self.sample_rate(),
             self.scale_factor(),
