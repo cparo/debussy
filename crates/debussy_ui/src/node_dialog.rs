@@ -3,11 +3,11 @@
 //! "Gestures", ADR-0089, ADR-0096, ADR-0107). It holds no session: [`NodeDialog::update`] reads
 //! the project through a [`Context`] and returns [`Command`]s for `App` to carry out.
 
-use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
+use audio_effects::{Control, Mode, parameter_name};
 use project_model::{Edit, NodeId, NodeKind, State};
 
 use crate::effect_panel;
-use crate::mixer_strip::{GAIN_STEP_DB, MixerFocus, PAN_STEP, toggled};
+use crate::mixer_strip::{MixerFocus, toggled};
 use crate::node_parameters::{Live, NodeParameters, ParameterCatalog, tab_order};
 
 /// The open dialog's control with the keyboard focus: Tab and Shift-Tab move it, the arrow keys
@@ -443,27 +443,29 @@ impl NodeDialog {
     }
 
     /// Adjusts the focused mixer control by `delta` steps, each recorded as one undo step: the
-    /// channel count by one, gain by [`GAIN_STEP_DB`], pan by [`PAN_STEP`] (up is left).
+    /// channel count by one, gain and pan by their parameters' steps
+    /// ([`NodeParameters::stepped_named`]). Pan is drawn reversed, so up moves it left.
     fn adjust_mixer_focus(&self, cx: &Context<'_>, delta: i32) -> Vec<Command> {
         let (Some((node, _)), Some(focus)) = (mixer(cx), self.mixer_focus()) else {
             return Vec::new();
         };
-        let value_of = |name: &str| self.parameters(cx, node).map_or(0.0, |p| p.value(name));
-        let (name, value) = match focus {
-            MixerFocus::Channels => return vec![Command::StepChannels(node, delta)],
-            MixerFocus::Gain(ch) => {
-                let name = parameter_name(ch, Control::Gain);
-                let gain = value_of(&name);
-                let value = ((gain / GAIN_STEP_DB).round() + delta as f32) * GAIN_STEP_DB;
-                (name, value.clamp(SILENCE_DB, MAX_GAIN_DB))
-            }
-            MixerFocus::Pan(ch) => {
-                let name = parameter_name(ch, Control::Pan);
-                let pan = value_of(&name);
-                let value = ((pan / PAN_STEP).round() - delta as f32) * PAN_STEP;
-                (name, value.clamp(-1.0, 1.0))
-            }
-            MixerFocus::Mute(_) | MixerFocus::Solo(_) => return Vec::new(),
+        if focus == MixerFocus::Channels {
+            return vec![Command::StepChannels(node, delta)];
+        }
+        let Some((control, ch)) = focus.slider() else {
+            return Vec::new();
+        };
+        let delta = if control == Control::Pan {
+            -delta
+        } else {
+            delta
+        };
+        let name = parameter_name(ch, control);
+        let Some(value) = self
+            .parameters(cx, node)
+            .and_then(|p| p.stepped_named(&name, delta))
+        else {
+            return Vec::new();
         };
         self.set_parameter(cx, node, name, value)
     }

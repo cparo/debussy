@@ -2,25 +2,22 @@
 //! solo, then vertical gain and pan sliders with their values as hover tips; and the keyboard
 //! focus that Tab and presses move through them (`docs/architecture/user-interface.md` "Layout").
 
-use audio_effects::{Control, MAX_GAIN_DB, Mode, SILENCE_DB, parameter_name};
+use audio_effects::{Control, Mode, parameter_name};
 use iced::widget::canvas::{Frame, Geometry, Path, Program, Stroke};
 use iced::widget::{
     button, canvas, column, container, row, scrollable, stack, text, text_input, tooltip,
     vertical_slider,
 };
 use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme, mouse};
-use project_model::NodeId;
+use signal_graph::ParameterInfo;
 
 use crate::app::{App, Message};
-use crate::effect_panel::STRIP_SCROLLBAR_GAP;
+use crate::effect_panel::{STRIP_SCROLLBAR_GAP, format_value};
 use crate::focus_target::{focus_target, ringed};
 use crate::node_dialog::{DialogFocus, DialogMessage};
+use crate::node_parameters::NodeParameters;
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
-/// The gain slider's step, and an arrow key's change to it, in dB.
-pub(crate) const GAIN_STEP_DB: f32 = 1.0;
-/// The pan slider's step, and an arrow key's change to it.
-pub(crate) const PAN_STEP: f32 = 0.01;
 /// The id of the "Channels" field, to focus it.
 pub(crate) const CHANNELS_INPUT: &str = "mixer-channels";
 /// An id no widget has: focusing it takes the focus from every text field.
@@ -82,6 +79,16 @@ impl MixerFocus {
             1 => MixerFocus::Solo(ch),
             2 => MixerFocus::Gain(ch),
             _ => MixerFocus::Pan(ch),
+        }
+    }
+
+    /// The control and channel of a gain or pan slider; `None` for any other control. Pan is
+    /// drawn reversed, left at the top, so an up arrow moves it toward lower values.
+    pub(crate) fn slider(self) -> Option<(Control, usize)> {
+        match self {
+            MixerFocus::Gain(ch) => Some((Control::Gain, ch)),
+            MixerFocus::Pan(ch) => Some((Control::Pan, ch)),
+            MixerFocus::Channels | MixerFocus::Mute(_) | MixerFocus::Solo(_) => None,
         }
     }
 
@@ -164,6 +171,52 @@ fn pan_label(pan: f32) -> String {
     }
 }
 
+/// How far `value` is from `min` (0) to `max` (1); 0.5 for an empty range.
+fn fraction(min: f32, max: f32, value: f32) -> f32 {
+    if max > min {
+        (value - min) / (max - min)
+    } else {
+        0.5
+    }
+}
+
+/// A vertical slider `height` tall for parameter `info` of `parameters`, over a tic mark at its
+/// default, from its range and declared step. `reversed` draws the maximum at the bottom.
+fn fader<'a>(
+    parameters: &NodeParameters<'a>,
+    info: &'a ParameterInfo,
+    height: f32,
+    reversed: bool,
+) -> Element<'a, Message> {
+    let id = parameters.node();
+    // A reversed slider runs over the negated range and shows the negated value.
+    let sign = if reversed { -1.0 } else { 1.0 };
+    let (min, max) = if reversed {
+        (-info.max, -info.min)
+    } else {
+        (info.min, info.max)
+    };
+    let value = sign * parameters.value(&info.name);
+    let at = fraction(min, max, sign * info.default);
+    stack![
+        canvas(Tic { at })
+            .width(Length::Fixed(SLIDER_WIDTH))
+            .height(Length::Fixed(height)),
+        vertical_slider(min..=max, value, move |value: f32| {
+            Message::Dialog(DialogMessage::Slide {
+                node: id,
+                name: info.name.clone(),
+                value: sign * value,
+            })
+        })
+        .step(info.step.unwrap_or((max - min) / 1000.0))
+        .on_release(Message::Dialog(DialogMessage::Release))
+        .width(SLIDER_WIDTH)
+        .height(Length::Fixed(height)),
+    ]
+    .into()
+}
+
 /// A small end label for a slider.
 fn label<'a>(s: String) -> Element<'a, Message> {
     text(s).size(LABEL_SIZE).into()
@@ -194,9 +247,14 @@ fn spin<'a>(glyph: &'a str, message: Option<Message>) -> Element<'a, Message> {
 }
 
 impl App {
-    /// Mixer `id`'s controls: a "Channels" field above its `channels` strips, which scroll
-    /// horizontally.
-    pub(crate) fn mixer_panel(&self, id: NodeId, channels: usize) -> Element<'_, Message> {
+    /// The controls of the mixer whose parameters are `parameters`: a "Channels" field above its
+    /// `channels` strips, which scroll horizontally.
+    pub(crate) fn mixer_panel<'a>(
+        &'a self,
+        parameters: &NodeParameters<'a>,
+        channels: usize,
+    ) -> Element<'a, Message> {
+        let id = parameters.node();
         let typed = match &self.node_text {
             Some((node, typed)) if *node == id => typed.clone(),
             _ => format!("{channels}"),
@@ -230,7 +288,7 @@ impl App {
         ]
         .spacing(10)
         .align_y(Alignment::Center);
-        let strips = row((0..channels).map(|ch| self.strip(id, ch))).spacing(4);
+        let strips = row((0..channels).map(|ch| self.strip(parameters, ch))).spacing(4);
         column![
             field,
             // Embedded, so the scrollbar takes its own row below the strips instead of
@@ -243,14 +301,13 @@ impl App {
         .into()
     }
 
-    /// One mixer channel: its number, gain, pan, mute and solo.
-    fn strip(&self, id: NodeId, ch: usize) -> Element<'_, Message> {
+    /// One mixer channel of `parameters`: its number, gain, pan, mute and solo. Gain and pan take
+    /// their range, step, tic and value text from their parameters' metadata.
+    fn strip<'a>(&'a self, parameters: &NodeParameters<'a>, ch: usize) -> Element<'a, Message> {
+        let id = parameters.node();
         let gain_name = parameter_name(ch, Control::Gain);
         let pan_name = parameter_name(ch, Control::Pan);
-        let mode_name = parameter_name(ch, Control::Mode);
-        let gain = self.parameter_value(id, &gain_name);
-        let pan = self.parameter_value(id, &pan_name);
-        let mode = Mode::from_value(self.parameter_value(id, &mode_name));
+        let mode = Mode::from_value(parameters.value(&parameter_name(ch, Control::Mode)));
         let set_mode = |mode: Mode| {
             Message::Dialog(DialogMessage::ToggleMode {
                 node: id,
@@ -259,7 +316,7 @@ impl App {
             })
         };
         // A press on a control focuses it; sliders leave the arrow keys to the focused control.
-        let target = |control: Element<'static, Message>, focus: MixerFocus| {
+        let target = |control: Element<'a, Message>, focus: MixerFocus| {
             ringed(
                 focus_target(
                     control,
@@ -269,60 +326,41 @@ impl App {
                 self.mixer_focus() == Some(focus),
             )
         };
-        let unity = (0.0 - SILENCE_DB) / (MAX_GAIN_DB - SILENCE_DB);
-        let gain_slider = stack![
-            canvas(Tic { at: unity })
-                .width(Length::Fixed(SLIDER_WIDTH))
-                .height(Length::Fixed(GAIN_HEIGHT)),
-            vertical_slider(SILENCE_DB..=MAX_GAIN_DB, gain, move |value| {
-                Message::Dialog(DialogMessage::Slide {
-                    node: id,
-                    name: gain_name.clone(),
-                    value,
-                })
-            })
-            .step(GAIN_STEP_DB)
-            .on_release(Message::Dialog(DialogMessage::Release))
-            .width(SLIDER_WIDTH)
-            .height(Length::Fixed(GAIN_HEIGHT)),
-        ];
-        // The slider runs from right (bottom) to left (top), so it shows the negated pan.
-        let pan_slider = stack![
-            canvas(Tic { at: 0.5 })
-                .width(Length::Fixed(SLIDER_WIDTH))
-                .height(Length::Fixed(PAN_HEIGHT)),
-            vertical_slider(-1.0..=1.0, -pan, move |value: f32| {
-                Message::Dialog(DialogMessage::Slide {
-                    node: id,
-                    name: pan_name.clone(),
-                    value: -value,
-                })
-            })
-            .step(PAN_STEP)
-            .on_release(Message::Dialog(DialogMessage::Release))
-            .width(SLIDER_WIDTH)
-            .height(Length::Fixed(PAN_HEIGHT)),
-        ];
-        let gain_part = column![
-            label(format!("{MAX_GAIN_DB:+}dB")),
-            target(
-                tipped(gain_slider.into(), format!("{gain:.0} dB")),
-                MixerFocus::Gain(ch),
-            ),
-            label(format!("{SILENCE_DB:+}dB")),
-        ]
-        .spacing(LABEL_SPACING)
-        .align_x(Alignment::Center);
-        let pan_part = column![
-            label("L".to_owned()),
-            target(
-                tipped(pan_slider.into(), pan_label(pan)),
-                MixerFocus::Pan(ch)
-            ),
-            label("R".to_owned()),
-        ]
-        .spacing(LABEL_SPACING)
-        .align_x(Alignment::Center);
+        let gain_part: Element<'a, Message> = match parameters.info(&gain_name) {
+            Some(info) => column![
+                label(format!("{:+}{}", info.max, info.unit)),
+                target(
+                    tipped(
+                        fader(parameters, info, GAIN_HEIGHT, false),
+                        format_value(info, parameters.value(&gain_name)),
+                    ),
+                    MixerFocus::Gain(ch),
+                ),
+                label(format!("{:+}{}", info.min, info.unit)),
+            ]
+            .spacing(LABEL_SPACING)
+            .align_x(Alignment::Center)
+            .into(),
+            None => column![].into(),
+        };
+        // Pan is drawn reversed, left at the top (ADR-0089).
+        let pan_part: Element<'a, Message> = match parameters.info(&pan_name) {
+            Some(info) => column![
+                label("L".to_owned()),
+                target(
+                    tipped(
+                        fader(parameters, info, PAN_HEIGHT, true),
+                        pan_label(parameters.value(&pan_name)),
+                    ),
+                    MixerFocus::Pan(ch),
+                ),
+                label("R".to_owned()),
+            ]
+            .spacing(LABEL_SPACING)
+            .align_x(Alignment::Center)
+            .into(),
+            None => column![].into(),
+        };
         let buttons = column![
             target(
                 mode_button("Mute", set_mode(Mode::Mute), mode == Mode::Mute),

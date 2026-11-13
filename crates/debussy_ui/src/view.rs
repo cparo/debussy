@@ -705,7 +705,10 @@ impl App {
             ),
         ];
         let body: Element<'_, Message> = match &node.kind {
-            NodeKind::Mixer { channels, .. } => self.mixer_panel(id, *channels),
+            NodeKind::Mixer { channels, .. } => match self.parameters(id) {
+                Some(parameters) => self.mixer_panel(&parameters, *channels),
+                None => Space::new().into(),
+            },
             NodeKind::FeedbackDelay { seconds, .. } => {
                 let typed = match &self.node_text {
                     Some((node, typed)) if *node == id => typed.clone(),
