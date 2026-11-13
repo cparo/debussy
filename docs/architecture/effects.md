@@ -155,8 +155,9 @@ With `oversampling` on, steps 1 and 2 run at 2 or 4 times the graph's rate insid
 `dsp::Oversampler`: the `Quality::Device` resampler up, the shaper on every sub-sample, the same
 resampler down. Its delay is a whole number of base frames and is the node's latency; at factor 1
 there is no filtering and no latency. `drive` and `makeup` ramp in dB and `bias` ramps linearly,
-per base frame, held over its sub-samples. A change of `shape` crossfades linearly from the old
-shape's output to the new one's over the parameter ramp time.
+per base frame, held over its sub-samples. A change of `shape` crossfades linearly from the mix of
+shapes heard at that moment to the new shape over the parameter ramp time, so a change during a
+fade does not jump.
 
 | Name | Group | Range | Default |
 |---|---|---|---|

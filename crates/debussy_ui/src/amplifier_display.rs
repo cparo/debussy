@@ -99,6 +99,7 @@ fn render(
     #[allow(clippy::cast_precision_loss)]
     let scale = height as f32 / DISPLAY_HEIGHT;
     let mut raster = Raster::with_physical_size(width, height, scale);
+    // `width` is a display's width in physical pixels; at most a few thousand.
     #[allow(clippy::cast_precision_loss)]
     let plot = Plot::new(width as f32 / scale);
     draw_grid(&mut raster, &plot);
@@ -166,6 +167,7 @@ fn draw_curve(mask: &mut Mask, plot: &Plot, curve: &ShaperCurve, scale: f32) {
     let half = CURVE_WIDTH / 2.0;
     let mut previous: Option<(f32, f32)> = None;
     for step in 0..=steps {
+        // `step` and `steps` are at most a few thousand.
         #[allow(clippy::cast_precision_loss)]
         let x = plot.left + plot.width * step as f32 / steps as f32;
         let v = curve.output(plot.input(x));
@@ -217,6 +219,7 @@ mod tests {
 
     /// The pixel at logical `(x, y)`, at scale 1.
     fn pixel(pixels: &Pixels, x: f32, y: f32) -> [u8; 4] {
+        // Test coordinates are small and non-negative.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let i = (y as usize * pixels.width() as usize + x as usize) * 4;
         let p = &pixels.rgba()[i..i + 4];

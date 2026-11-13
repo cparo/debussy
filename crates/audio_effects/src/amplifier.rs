@@ -143,25 +143,47 @@ pub fn amplifier_curve(value: impl Fn(&str) -> f32) -> ShaperCurve {
     }
 }
 
+/// Every shape, in `shape` parameter order.
+const SHAPES_IN_ORDER: [Shape; 3] = [Shape::Warm, Shape::Crunched, Shape::Harsh];
+
+impl Shape {
+    /// The shape's position in [`SHAPES_IN_ORDER`].
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The share of each shape in what is heard, by [`SHAPES_IN_ORDER`] index; the shares sum to 1.
+type Mix = [f32; 3];
+
 /// A prepared amplifier: ramps, the shape crossfade, and each channel's oversampler and DC
 /// filter.
 struct Running {
     sample_rate: u32,
     /// Drive, in dB.
     drive: Ramp,
+    /// Bias, as a sample value.
     bias: Ramp,
     /// Makeup, in dB.
     makeup: Ramp,
-    /// The shape being faded to, and the one being faded from.
+    /// The shape being faded to.
     shape: Shape,
-    previous: Shape,
-    /// How much of `shape` is heard: ramps from 0 to 1 after a change.
-    fade: Ramp,
+    /// The mix heard when the fade began.
+    fading_from: Mix,
+    /// How much of `shape` has replaced `fading_from`: ramps from 0 to 1 after a change.
+    fade_in: Ramp,
     oversamplers: [Oversampler; 2],
     dc: Cascade,
 }
 
 impl Running {
+    /// The mix of shapes for a fade `fade_in` of the way from `fading_from` to `shape`.
+    fn mix(fading_from: &Mix, shape: Shape, fade_in: f32) -> Mix {
+        let mut mix = fading_from.map(|share| share * (1.0 - fade_in));
+        mix[shape.index()] += fade_in;
+        mix
+    }
+
     /// Takes the parameter values, once per block.
     fn set(&mut self, value: impl Fn(Control) -> f32) {
         self.drive.set_target(value(Control::Drive));
@@ -169,13 +191,11 @@ impl Running {
         self.makeup.set_target(value(Control::Makeup));
         let shape = Shape::from_value(value(Control::Shape));
         if shape != self.shape {
-            // A change mid-fade restarts from the shape heard most.
-            if self.fade.current() >= 0.5 {
-                self.previous = self.shape;
-            }
+            // A change mid-fade starts from the mix heard now, so the output does not jump.
+            self.fading_from = Self::mix(&self.fading_from, self.shape, self.fade_in.current());
             self.shape = shape;
-            self.fade = Ramp::new(0.0, self.sample_rate);
-            self.fade.set_target(1.0);
+            self.fade_in = Ramp::new(0.0, self.sample_rate);
+            self.fade_in.set_target(1.0);
         }
     }
 
@@ -184,14 +204,21 @@ impl Running {
         let drive = db_to_gain(self.drive.next_value());
         let bias = self.bias.next_value();
         let makeup = db_to_gain(self.makeup.next_value());
-        let mix = self.fade.next_value();
-        let (shape, previous) = (self.shape, self.previous);
+        let fading = self.fade_in.is_ramping();
+        let fade_in = self.fade_in.next_value();
+        let shape = self.shape;
+        let mix = Self::mix(&self.fading_from, shape, fade_in);
         let shaper = |x: f32| {
             let u = drive * x + bias;
-            if mix >= 1.0 {
-                shape.apply(u)
+            if fading {
+                SHAPES_IN_ORDER
+                    .iter()
+                    .zip(mix)
+                    .filter(|&(_, share)| share > 0.0)
+                    .map(|(s, share)| share * s.apply(u))
+                    .sum()
             } else {
-                mix * shape.apply(u) + (1.0 - mix) * previous.apply(u)
+                shape.apply(u)
             }
         };
         let [left_os, right_os] = &mut self.oversamplers;
@@ -205,7 +232,7 @@ impl Running {
 /// channel. One stereo input and one stereo output.
 ///
 /// `drive` and `makeup` ramp in dB and `bias` ramps linearly; a change of `shape` crossfades
-/// from the old shape to the new one over the ramp time. With `oversampling` on, the shaper runs
+/// from the mix of shapes heard to the new one over the ramp time. With `oversampling` on, the shaper runs
 /// at 2 or 4 times the rate, the ramps holding over each frame's sub-samples; the factor is fixed
 /// when the node is prepared, and the oversampler's delay is the node's latency.
 pub struct Amplifier {
@@ -278,8 +305,8 @@ impl Node for Amplifier {
             bias: ramp(Control::Bias),
             makeup: ramp(Control::Makeup),
             shape,
-            previous: shape,
-            fade: Ramp::new(1.0, sample_rate),
+            fading_from: Running::mix(&[0.0; 3], shape, 1.0),
+            fade_in: Ramp::new(1.0, sample_rate),
             oversamplers: [left, right],
             dc: Cascade::new(Response::HighPass, DC_CUTOFF, DC_ORDER, sample_rate),
         });
@@ -369,6 +396,49 @@ mod tests {
             assert_eq!(amplifier.latency(), expected);
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_set_shape_change_mid_fade_does_not_jump() -> Result<(), Box<dyn std::error::Error>> {
+        let mut amplifier = Amplifier::new()?;
+        amplifier.parameters[Control::Drive as usize].set(12.0);
+        amplifier.prepare(48_000, 64);
+        let parameters = amplifier.parameters.clone();
+        let running = amplifier.running.as_mut().ok_or("not prepared")?;
+        let set = |running: &mut Running| running.set(|c| parameters[c as usize].get());
+        // A steady input deep in the shapes' knees, where they differ most; let the DC filter
+        // settle so only the shaper moves the output.
+        let x = 0.8;
+        let mut last = 0.0;
+        for _ in 0..48_000 {
+            last = running.frame(x, x).0;
+        }
+        let mut largest_step = 0.0_f32;
+        // Warm to harsh, then crunched 300 frames into the 480-frame fade, then back to warm
+        // 100 frames later.
+        for (shape, frames) in [(2.0, 300), (1.0, 100), (0.0, 1000)] {
+            parameters[Control::Shape as usize].set(shape);
+            set(running);
+            for _ in 0..frames {
+                let y = running.frame(x, x).0;
+                largest_step = largest_step.max((y - last).abs());
+                last = y;
+            }
+        }
+        // The shapes differ by about 0.2 here; a fade moves at most that over 480 frames.
+        assert!(largest_step < 2e-3, "{largest_step}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_mix_shares_sum_to_one() {
+        let from = Running::mix(&[0.0; 3], Shape::Warm, 1.0);
+        assert_eq!(from, [1.0, 0.0, 0.0]);
+        let mid = Running::mix(&from, Shape::Harsh, 0.25);
+        assert_eq!(mid, [0.75, 0.0, 0.25]);
+        let again = Running::mix(&mid, Shape::Crunched, 0.5);
+        assert_eq!(again, [0.375, 0.5, 0.125]);
+        assert!((again.iter().sum::<f32>() - 1.0).abs() < 1e-6);
     }
 
     #[test]

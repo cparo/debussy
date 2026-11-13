@@ -206,10 +206,12 @@ mod tests {
                 let mut peak_out = 0.0_f64;
                 let mut error = 0.0_f64;
                 for i in 0..frames {
+                    // Frame counts under a second are exact in `f64`.
                     #[allow(clippy::cast_precision_loss)]
                     let x = (w * i as f64).sin();
                     let y = f64::from(o.process(x as f32, |u| u));
                     if i > frames / 2 {
+                        // As above.
                         #[allow(clippy::cast_precision_loss)]
                         let expected = (w * (i - latency) as f64).sin();
                         peak_in = peak_in.max(expected.abs());

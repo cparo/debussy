@@ -30,8 +30,9 @@ web search, not patent-database queries.
   Butterworth high-pass at 20 Hz. Bias is added after the drive gain, so it sets the operating
   point on the curve independently of drive.
 - Three shapes, each with slope 1 at 0 and bounded by ±1: warm `(2/π)·atan((π/2)·u)`, crunched
-  `tanh(u)`, harsh `clamp(u, −1, 1)`. A change crossfades linearly from the old shape's output to
-  the new one's over the parameter ramp time.
+  `tanh(u)`, harsh `clamp(u, −1, 1)`. A change crossfades linearly from the mix of shapes heard at
+  that moment to the new shape over the parameter ramp time, so a second change mid-fade starts
+  from where the first had got to instead of jumping.
 - The DC filter reuses the filters' `Cascade`; it removes the steady offset `makeup·f(bias)`.
 - Oversampling is `dsp::Oversampler`: the ADR-0036 resampler at `Quality::Device` up and down,
   the downsampler padded to an even length and the chain topped up with a short delay at the high

@@ -8,7 +8,7 @@ use audio_buffers::Layout;
 use audio_effects::effect;
 use dsp::{Complex, RealFft};
 use realtime_guard::{GuardAllocator, assert_realtime};
-use signal_graph::{Config, Graph, NodeId, Runner};
+use signal_graph::{Config, Graph, NodeId, Parameter, Runner};
 
 #[global_allocator]
 static ALLOCATOR: GuardAllocator = GuardAllocator;
@@ -23,6 +23,8 @@ const SIZE: usize = 8192;
 /// A graph of one amplifier node between a stereo source and sink.
 struct Rig {
     graph: Graph,
+    /// The node's parameters, shared with it.
+    parameters: Vec<Parameter>,
     runner: Runner,
     source: NodeId,
     sink: NodeId,
@@ -32,7 +34,8 @@ impl Rig {
     /// An amplifier with the named parameters set before it is prepared.
     fn new(values: &[(&str, f32)]) -> Result<Self, Box<dyn StdError>> {
         let node = effect("amplifier").ok_or("unknown kind")?;
-        for parameter in node.parameters() {
+        let parameters = node.parameters();
+        for parameter in &parameters {
             if let Some(&(_, value)) = values.iter().find(|(n, _)| *n == parameter.info().name) {
                 parameter.set(value);
             }
@@ -46,10 +49,21 @@ impl Rig {
         graph.commit()?;
         Ok(Rig {
             graph,
+            parameters,
             runner,
             source,
             sink,
         })
+    }
+
+    /// Sets parameter `name` to `value`, as the UI does while playing.
+    fn set(&self, name: &str, value: f32) -> TestResult {
+        self.parameters
+            .iter()
+            .find(|p| p.info().name == name)
+            .ok_or("no such parameter")?
+            .set(value);
+        Ok(())
     }
 
     /// Runs `input` through both channels and returns the left output; checks the right
@@ -182,6 +196,31 @@ fn test_latency_is_the_oversamplers() -> TestResult {
             .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
             .map(|(i, _)| i);
         assert_eq!(peak, Some(1000 + latency), "{oversampling}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_shape_changes_while_playing_crossfade_without_a_click() -> TestResult {
+    for oversampling in [0.0, 1.0, 2.0] {
+        let mut rig = Rig::new(&[("drive", 12.0), ("oversampling", oversampling)])?;
+        // A slow sine, so the steady output moves little from one frame to the next.
+        let input = sine(8, 0.8);
+        let mut output = rig.render(&input[..24_000])?;
+        // Harsh, then crunched two blocks into its 480-frame fade, then warm one block later.
+        for (shape, start, end) in [
+            (2.0, 24_000, 24_256),
+            (1.0, 24_256, 24_384),
+            (0.0, 24_384, 26_000),
+        ] {
+            rig.set("shape", shape)?;
+            output.extend(rig.render(&input[start..end])?);
+        }
+        let largest_step = output[23_000..]
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(largest_step < 0.03, "{oversampling}: {largest_step}");
     }
     Ok(())
 }

@@ -56,9 +56,8 @@ same mapping processing uses. Ballistics, lookahead and the detector mode are no
 ## Amplifier display
 
 `amplifier` has `AmplifierDisplay` (`crates/debussy_ui/src/amplifier_display.rs`), which plots the
-static curve its parameter values ask for, as `audio_effects::amplifier_curve` gives it: output
-`makeup·(f(drive·x + bias) − f(bias))` over input sample `x`, so it always passes through the
-origin. The DC filter's response and oversampling are not shown.
+static curve its parameter values ask for, as `audio_effects::amplifier_curve` gives it (see
+`docs/architecture/effects.md` "Amplifier"): output over input sample, passing through the origin. The DC filter's response and oversampling are not shown.
 
 - Both axes are linear in sample value, from −10^(3/20) to +10^(3/20) (±3 dBFS). Gutters, label
   size and curve are as in "Equaliser displays".
