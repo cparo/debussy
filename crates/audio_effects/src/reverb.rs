@@ -49,7 +49,7 @@ fn info(control: Control) -> ParameterInfo {
                     ALGORITHMS.iter().map(|&a| a.to_owned()).collect(),
                 ))
                 .stopped_only()
-                .with_group("algorithm")
+                .with_group("type")
         }
         Control::PreDelay => ParameterInfo::new("pre-delay", 0.0, MAX_PRE_DELAY_MS, 10.0)
             .with_unit("ms")
@@ -725,7 +725,7 @@ mod tests {
         let names: Vec<&str> = infos.iter().map(|i| i.name.as_str()).collect();
         assert_eq!(names, ["algorithm", "pre-delay", "decay", "damping", "mix"]);
         let groups: Vec<&str> = infos.iter().map(|i| i.group.as_str()).collect();
-        assert_eq!(groups, ["algorithm", "time", "time", "tone", "output"]);
+        assert_eq!(groups, ["type", "time", "time", "tone", "output"]);
         let algorithm = &infos[Control::Algorithm as usize];
         assert!(algorithm.stopped_only && !algorithm.sets_latency);
         assert_eq!(infos.iter().filter(|i| i.stopped_only).count(), 1);

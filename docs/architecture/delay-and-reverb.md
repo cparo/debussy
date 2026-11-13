@@ -9,8 +9,8 @@ range at the graph's rate, allocated when the node is prepared. Per frame and ch
 1. **Read.** `y` from the tap. While the tap changes, `y` is a linear crossfade from the old tap
    to the new over the parameter ramp time, with no pitch glide; a change during a crossfade
    waits for it to end.
-2. **Feedback path.** `y` through a 2nd-order TPT state-variable low-pass at `low-pass` Hz,
-   Q 0.707 (see `docs/architecture/effects.md` "Filters"), weighted by its share; then `tanh`
+2. **Feedback path.** `y` through a first-order TPT one-pole low-pass at `low-pass` Hz (see
+   `docs/architecture/effects.md` "Filters"), weighted by its share; then `tanh`
    (`audio_effects::Shape::Crunched`), weighted by its share; then × `feedback`.
 3. **Write.** In stereo mode, each channel writes its input plus its own feedback. In ping-pong,
    the left line writes the input folded to mono, `(L + R) × 0.7071`, plus the right line's
@@ -41,7 +41,8 @@ is 0, and there is no curve.
 
 Presets: Slapback (110 ms, 10 % feedback, 35 % mix), Ping-pong (synced dotted 1/8, ping-pong,
 45 % feedback), Dub echo (synced 1/4, 70 % feedback, low-pass at 2 kHz, saturation, 40 % mix)
-([ADR-0112](../adrs/0112-the-delay-reads-whole-frame-taps-from-a-4-second.md)).
+([ADR-0112](../adrs/0112-the-delay-reads-whole-frame-taps-from-a-4-second.md),
+[ADR-0114](../adrs/0114-the-delay-s-feedback-low-pass-is-a-first-order-one.md)).
 
 ## Reverb
 
@@ -76,7 +77,7 @@ both, and the two never run together. Latency is 0, and there is no curve.
 
 | Name | Group | Range | Default |
 |---|---|---|---|
-| `algorithm` | algorithm | room (0), plate (1); stopped-only | room |
+| `algorithm` | type | room (0), plate (1); stopped-only | room |
 | `pre-delay` | time | 0 to 200 ms | 10 |
 | `decay` | time | 0.2 to 20 s, logarithmic, time to fall 60 dB | 2 |
 | `damping` | tone | 1 to 20 kHz, logarithmic | 8 kHz |

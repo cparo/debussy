@@ -1,6 +1,6 @@
 # ADR-0112 — The delay reads whole-frame taps from a 4-second line, free or tempo-synced, with a crossfade on time change and an optional low-pass and saturation in its feedback
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0114
 - **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-13
 - **Issue:** #61

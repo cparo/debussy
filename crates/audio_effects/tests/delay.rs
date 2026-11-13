@@ -250,3 +250,27 @@ fn test_delay_low_pass_darkens_later_repeats() -> TestResult {
     assert!(fourth < first * 1e-3, "{first} {fourth}");
     Ok(())
 }
+
+#[test]
+fn test_delay_low_pass_is_first_order() -> TestResult {
+    let mut rig = Rig::new(&[
+        WET[0],
+        WET[1],
+        ("feedback", 100.0),
+        ("low-pass enabled", 1.0),
+        ("low-pass", 1_000.0),
+    ])?;
+    let input = impulse(3 * TAP);
+    let (left, _) = rig.render(&input, &input)?;
+    // The second repeat has passed the low-pass once.
+    let window = &left[2 * TAP..2 * TAP + 4096];
+    let mut fft = RealFft::new(window.len())?;
+    let mut bins = vec![Complex::default(); fft.bins()];
+    fft.forward(window, &mut bins)?;
+    // Bins 341 and 683 are 4 and 8 kHz, to within 6 Hz.
+    let db = |bin: usize| 20.0 * bins[bin].abs().log10();
+    let fall = db(341) - db(683);
+    // One pole falls about 6.5 dB over this octave at 48 kHz; two would fall over 12.
+    assert!((5.5..8.0).contains(&fall), "{fall}");
+    Ok(())
+}

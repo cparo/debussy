@@ -108,7 +108,8 @@ fn preset_picker<'a>(parameters: &NodeParameters<'_>, kind: &str) -> Option<Elem
         Message::Dialog(DialogMessage::ApplyPreset { node: id, preset })
     })
     .placeholder("Custom")
-    .text_size(12);
+    .text_size(12)
+    .width(Length::Fill);
     Some(
         column![text("Preset").size(12), picker]
             .spacing(4)
@@ -196,6 +197,7 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
                 set(index as f32)
             })
             .text_size(12)
+            .width(Length::Fill)
             .into()
         }
         // A toggle is a button unless frozen.
