@@ -7,13 +7,14 @@ use iced::Color;
 use crate::effect_display::{DISPLAY_HEIGHT, DisplayContext, Pixels};
 use crate::raster::Raster;
 use crate::stroke::Mask;
-use crate::typeface::Typeface;
+use crate::theme::LABEL;
+use crate::typeface::{StrokeFont, Typeface};
 
 /// The left gutter, for the vertical axis's labels, in logical pixels.
-pub(crate) const LEFT: f32 = 46.0;
+pub(crate) const LEFT_GUTTER: f32 = 46.0;
 
 /// The gutter below the plot, for the horizontal axis's labels, in logical pixels.
-pub(crate) const BOTTOM: f32 = 20.0;
+pub(crate) const BOTTOM_GUTTER: f32 = 20.0;
 
 /// The labels' capital height, in logical pixels.
 pub(crate) const LABEL_SIZE: f32 = 9.0;
@@ -26,6 +27,10 @@ pub(crate) const CURVE_WIDTH: f32 = 2.0;
 
 /// The grid lines' width, in logical pixels.
 pub(crate) const GRID_WIDTH: f32 = 1.0;
+
+/// How far a label's capitals are kept below the frame's top, in logical pixels: room for the
+/// label strokes' half-width.
+pub(crate) const LABEL_INSET: f32 = 1.0;
 
 /// The space a label needs between its neighbours' to be shown at every mark, as a multiple of
 /// the widest label's extent along the axis; with less, every other mark is labelled.
@@ -144,13 +149,13 @@ pub(crate) struct Plot {
 
 impl Plot {
     /// The plot in a display `width` logical pixels wide and [`DISPLAY_HEIGHT`] tall: inside the
-    /// [`LEFT`] and [`BOTTOM`] gutters, running to the top and right edges.
+    /// [`LEFT_GUTTER`] and [`BOTTOM_GUTTER`] gutters, running to the top and right edges.
     pub(crate) fn new(width: f32, x_axis: Axis, y_axis: Axis) -> Plot {
         Plot {
-            left: LEFT,
+            left: LEFT_GUTTER,
             top: 0.0,
-            width: (width - LEFT).max(1.0),
-            height: DISPLAY_HEIGHT - BOTTOM,
+            width: (width - LEFT_GUTTER).max(1.0),
+            height: DISPLAY_HEIGHT - BOTTOM_GUTTER,
             x_axis,
             y_axis,
         }
@@ -223,19 +228,58 @@ impl Canvas {
         Plot::new(self.width as f32 / self.scale, x_axis, y_axis)
     }
 
-    /// The raster, to draw on directly (with [`grid`], for one).
-    pub(crate) fn raster(&mut self) -> &mut Raster {
-        &mut self.raster
+    /// Grid lines across the whole plot: a vertical line at each of `verticals` (a
+    /// horizontal-axis value and its colour) and a horizontal one at each of `horizontals`. A line
+    /// on the plot's edge is moved inward to show its whole width.
+    pub(crate) fn grid(
+        &mut self,
+        plot: &Plot,
+        verticals: &[(f32, Color)],
+        horizontals: &[(f32, Color)],
+    ) {
+        let half = GRID_WIDTH / 2.0;
+        for &(v, color) in verticals {
+            let x = (plot.x(v) - half).clamp(plot.left, plot.right() - GRID_WIDTH);
+            self.raster
+                .fill_rect(x, plot.top, GRID_WIDTH, plot.height, color);
+        }
+        for &(v, color) in horizontals {
+            let y = (plot.y(v) - half).clamp(plot.top, plot.bottom() - GRID_WIDTH);
+            self.raster
+                .fill_rect(plot.left, y, plot.width, GRID_WIDTH, color);
+        }
+    }
+
+    /// The `below` and `left` marks' labels, placed by [`labels`] and drawn in [`StrokeFont`] in
+    /// the label colour.
+    pub(crate) fn labels<B: AsRef<str>, L: AsRef<str>>(
+        &mut self,
+        plot: &Plot,
+        below: &[(f32, B)],
+        left: &[(f32, L)],
+    ) {
+        let mut mask = self.mask();
+        for label in labels(plot, &StrokeFont, below, left) {
+            StrokeFont.draw(&mut mask, &label.text, label.x, label.baseline, LABEL_SIZE);
+        }
+        self.raster.paint(&mask, LABEL);
+    }
+
+    /// The curve through `points`, drawn by [`polyline`] in `color`.
+    pub(crate) fn curve(
+        &mut self,
+        plot: &Plot,
+        points: impl IntoIterator<Item = (f32, f32)>,
+        color: Color,
+    ) {
+        let mut mask = self.mask();
+        polyline(&mut mask, plot, points);
+        self.raster.paint(&mask, color);
     }
 
     /// An empty mask for a new layer, of this canvas's size.
-    pub(crate) fn mask(&self) -> Mask {
+    fn mask(&self) -> Mask {
         Mask::new(self.width, self.height, self.scale)
-    }
-
-    /// Paints `mask` in `color` over the picture so far.
-    pub(crate) fn paint(&mut self, mask: &Mask, color: Color) {
-        self.raster.paint(mask, color);
     }
 
     /// The finished picture.
@@ -243,26 +287,6 @@ impl Canvas {
         let width = u32::try_from(self.width).ok()?;
         let height = u32::try_from(self.height).ok()?;
         Pixels::new(width, height, self.raster.into_rgba8())
-    }
-}
-
-/// Grid lines across the whole plot: a vertical line at each of `columns` (a horizontal-axis
-/// value and its colour) and a horizontal one at each of `rows`. A line on the plot's edge is
-/// moved inward to show its whole width.
-pub(crate) fn grid(
-    raster: &mut Raster,
-    plot: &Plot,
-    columns: &[(f32, Color)],
-    rows: &[(f32, Color)],
-) {
-    let half = GRID_WIDTH / 2.0;
-    for &(v, color) in columns {
-        let x = (plot.x(v) - half).clamp(plot.left, plot.right() - GRID_WIDTH);
-        raster.fill_rect(x, plot.top, GRID_WIDTH, plot.height, color);
-    }
-    for &(v, color) in rows {
-        let y = (plot.y(v) - half).clamp(plot.top, plot.bottom() - GRID_WIDTH);
-        raster.fill_rect(plot.left, y, plot.width, GRID_WIDTH, color);
     }
 }
 
@@ -282,16 +306,27 @@ fn thinned<S: AsRef<str>>(
     sorted.into_iter().step_by(every).collect()
 }
 
-/// Each label and where it goes: `(text, x, baseline)` in logical pixels. The `below` marks (a
-/// horizontal-axis value and its text) are centred under the plot on their values; the `left`
-/// marks are right-aligned in the left gutter, centred on theirs. Crowded marks on either axis
-/// are thinned to every other one from the low end, and every label is kept inside the frame.
+/// A label and where it goes, in logical pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Label {
+    /// The text.
+    pub(crate) text: String,
+    /// Where its first glyph starts.
+    pub(crate) x: f32,
+    /// The baseline it sits on.
+    pub(crate) baseline: f32,
+}
+
+/// Each label and where it goes. The `below` marks (a horizontal-axis value and its text) are
+/// centred under the plot on their values; the `left` marks are right-aligned in the left gutter,
+/// centred on theirs. Crowded marks on either axis are thinned to every other one from the low
+/// end, and every label is kept inside the frame.
 pub(crate) fn labels<B: AsRef<str>, L: AsRef<str>>(
     plot: &Plot,
     face: &dyn Typeface,
     below: &[(f32, B)],
     left: &[(f32, L)],
-) -> Vec<(String, f32, f32)> {
+) -> Vec<Label> {
     let mut labels = Vec::new();
     let widest = below
         .iter()
@@ -304,26 +339,25 @@ pub(crate) fn labels<B: AsRef<str>, L: AsRef<str>>(
         let x = (plot.x(*v) - advance / 2.0)
             .min(plot.right() - advance)
             .max(plot.left);
-        labels.push((text.to_owned(), x, baseline));
+        labels.push(Label {
+            text: text.to_owned(),
+            x,
+            baseline,
+        });
     }
-    // The stroke's half-width, kept inside the frame too.
-    let margin = 1.0;
     for (v, text) in thinned(left, |v| plot.y(v), LABEL_SIZE) {
         let text = text.as_ref();
         let x = plot.left - LABEL_GAP - face.advance(text, LABEL_SIZE);
         let baseline = (plot.y(*v) + LABEL_SIZE / 2.0)
             .min(plot.bottom() + LABEL_SIZE / 2.0)
-            .max(plot.top + LABEL_SIZE + margin);
-        labels.push((text.to_owned(), x, baseline));
+            .max(plot.top + LABEL_SIZE + LABEL_INSET);
+        labels.push(Label {
+            text: text.to_owned(),
+            x,
+            baseline,
+        });
     }
     labels
-}
-
-/// Draws `labels` (from [`labels`]) into `mask` in `face`.
-pub(crate) fn draw_labels(mask: &mut Mask, face: &dyn Typeface, labels: &[(String, f32, f32)]) {
-    for (text, x, baseline) in labels {
-        face.draw(mask, text, *x, *baseline, LABEL_SIZE);
-    }
 }
 
 /// The `x` of each sample across the plot, twice per physical column at `scale`, from its left
@@ -397,7 +431,6 @@ pub(crate) mod probe {
 mod tests {
     use super::*;
     use crate::theme::{GRID, Tone};
-    use crate::typeface::StrokeFont;
 
     /// The plot of a display `width` logical pixels wide, a log axis across and dB up.
     fn log_plot(width: f32) -> Plot {
@@ -405,8 +438,8 @@ mod tests {
     }
 
     /// Asserts every label lies inside a display `width` wide.
-    fn assert_in_frame(labels: &[(String, f32, f32)], width: f32) {
-        for (text, x, baseline) in labels {
+    fn assert_in_frame(labels: &[Label], width: f32) {
+        for Label { text, x, baseline } in labels {
             let right = x + StrokeFont.advance(text, LABEL_SIZE);
             assert!(
                 *x >= 0.0 && right <= width + 1e-3,
@@ -422,10 +455,10 @@ mod tests {
     #[test]
     fn test_plot_linear_axes_hit_the_corners() {
         let plot = Plot::new(600.0, Axis::linear(-2.0, 2.0), Axis::decibels());
-        assert!((plot.x(-2.0) - LEFT).abs() < 1e-3);
+        assert!((plot.x(-2.0) - LEFT_GUTTER).abs() < 1e-3);
         assert!((plot.x(2.0) - 600.0).abs() < 1e-3);
         assert!(plot.y(TOP_DB).abs() < 1e-3);
-        assert!((plot.y(BOTTOM_DB) - (DISPLAY_HEIGHT - BOTTOM)).abs() < 1e-3);
+        assert!((plot.y(BOTTOM_DB) - (DISPLAY_HEIGHT - BOTTOM_GUTTER)).abs() < 1e-3);
         assert!((plot.x_value(plot.x(0.3)) - 0.3).abs() < 1e-5);
         assert_eq!((plot.top, plot.right()), (0.0, 600.0));
     }
@@ -433,7 +466,7 @@ mod tests {
     #[test]
     fn test_plot_log_axis_hits_the_corners_and_round_trips() {
         let plot = log_plot(600.0);
-        assert!((plot.x(20.0) - LEFT).abs() < 1e-3);
+        assert!((plot.x(20.0) - LEFT_GUTTER).abs() < 1e-3);
         assert!((plot.x(20_000.0) - 600.0).abs() < 1e-3);
         // A decade takes a third of the width.
         assert!((plot.x(200.0) - plot.x(20.0) - plot.width / 3.0).abs() < 1e-3);
@@ -470,21 +503,49 @@ mod tests {
     #[test]
     fn test_labels_thin_from_the_low_end_when_crowded() {
         let marks = db_marks();
-        let count = |width: f32| {
+        let texts_at = |width: f32| -> Vec<String> {
             let plot = Plot::new(width, Axis::decibels(), Axis::decibels());
-            let labels = labels(&plot, &StrokeFont, &marks, &[] as &[(f32, &str)]);
-            let texts: Vec<String> = labels.into_iter().map(|(t, _, _)| t).collect();
-            texts
+            labels(&plot, &StrokeFont, &marks, &[] as &[(f32, &str)])
+                .into_iter()
+                .map(|label| label.text)
+                .collect()
         };
-        let wide = count(600.0);
+        let wide = texts_at(600.0);
         assert_eq!(wide.len(), 10);
-        let narrow = count(260.0);
+        let narrow = texts_at(260.0);
         assert_eq!(narrow.len(), 5);
         assert_eq!(narrow.first().map(String::as_str), Some("\u{2212}96dB"));
         // The vertical axis is never crowded at the display's height.
         let plot = Plot::new(600.0, Axis::decibels(), Axis::decibels());
         let left = labels(&plot, &StrokeFont, &[] as &[(f32, &str)], &marks);
         assert_eq!(left.len(), 10);
+    }
+
+    #[test]
+    fn test_labels_thin_exactly_at_the_label_room() {
+        // A plot 300 logical pixels each way, values 0 to 1 on both axes.
+        let plot = Plot::new(
+            LEFT_GUTTER + 300.0,
+            Axis::linear(0.0, 1.0),
+            Axis::linear(0.0, 1.0),
+        );
+        let none: &[(f32, &str)] = &[];
+        // Three marks `gap` logical pixels apart along an axis 300 long.
+        let marks = |gap: f32| {
+            [
+                (0.0, "0dB"),
+                (gap / 300.0, "0dB"),
+                (2.0 * gap / 300.0, "0dB"),
+            ]
+        };
+        let room = StrokeFont.advance("0dB", LABEL_SIZE) * LABEL_ROOM;
+        let below = |gap: f32| labels(&plot, &StrokeFont, &marks(gap), none).len();
+        assert_eq!(below(room + 0.1), 3);
+        assert_eq!(below(room - 0.1), 2);
+        // The vertical axis's extent is the label's height.
+        let left = |gap: f32| labels(&plot, &StrokeFont, none, &marks(gap)).len();
+        assert_eq!(left(LABEL_SIZE * LABEL_ROOM + 0.1), 3);
+        assert_eq!(left(LABEL_SIZE * LABEL_ROOM - 0.1), 2);
     }
 
     #[test]
@@ -536,7 +597,9 @@ mod tests {
         assert!((canvas.scale() - 1.5).abs() < 1e-6);
         let plot = canvas.plot(Axis::decibels(), Axis::decibels());
         assert!((plot.right() - 600.0).abs() < 1e-3);
-        grid(canvas.raster(), &plot, &[(0.0, GRID)], &[(0.0, GRID)]);
+        canvas.grid(&plot, &[(0.0, GRID)], &[(0.0, GRID)]);
+        canvas.labels(&plot, &db_marks(), &db_marks());
+        canvas.curve(&plot, [(0.0, 0.0), (600.0, 300.0)], GRID);
         let pixels = canvas.finish().ok_or("no picture")?;
         assert_eq!((pixels.width(), pixels.height()), (900, 480));
         assert_eq!(pixels.rgba().len(), 900 * 480 * 4);

@@ -5,9 +5,8 @@
 use audio_effects::{ShaperCurve, amplifier_curve};
 
 use crate::effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
-use crate::plot::{Axis, Canvas, columns, draw_labels, grid, labels, polyline};
-use crate::theme::{self, FULL_SCALE, GRID, LABEL};
-use crate::typeface::StrokeFont;
+use crate::plot::{Axis, Canvas, columns};
+use crate::theme::{self, FULL_SCALE, GRID};
 
 /// The axes' extent each way from 0: +3 dBFS as a sample value, 10^(3/20).
 const EDGE: f32 = 1.412_537_5;
@@ -19,7 +18,7 @@ const MARKS: [(f32, &str); 4] = [(-EDGE, "+3dB"), (-1.0, "0dB"), (1.0, "0dB"), (
 const LINES: [(f32, iced::Color); 3] = [(0.0, GRID), (-1.0, FULL_SCALE), (1.0, FULL_SCALE)];
 
 /// Each axis: sample values from −[`EDGE`] to [`EDGE`].
-fn samples() -> Axis {
+fn sample_axis() -> Axis {
     Axis::linear(-EDGE, EDGE)
 }
 
@@ -46,22 +45,14 @@ impl EffectDisplay for AmplifierDisplay {
 /// output sample up.
 fn render(curve: &ShaperCurve, context: &DisplayContext<'_>) -> Option<Pixels> {
     let mut canvas = Canvas::new(context)?;
-    let plot = canvas.plot(samples(), samples());
-    grid(canvas.raster(), &plot, &LINES, &LINES);
-    let mut text = canvas.mask();
-    draw_labels(
-        &mut text,
-        &StrokeFont,
-        &labels(&plot, &StrokeFont, &MARKS, &MARKS),
-    );
-    canvas.paint(&text, LABEL);
-    let mut line = canvas.mask();
+    let plot = canvas.plot(sample_axis(), sample_axis());
+    canvas.grid(&plot, &LINES, &LINES);
+    canvas.labels(&plot, &MARKS, &MARKS);
     let points = columns(&plot, canvas.scale()).map(|x| {
         let v = curve.output(plot.x_value(x));
         (x, plot.y(if v.is_nan() { 0.0 } else { v }))
     });
-    polyline(&mut line, &plot, points);
-    canvas.paint(&line, theme::tokens(context.tone).audio);
+    canvas.curve(&plot, points, theme::tokens(context.tone).audio);
     canvas.finish()
 }
 
@@ -74,7 +65,7 @@ mod tests {
 
     /// The plot of a display 600 logical pixels wide.
     fn plot() -> Plot {
-        Plot::new(600.0, samples(), samples())
+        Plot::new(600.0, sample_axis(), sample_axis())
     }
 
     /// The display at the `amplifier` defaults, with `changes` by name, 600 pixels wide at

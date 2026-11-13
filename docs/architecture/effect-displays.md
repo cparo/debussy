@@ -64,8 +64,8 @@ the curve, makeup and the ceiling if it is on, as `audio_effects::dynamics_curve
 same mapping processing uses. Ballistics, lookahead and the detector mode are not shown.
 
 - Axes are fixed: input from −96 dBFS at the left to +12 dBFS at the right, output from +12 dBFS at
-  the top to −96 dBFS at the bottom, drawn as in "Display plots". Grid lines, the same grey as in
-  "Equaliser displays", run every 12 dB on both axes, with gain labels on both.
+  the top to −96 dBFS at the bottom, drawn as in "Display plots". Grey grid lines, the same in both
+  tones, run every 12 dB on both axes, with gain labels on both.
 - The 0 dBFS lines of both axes are 1 logical pixel wide and red (`#D03030`) in both tones, in
   place of the brighter 0 dB grey.
 - An undefined output level is drawn at −96 dBFS; levels beyond the axes, such as a gate's

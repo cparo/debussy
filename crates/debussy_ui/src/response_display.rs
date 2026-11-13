@@ -6,11 +6,8 @@ use audio_effects::{FrequencyResponse, frequency_response};
 use iced::Color;
 
 use crate::effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
-use crate::plot::{
-    Axis, BOTTOM_DB, Canvas, Plot, columns, db_lines, db_marks, draw_labels, grid, labels, polyline,
-};
-use crate::theme::{self, GRID, GRID_ZERO, LABEL};
-use crate::typeface::StrokeFont;
+use crate::plot::{Axis, BOTTOM_DB, Canvas, Plot, columns, db_lines, db_marks};
+use crate::theme::{self, GRID, GRID_ZERO};
 
 /// The frequencies of the vertical grid lines, in Hz, and their labels.
 const FREQUENCY_LINES: [(f32, &str); 10] = [
@@ -57,14 +54,10 @@ fn render(response: &FrequencyResponse, context: &DisplayContext<'_>) -> Option<
     let horizontals: Vec<(f32, Color)> = db_lines()
         .map(|db| (db, if db == 0.0 { GRID_ZERO } else { GRID }))
         .collect();
-    grid(canvas.raster(), &plot, &verticals, &horizontals);
-    let mut text = canvas.mask();
-    let placed = labels(&plot, &StrokeFont, &FREQUENCY_LINES, &db_marks());
-    draw_labels(&mut text, &StrokeFont, &placed);
-    canvas.paint(&text, LABEL);
-    let mut line = canvas.mask();
-    polyline(&mut line, &plot, points(&plot, response, canvas.scale()));
-    canvas.paint(&line, theme::tokens(context.tone).audio);
+    canvas.grid(&plot, &verticals, &horizontals);
+    canvas.labels(&plot, &FREQUENCY_LINES, &db_marks());
+    let points = points(&plot, response, canvas.scale());
+    canvas.curve(&plot, points, theme::tokens(context.tone).audio);
     canvas.finish()
 }
 
@@ -93,7 +86,7 @@ fn points(plot: &Plot, response: &FrequencyResponse, scale: f32) -> Vec<(f32, f3
 mod tests {
     use super::*;
     use crate::effect_display::DISPLAY_HEIGHT;
-    use crate::plot::{BOTTOM, LEFT};
+    use crate::plot::{BOTTOM_GUTTER, LEFT_GUTTER};
     use crate::theme::Tone;
 
     /// A context for `kind` at scale 1, 600 pixels wide.
@@ -145,7 +138,7 @@ mod tests {
             .enumerate()
             .filter(|(i, p)| {
                 let x = (i % width) as f32;
-                x > LEFT + 4.0 && x < 600.0 - 4.0 && p[3] > 0 && p[0] != p[2]
+                x > LEFT_GUTTER + 4.0 && x < 600.0 - 4.0 && p[3] > 0 && p[0] != p[2]
             })
             .map(|(i, _)| i / width)
             .collect()
@@ -179,7 +172,7 @@ mod tests {
         let pixels = draw("parametric-eq", &values).ok_or("no picture")?;
         let lowest = accent_rows(&pixels).into_iter().max().ok_or("no curve")?;
         assert!(
-            lowest as f32 >= DISPLAY_HEIGHT - BOTTOM - 1.0,
+            lowest as f32 >= DISPLAY_HEIGHT - BOTTOM_GUTTER - 1.0,
             "lowest {lowest}"
         );
         Ok(())

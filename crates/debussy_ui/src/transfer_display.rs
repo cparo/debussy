@@ -6,11 +6,8 @@ use audio_effects::{TransferCurve, dynamics_curve};
 use iced::Color;
 
 use crate::effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
-use crate::plot::{
-    Axis, BOTTOM_DB, Canvas, columns, db_lines, db_marks, draw_labels, grid, labels, polyline,
-};
-use crate::theme::{self, FULL_SCALE, GRID, LABEL};
-use crate::typeface::StrokeFont;
+use crate::plot::{Axis, BOTTOM_DB, Canvas, columns, db_lines, db_marks};
+use crate::theme::{self, FULL_SCALE, GRID};
 
 /// The display of the `dynamics` kind: its transfer curve.
 pub(crate) struct TransferDisplay;
@@ -39,22 +36,13 @@ fn render(curve: &TransferCurve, context: &DisplayContext<'_>) -> Option<Pixels>
     let lines: Vec<(f32, Color)> = db_lines()
         .map(|db| (db, if db == 0.0 { FULL_SCALE } else { GRID }))
         .collect();
-    grid(canvas.raster(), &plot, &lines, &lines);
-    let mut text = canvas.mask();
-    let marks = db_marks();
-    draw_labels(
-        &mut text,
-        &StrokeFont,
-        &labels(&plot, &StrokeFont, &marks, &marks),
-    );
-    canvas.paint(&text, LABEL);
-    let mut line = canvas.mask();
+    canvas.grid(&plot, &lines, &lines);
+    canvas.labels(&plot, &db_marks(), &db_marks());
     let points = columns(&plot, canvas.scale()).map(|x| {
         let db = curve.output_db(plot.x_value(x));
         (x, plot.y(if db.is_nan() { BOTTOM_DB } else { db }))
     });
-    polyline(&mut line, &plot, points);
-    canvas.paint(&line, theme::tokens(context.tone).audio);
+    canvas.curve(&plot, points, theme::tokens(context.tone).audio);
     canvas.finish()
 }
 
