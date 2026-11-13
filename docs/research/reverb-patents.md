@@ -476,3 +476,16 @@ forward, all Lexicon/Harman room-enhancement and loudspeaker patents, none opene
 - The US8345887B1 page printed only a partial citing list; its forward citations were not read.
 - Term end dates are as Google prints them; terminal disclaimers and adjustments not otherwise
   seen. Rows 8 and 9 are applications, so any term depends on grant.
+
+## Decision
+
+Chris Paro, 2026-11-13, through `flag-risk` (tag `patent`), to be recorded in the reverb's ADR:
+
+- **US10559295B1 (Reads):** no `size` parameter; each algorithm's delay lengths are fixed,
+  scaled only by the sample rate.
+- **US8345887B1 (Unclear):** the Room takes its L/R outputs from the delay-line outputs before
+  the Hadamard matrix, with ± sign patterns, not from the matrix's output vector.
+- **US10311845B2, EP4468748A1 (Unclear):** `algorithm` is stopped-only and a change replaces the
+  node; the two engines never run together and there is no crossfade.
+- **US8351614B2 (Unclear for the plate):** the Dattorro plate is kept, accepting the
+  claim-construction risk, with Dattorro 1997 as prior art.
