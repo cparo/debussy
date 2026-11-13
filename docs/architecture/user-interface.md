@@ -213,6 +213,11 @@ declared default. Every reader of a node's parameters, from its controls, displa
 arrow keys to the stopped-only guard, reads one view over static metadata, never the running graph
 ([ADR-0106](../adrs/0106-a-node-s-parameters-as-shown-come-from-one-view.md)).
 
+A mixer's or effect's dialog messages go to one dialog module, which holds the dialog's keyboard
+focus and the slider being dragged. It reads the project without changing it and returns the
+edits, live values and status text that `App` applies
+([ADR-0107](../adrs/0107-the-node-dialog-is-a-module-that-owns-its-focus.md)).
+
 ## Range selection and shortcuts
 
 A press in a lane seeks there, makes its track the current track, and clears the range selection.

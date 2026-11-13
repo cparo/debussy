@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use audio_effects::Preset;
-use project_model::{Edit, NodeId};
+use project_model::{Edit, NodeId, NodeKind, State};
 use signal_graph::{ParameterInfo, Scale};
 
 /// The share of a slider's range (of its logarithm, if logarithmic) an arrow key moves it.
@@ -17,6 +17,60 @@ pub(crate) struct Live {
     pub node: NodeId,
     pub name: String,
     pub value: f32,
+}
+
+/// Every mixer's and built-in effect's parameters, read once at launch.
+#[derive(Debug)]
+pub(crate) struct ParameterCatalog {
+    /// Each built-in effect kind's parameters.
+    effects: BTreeMap<&'static str, Vec<ParameterInfo>>,
+    /// The parameters of a mixer of the most channels; a mixer of fewer has the first three per
+    /// channel.
+    mixer: Vec<ParameterInfo>,
+}
+
+impl ParameterCatalog {
+    /// The parameters of every built-in effect kind and of a mixer of the most channels.
+    pub(crate) fn new() -> ParameterCatalog {
+        ParameterCatalog {
+            effects: audio_effects::EFFECTS
+                .iter()
+                .filter_map(|e| Some((e.id, audio_effects::parameter_infos(e.id)?)))
+                .collect(),
+            mixer: audio_effects::mixer_parameter_infos(audio_effects::MAX_CHANNELS),
+        }
+    }
+
+    /// Node `node` of `state`'s parameters as its dialog shows them, with the parameter being
+    /// dragged anywhere `live` and whether playback is running; `None` unless it is a mixer or a
+    /// built-in effect this build knows.
+    pub(crate) fn view<'a>(
+        &'a self,
+        state: &'a State,
+        node: NodeId,
+        live: Option<&'a Live>,
+        playing: bool,
+    ) -> Option<NodeParameters<'a>> {
+        let (kind, infos, stored) = match &state.node(node)?.kind {
+            NodeKind::Effect { kind, parameters } => (
+                Some(kind.as_str()),
+                self.effects.get(kind.as_str())?.as_slice(),
+                parameters,
+            ),
+            NodeKind::Mixer {
+                channels,
+                parameters,
+            } => (
+                None,
+                self.mixer.get(..channels.saturating_mul(3))?,
+                parameters,
+            ),
+            _ => return None,
+        };
+        Some(NodeParameters::new(
+            node, kind, infos, stored, live, playing,
+        ))
+    }
 }
 
 /// A mixer's or effect's parameters as its dialog shows them right now.

@@ -11,6 +11,8 @@
 //!
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
+//! - `node_dialog`: [`DialogMessage`] and [`DialogFocus`]: the mixer and effect dialogs' shared
+//!   keyboard focus and slider drag, returning the edits `App` applies.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
 //! - `node_parameters`: a mixer's or effect's parameters as its dialog shows them, the one view
 //!   its controls, display, presets and keys read.
@@ -52,6 +54,7 @@ mod icon;
 mod launcher;
 mod menu;
 mod mixer_strip;
+mod node_dialog;
 mod node_parameters;
 mod patch_board;
 mod plot;
@@ -74,11 +77,12 @@ use std::sync::Mutex;
 
 use shell::Shell;
 
-pub use app::{App, DialogFocus, Message, NewNode};
+pub use app::{App, Message, NewNode};
 pub use effect_display::{DisplayContext, Pixels};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
+pub use node_dialog::{DialogFocus, DialogMessage};
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{

@@ -12,6 +12,7 @@ use iced::{Alignment, Element, Length, Subscription, Task};
 use crate::app::{App, Message};
 use crate::launcher::{Launcher, ProjectEntry};
 use crate::mixer_strip::{self, MixerFocus};
+use crate::node_dialog::DialogMessage;
 use crate::shortcuts;
 use crate::theme::{self, Tone};
 use crate::view::{self, Face, RENAME_INPUT, group, tool};
@@ -83,7 +84,10 @@ impl Shell {
             Message::StartRename(_) => iced::widget::operation::focus(RENAME_INPUT),
             _ => Task::none(),
         };
-        let moves_focus = matches!(message, Message::FocusNext | Message::FocusPrevious);
+        let moves_focus = matches!(
+            message,
+            Message::Dialog(DialogMessage::FocusNext | DialogMessage::FocusPrevious)
+        );
         match &mut self.app {
             Some(app) => {
                 app.update(message);

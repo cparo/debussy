@@ -16,6 +16,7 @@ use crate::app::{App, Message, NewNode};
 use crate::click::{COUNT_IN_BARS, format_bpm};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
+use crate::node_dialog::DialogMessage;
 use crate::patch_board::{
     BoardView, Divider, GUTTER_WIDTH, GutterView, PIN_RADIUS, Selection, gutter_pin_x,
 };
@@ -710,7 +711,16 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { .. } => self.effect_panel(id),
+            NodeKind::Effect { .. } => match self.parameters(id) {
+                Some(parameters) => crate::effect_panel::effect_panel(
+                    &parameters,
+                    self.effect_focus(),
+                    self.tone(),
+                    self.sample_rate(),
+                    self.scale_factor(),
+                ),
+                None => Space::new().into(),
+            },
             NodeKind::Bus(_) => Space::new().into(),
         };
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
@@ -719,7 +729,7 @@ impl App {
             .height(Length::Fixed(size.height))
             .style(theme::panel);
         // A press on the dialog's background, not on a control, takes the keyboard focus away.
-        let dialog = mouse_area(dialog).on_press(Message::SetFocus(None));
+        let dialog = mouse_area(dialog).on_press(Message::Dialog(DialogMessage::SetFocus(None)));
         if self.confirming_delete != Some(id) {
             return Some(dialog.into());
         }

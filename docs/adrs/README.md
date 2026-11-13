@@ -130,4 +130,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0104](0104-effect-displays-share-a-plot-toolkit-the-curve.md) | Effect displays share a plot toolkit; the curve stays inside the plot and crowded labels are thinned | Accepted | [Display plots](../architecture/effect-displays.md#display-plots) |
 | [ADR-0105](0105-effect-curves-are-described-per-kind-in-audio.md) | Effect curves are described per kind in audio_effects and displays are chosen by the kind of curve | Accepted | [Effect curves](../architecture/effects.md#effect-curves) |
 | [ADR-0106](0106-a-node-s-parameters-as-shown-come-from-one-view.md) | A node's parameters as shown come from one view over static metadata | Accepted | [Gestures](../architecture/user-interface.md#gestures) |
+| [ADR-0107](0107-the-node-dialog-is-a-module-that-owns-its-focus.md) | The node dialog is a module that owns its focus and drag and returns edits | Accepted | [Gestures](../architecture/user-interface.md#gestures) |
 

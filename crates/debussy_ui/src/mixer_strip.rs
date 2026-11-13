@@ -11,10 +11,10 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme, mouse};
 use project_model::NodeId;
 
-use crate::app::DialogFocus;
 use crate::app::{App, Message};
 use crate::effect_panel::STRIP_SCROLLBAR_GAP;
 use crate::focus_target::{focus_target, ringed};
+use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
 /// The gain slider's step, and an arrow key's change to it, in dB.
@@ -241,7 +241,9 @@ impl App {
                         ],
                     ]
                     .align_y(Alignment::Center),
-                    Message::SetFocus(Some(DialogFocus::Mixer(MixerFocus::Channels))),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Mixer(
+                        MixerFocus::Channels,
+                    )))),
                     true,
                 ),
                 self.mixer_focus() == Some(MixerFocus::Channels),
@@ -270,17 +272,19 @@ impl App {
         let gain = self.parameter_value(id, &gain_name);
         let pan = self.parameter_value(id, &pan_name);
         let mode = Mode::from_value(self.parameter_value(id, &mode_name));
-        let set_mode = |mode: Mode| Message::ToggleMode {
-            node: id,
-            channel: ch,
-            mode,
+        let set_mode = |mode: Mode| {
+            Message::Dialog(DialogMessage::ToggleMode {
+                node: id,
+                channel: ch,
+                mode,
+            })
         };
         // A press on a control focuses it; sliders leave the arrow keys to the focused control.
         let target = |control: Element<'static, Message>, focus: MixerFocus| {
             ringed(
                 focus_target(
                     control,
-                    Message::SetFocus(Some(DialogFocus::Mixer(focus))),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Mixer(focus)))),
                     false,
                 ),
                 self.mixer_focus() == Some(focus),
@@ -292,14 +296,14 @@ impl App {
                 .width(Length::Fixed(SLIDER_WIDTH))
                 .height(Length::Fixed(GAIN_HEIGHT)),
             vertical_slider(SILENCE_DB..=MAX_GAIN_DB, gain, move |value| {
-                Message::Slide {
+                Message::Dialog(DialogMessage::Slide {
                     node: id,
                     name: gain_name.clone(),
                     value,
-                }
+                })
             })
             .step(GAIN_STEP_DB)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .width(SLIDER_WIDTH)
             .height(Length::Fixed(GAIN_HEIGHT)),
         ];
@@ -308,13 +312,15 @@ impl App {
             canvas(Tic { at: 0.5 })
                 .width(Length::Fixed(SLIDER_WIDTH))
                 .height(Length::Fixed(PAN_HEIGHT)),
-            vertical_slider(-1.0..=1.0, -pan, move |value: f32| Message::Slide {
-                node: id,
-                name: pan_name.clone(),
-                value: -value,
+            vertical_slider(-1.0..=1.0, -pan, move |value: f32| {
+                Message::Dialog(DialogMessage::Slide {
+                    node: id,
+                    name: pan_name.clone(),
+                    value: -value,
+                })
             })
             .step(PAN_STEP)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .width(SLIDER_WIDTH)
             .height(Length::Fixed(PAN_HEIGHT)),
         ];
