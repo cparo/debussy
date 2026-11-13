@@ -19,6 +19,7 @@
 //! - `effect_display`: [`Pixels`] and [`DisplayContext`], the picture above an effect's controls
 //!   of the curve its parameter values ask for.
 //! - `equal_heights`: a row whose children all take its tallest child's height.
+//! - `reveal`: scrolling the node dialog's focused control into view.
 //! - `response_display`: the equalisers' display, their frequency response.
 //! - `plot`: the effect displays' plot toolkit: frame, axes, grid, labels and curve.
 //! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
@@ -62,6 +63,7 @@ mod range_selection;
 mod raster;
 mod recording;
 mod response_display;
+mod reveal;
 mod services;
 mod shell;
 mod shortcuts;

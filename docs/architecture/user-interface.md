@@ -84,6 +84,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   arrows step the focused field or slider (1 channel, 1 dB, 1 % pan with up to the left), each
   press one step, never the hovered slider; Space or Enter presses a focused button
   ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
+  In any node dialog, Tab or Shift-Tab scrolls the newly focused control into view, by the
+  least that shows it whole ([ADR-0109](../adrs/0109-moving-a-node-dialog-s-focus-with-tab-scrolls-the.md)).
 - **Lanes** show waveforms from the waveform summaries, or, at zooms finer than the summaries,
   the stored audio as an intensity-graded trace (`docs/architecture/analysis.md` "Waveform
   summaries"), or spectrograms: one spectrum per two waveform columns, computed on demand

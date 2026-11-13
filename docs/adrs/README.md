@@ -132,4 +132,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0106](0106-a-node-s-parameters-as-shown-come-from-one-view.md) | A node's parameters as shown come from one view over static metadata | Accepted | [Gestures](../architecture/user-interface.md#gestures) |
 | [ADR-0107](0107-the-node-dialog-is-a-module-that-owns-its-focus.md) | The node dialog is a module that owns its focus and drag and returns edits | Accepted | [Gestures](../architecture/user-interface.md#gestures) |
 | [ADR-0108](0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md) | A node dialog's Delete button is in its Tab cycle and only its confirmation deletes a node | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0109](0109-moving-a-node-dialog-s-focus-with-tab-scrolls-the.md) | Moving a node dialog's focus with Tab scrolls the focused control into view | Accepted | [Layout](../architecture/user-interface.md#layout) |
 
