@@ -1,5 +1,5 @@
 //! The running window's state: the open project's [`App`], if any, and switching projects
-//! through the [`Launcher`] (`docs/architecture/user-interface.md` "Application startup").
+//! through the [`Launcher`] (`docs/architecture/startup.md` "Application startup").
 
 use std::path::Path;
 use std::time::Duration;

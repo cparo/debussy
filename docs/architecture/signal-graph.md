@@ -65,6 +65,10 @@ Each channel has three parameters, by name:
 | `channel N pan` | −1 to 1 | 0 | Pan position, under the pan law in "Panning" |
 | `channel N mode` | 0 to 2 | 0 | 0 plays, 1 is muted, 2 is soloed; read rounded to the nearest whole number |
 
+`audio_effects::mixer_parameter_infos` declares a mixer's parameters without building one, and the
+running mixer builds its parameters from it
+([ADR-0106](../adrs/0106-a-node-s-parameters-as-shown-come-from-one-view.md)).
+
 Mute and solo are one parameter, so a channel is never both. Solo acts within its own mixer: while
 any channel of a mixer is soloed, only its soloed channels play. Gain, pan, mute and solo changes
 ramp like any parameter. A mono mix of a mixer is made by connecting its output to a mono input

@@ -710,7 +710,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { kind, .. } => self.effect_panel(id, kind),
+            NodeKind::Effect { .. } => self.effect_panel(id),
             NodeKind::Bus(_) => Space::new().into(),
         };
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))

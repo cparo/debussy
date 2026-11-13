@@ -4,7 +4,7 @@
 - **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-10
 - **Issue:** —
-- **Architecture:** [Application startup](../architecture/user-interface.md#application-startup)
+- **Architecture:** [Application startup](../architecture/startup.md#application-startup)
 
 ## Context
 

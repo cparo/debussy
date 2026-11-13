@@ -12,6 +12,8 @@
 //! - `app`: [`App`] and [`Message`]: state and update logic, tested without a window.
 //! - `view`: drawing the window.
 //! - `effect_panel`: a built-in effect's controls, from its parameters' metadata.
+//! - `node_parameters`: a mixer's or effect's parameters as its dialog shows them, the one view
+//!   its controls, display, presets and keys read.
 //! - `effect_display`: [`Pixels`] and [`DisplayContext`], the picture above an effect's controls
 //!   of the curve its parameter values ask for.
 //! - `equal_heights`: a row whose children all take its tallest child's height.
@@ -50,6 +52,7 @@ mod icon;
 mod launcher;
 mod menu;
 mod mixer_strip;
+mod node_parameters;
 mod patch_board;
 mod plot;
 mod range_selection;

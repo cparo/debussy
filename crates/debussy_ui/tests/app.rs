@@ -483,6 +483,19 @@ fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> 
 }
 
 #[test]
+fn test_preset_of_another_kind_is_ignored() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let low_pass = add_effect(&mut app, "low-pass")?;
+    let revision = app.session().revision();
+    app.update(Message::ApplyPreset {
+        node: low_pass,
+        preset: "Compressor",
+    });
+    assert_eq!(app.session().revision(), revision);
+    Ok(())
+}
+
+#[test]
 fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let eq = add_effect(&mut app, "parametric-eq")?;

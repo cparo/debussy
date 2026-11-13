@@ -72,6 +72,26 @@ pub fn parameter_name(channel: usize, control: Control) -> String {
     format!("channel {} {control}", channel + 1)
 }
 
+/// The parameters of a mixer of `channels` channels, in the order a running [`Mixer`] declares
+/// them: each channel's gain, pan and mode. Allocates.
+pub fn mixer_parameter_infos(channels: usize) -> Vec<ParameterInfo> {
+    (0..channels).flat_map(channel_infos).collect()
+}
+
+/// Channel `index`'s gain, pan and mode parameters (0-based).
+fn channel_infos(index: usize) -> [ParameterInfo; 3] {
+    let group = format!("channel {}", index + 1);
+    let parameter = |control, min, max| {
+        ParameterInfo::new(parameter_name(index, control), min, max, 0.0).with_group(&group)
+    };
+    let modes = ["play", "mute", "solo"].map(String::from).to_vec();
+    [
+        parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB).with_unit("dB"),
+        parameter(Control::Pan, -1.0, 1.0),
+        parameter(Control::Mode, 0.0, 2.0).with_scale(Scale::Choice(modes)),
+    ]
+}
+
 /// One channel's parameters and the state that ramps them.
 struct Channel {
     gain: Parameter,
@@ -85,19 +105,11 @@ struct Channel {
 
 impl Channel {
     fn new(index: usize) -> Result<Self, Error> {
-        let group = format!("channel {}", index + 1);
-        let parameter = |control, min, max| {
-            ParameterInfo::new(parameter_name(index, control), min, max, 0.0).with_group(&group)
-        };
-        let modes = ["play", "mute", "solo"].map(String::from).to_vec();
+        let [gain, pan, mode] = channel_infos(index);
         Ok(Channel {
-            gain: Parameter::new(
-                parameter(Control::Gain, SILENCE_DB, MAX_GAIN_DB).with_unit("dB"),
-            )?,
-            pan: Parameter::new(parameter(Control::Pan, -1.0, 1.0))?,
-            mode: Parameter::new(
-                parameter(Control::Mode, 0.0, 2.0).with_scale(Scale::Choice(modes)),
-            )?,
+            gain: Parameter::new(gain)?,
+            pan: Parameter::new(pan)?,
+            mode: Parameter::new(mode)?,
             level: None,
             pan_smoothed: None,
         })
@@ -257,6 +269,20 @@ mod tests {
         );
         let mode = mixer.parameters()[2].info().clone();
         assert!(matches!(mode.scale, Scale::Choice(ref o) if o.len() == 3));
+        Ok(())
+    }
+
+    #[test]
+    fn test_mixer_parameter_infos_match_a_running_mixer() -> Result<(), Error> {
+        for channels in [1, 3, MAX_CHANNELS] {
+            let running: Vec<ParameterInfo> = Mixer::new(channels)?
+                .parameters()
+                .iter()
+                .map(|p| p.info().clone())
+                .collect();
+            assert_eq!(mixer_parameter_infos(channels), running);
+        }
+        assert!(mixer_parameter_infos(0).is_empty());
         Ok(())
     }
 

@@ -147,6 +147,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Effect nodes](signal-graph.md#effect-nodes)
   - [Port types](signal-graph.md#port-types)
   - [Delay compensation](signal-graph.md#delay-compensation)
+- [Startup](startup.md)
+  - [Application startup](startup.md#application-startup)
 - [Developer Tooling](tooling.md)
   - [Repository tasks (xtask)](tooling.md#repository-tasks-xtask)
   - [Commit gate](tooling.md#commit-gate)
@@ -159,7 +161,6 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Transport and seeking](user-interface.md#transport-and-seeking)
   - [Gestures](user-interface.md#gestures)
   - [Range selection and shortcuts](user-interface.md#range-selection-and-shortcuts)
-  - [Application startup](user-interface.md#application-startup)
   - [Recording](user-interface.md#recording)
   - [Files and devices](user-interface.md#files-and-devices)
 

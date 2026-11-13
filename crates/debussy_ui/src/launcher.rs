@@ -1,5 +1,5 @@
 //! [`Launcher`]: how the window opens and creates projects, which `debussy` implements
-//! (`docs/architecture/user-interface.md` "Application startup").
+//! (`docs/architecture/startup.md` "Application startup").
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
