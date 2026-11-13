@@ -49,8 +49,11 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Node dialogs** cover the whole track pane for the selected node: a header with its name and a
   close × with no button face, then a mixer's controls, a feedback delay's time in seconds, or a
   built-in effect's controls; a bus or an effect this build does not know has only the header.
-  A "Delete" button at the bottom right asks first: a confirmation with Cancel, the default
-  (Enter, Space, Escape or a press outside it), and Delete. An effect's controls are drawn from its parameters'
+  A "Delete" button at the bottom right, last in the dialog's Tab order (alone in a dialog with
+  no other controls), asks first: a confirmation with Cancel, the default, and Delete. Tab and
+  Shift-Tab move between the two, the focused one lit; Enter or Space presses it; Escape or a
+  press outside cancels
+  ([ADR-0108](../adrs/0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md)). An effect's controls are drawn from its parameters'
   metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
   [display](effect-displays.md#effect-displays): ungrouped parameters in a row,
   after a "Preset" pick list if the kind has presets (`docs/architecture/effects.md`
@@ -77,7 +80,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   0 dB or centre, and shows its value only as a hover tip. Soloing a channel unsolos the mixer's
   others in the same step. A keyboard focus, drawn as an accent ring, goes to a control when it is
   pressed, leaves on a press on the dialog's background, and moves with Tab and Shift-Tab from the
-  field down each strip's mute, solo, gain and pan, strip by strip, wrapping. The up and down
+  field down each strip's mute, solo, gain and pan, strip by strip, then "Delete", wrapping. The up and down
   arrows step the focused field or slider (1 channel, 1 dB, 1 % pan with up to the left), each
   press one step, never the hovered slider; Space or Enter presses a focused button
   ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
@@ -159,8 +162,9 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
 - Drag from an output to an input to connect; at a stereo port the connection names its side. An
   input takes one wire; a drop on an occupied input, an output, or empty board does nothing.
 - Drag a node, or the L and R outputs (vertically), to move them; the move is one undo step.
-- Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes the
-  selection, except while text is being typed. A click on empty board clears the selection and
+- Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes a
+  selected wire, except while text is being typed; a node is deleted only through its dialog
+  ([ADR-0108](../adrs/0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md)). A click on empty board clears the selection and
   closes the dialog.
 - The "+" at the board's top right adds a two-channel mixer, a stereo bus, a stereo feedback
   delay, or, below a separator, each built-in effect at its defaults, by the name shown in
@@ -235,7 +239,7 @@ Cut, delete and paste are refused while the transport is playing; copy is not.
 | Key | Action |
 |---|---|
 | ⌘X, ⌘C, ⌘V | Cut, copy, paste |
-| Delete, Backspace | Delete the patch board's selection if it has one, otherwise the range |
+| Delete, Backspace | Delete the patch board's selected wire; nothing with a node selected; otherwise the range |
 | ⌘Z, ⇧⌘Z | Undo, redo |
 | Escape | Clear the range selection |
 

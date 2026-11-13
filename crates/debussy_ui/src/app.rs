@@ -228,7 +228,8 @@ pub enum Message {
     DragOutput(f32),
     /// The node or outputs being dragged were dropped: record the move as one step.
     Drop,
-    /// Delete the selected node or wire.
+    /// Delete the selected wire; a selected node is left alone, deleted only through its
+    /// dialog's confirmation.
     DeleteSelection,
     /// Add a node to the board.
     AddNode(NewNode),
@@ -312,10 +313,8 @@ pub struct App {
     pub(crate) node_text: Option<(NodeId, String)>,
     /// The tracks the engine's feeds were made from.
     pub(crate) loaded: Option<Vec<Track>>,
-    /// The open node dialog's keyboard focus and slider drag.
-    dialog: NodeDialog,
-    /// The node whose deletion is waiting to be confirmed.
-    pub(crate) confirming_delete: Option<NodeId>,
+    /// The open node dialog's keyboard focus, slider drag and delete confirmation.
+    pub(crate) dialog: NodeDialog,
     /// The audio devices present, and the one in use.
     pub(crate) devices: (Vec<crate::services::DeviceChoice>, Option<String>),
     /// The last error or notice, for the status line.
@@ -392,7 +391,6 @@ impl App {
             node_text: None,
             loaded: None,
             dialog: NodeDialog::default(),
-            confirming_delete: None,
             devices: (Vec::new(), None),
             status: None,
             saved_revision: 0,
@@ -714,8 +712,8 @@ impl App {
             } => self.lane_press(track, frame, extend),
             Message::LaneDrag { track, frame } => self.lane_drag(track, frame),
             Message::LaneRelease => self.drag = None,
-            Message::ClearRange if self.confirming_delete.is_some() => {
-                self.confirming_delete = None;
+            Message::ClearRange if self.dialog.confirming().is_some() => {
+                self.dialog.cancel_delete();
             }
             Message::ClearRange => self.range = None,
             Message::Cut => self.cut(),
@@ -890,8 +888,7 @@ impl App {
             Message::Select(selection) => {
                 // A click on the board leaves any field being typed.
                 self.node_text = None;
-                self.dialog.clear_focus();
-                self.confirming_delete = None;
+                self.dialog.close();
                 self.selection = selection;
             }
             Message::DragNode(node, position) => {
@@ -915,16 +912,12 @@ impl App {
                 if self.renaming.is_some() || self.node_text.is_some() {
                     return;
                 }
-                let result = match self.selection.take() {
-                    Some(Selection::Node(node)) => {
-                        self.bridge.edit(&mut self.session, |s| s.remove_node(node))
-                    }
-                    Some(Selection::Wire(id)) => {
-                        self.bridge.edit(&mut self.session, |s| s.disconnect(id))
-                    }
-                    None => Ok(()),
-                };
-                self.report(result.map_err(|e| e.to_string()));
+                // A node is deleted only through its dialog's confirmation.
+                if let Some(Selection::Wire(id)) = self.selection {
+                    self.selection = None;
+                    let result = self.bridge.edit(&mut self.session, |s| s.disconnect(id));
+                    self.report(result.map_err(|e| e.to_string()));
+                }
             }
             Message::AddNode(choice) => {
                 let result = self
@@ -932,21 +925,17 @@ impl App {
                     .edit(&mut self.session, |s| s.add_node(choice.kind()));
                 match result {
                     Ok(node) => {
-                        self.dialog.clear_focus();
+                        self.dialog.close();
                         self.selection = Some(Selection::Node(node));
                     }
                     Err(error) => self.status = Some(error.to_string()),
                 }
             }
-            Message::AskDeleteNode(node) => self.confirming_delete = Some(node),
-            Message::CancelDelete => self.confirming_delete = None,
+            Message::AskDeleteNode(node) => self.dialog.ask_delete(node),
+            Message::CancelDelete => self.dialog.cancel_delete(),
             Message::DeleteNode(node) => {
-                self.confirming_delete = None;
-                let result = self.bridge.edit(&mut self.session, |s| s.remove_node(node));
-                self.report(result.map_err(|e| e.to_string()));
-                if self.selection == Some(Selection::Node(node)) {
-                    self.selection = None;
-                }
+                self.dialog.cancel_delete();
+                self.delete_node(node);
             }
             Message::NodeText(node, text) => {
                 if self.dialog_mixer().is_some_and(|(mixer, _)| mixer == node) {
@@ -955,12 +944,6 @@ impl App {
                 self.node_text = Some((node, text));
             }
             Message::StepMixerChannels(node, delta) => self.step_channels(node, delta),
-            // The confirmation holds the keyboard while open; Space or Enter cancels it.
-            Message::Dialog(message) if message.is_key() && self.confirming_delete.is_some() => {
-                if message == DialogMessage::FocusPress {
-                    self.confirming_delete = None;
-                }
-            }
             Message::Dialog(message) => {
                 let open = match self.selection {
                     Some(Selection::Node(node)) => Some(node),
@@ -1018,15 +1001,6 @@ impl App {
         }
     }
 
-    /// The selected node's parameters as shown, if it is a built-in effect this build knows:
-    /// the effect whose dialog is open.
-    pub(crate) fn dialog_effect(&self) -> Option<NodeParameters<'_>> {
-        let Some(Selection::Node(id)) = self.selection else {
-            return None;
-        };
-        self.parameters(id).filter(|p| p.kind().is_some())
-    }
-
     /// Node `node`'s parameters as its dialog shows them; `None` unless it is a mixer or a
     /// built-in effect this build knows.
     pub(crate) fn parameters(&self, node: NodeId) -> Option<NodeParameters<'_>> {
@@ -1074,7 +1048,17 @@ impl App {
                         self.commit_node_text(node, &text);
                     }
                 }
+                Command::DeleteNode(node) => self.delete_node(node),
             }
+        }
+    }
+
+    /// Deletes node `node` and its connections as one step, closing its dialog if open.
+    fn delete_node(&mut self, node: NodeId) {
+        let result = self.bridge.edit(&mut self.session, |s| s.remove_node(node));
+        self.report(result.map_err(|e| e.to_string()));
+        if self.selection == Some(Selection::Node(node)) {
+            self.selection = None;
         }
     }
 

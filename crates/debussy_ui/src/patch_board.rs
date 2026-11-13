@@ -422,7 +422,7 @@ pub enum Selection {
 
 /// Draws a laid-out board and turns presses, drags and keys on it into messages: drag from an
 /// output to an input to connect, drag a node or the L/R outputs to move them, click to select,
-/// Delete or Backspace to remove the selection.
+/// Delete or Backspace to remove a selected wire.
 pub struct BoardView {
     /// The laid-out board.
     pub board: Board,

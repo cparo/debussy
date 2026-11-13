@@ -14,9 +14,10 @@ use project_model::{Endpoint, NodeKind, Side, TrackId};
 
 use crate::app::{App, Message, NewNode};
 use crate::click::{COUNT_IN_BARS, format_bpm};
+use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
-use crate::node_dialog::DialogMessage;
+use crate::node_dialog::{ConfirmFocus, DialogFocus, DialogMessage};
 use crate::patch_board::{
     BoardView, Divider, GUTTER_WIDTH, GutterView, PIN_RADIUS, Selection, gutter_pin_x,
 };
@@ -687,10 +688,17 @@ impl App {
         .align_y(Alignment::Center);
         let footer = row![
             Space::new().width(Fill),
-            tool(
-                Face::Label("Delete"),
-                Some(Message::AskDeleteNode(id)),
-                false
+            ringed(
+                focus_target(
+                    tool(
+                        Face::Label("Delete"),
+                        Some(Message::AskDeleteNode(id)),
+                        false
+                    ),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Delete))),
+                    false,
+                ),
+                self.focus() == Some(DialogFocus::Delete),
             ),
         ];
         let body: Element<'_, Message> = match &node.kind {
@@ -730,18 +738,27 @@ impl App {
             .style(theme::panel);
         // A press on the dialog's background, not on a control, takes the keyboard focus away.
         let dialog = mouse_area(dialog).on_press(Message::Dialog(DialogMessage::SetFocus(None)));
-        if self.confirming_delete != Some(id) {
+        if self.dialog.confirming() != Some(id) {
             return Some(dialog.into());
         }
         let title = crate::patch_board::title(&node.kind);
+        let delete_focused = self.dialog.confirm_focus() == Some(ConfirmFocus::Delete);
         let confirm = container(
             column![
                 text(format!("Delete the {title} node?")).size(14),
                 row![
                     Space::new().width(Fill),
-                    // Cancel is the default: lit, and what Enter or Space does.
-                    tool(Face::Label("Cancel"), Some(Message::CancelDelete), true),
-                    tool(Face::Label("Delete"), Some(Message::DeleteNode(id)), false),
+                    // The focused button is lit: what Enter or Space does. Cancel is the default.
+                    tool(
+                        Face::Label("Cancel"),
+                        Some(Message::CancelDelete),
+                        !delete_focused
+                    ),
+                    tool(
+                        Face::Label("Delete"),
+                        Some(Message::DeleteNode(id)),
+                        delete_focused
+                    ),
                 ]
                 .spacing(6),
             ]

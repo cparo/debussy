@@ -91,9 +91,9 @@ impl Shell {
         match &mut self.app {
             Some(app) => {
                 app.update(message);
-                // Tab into a mixer's "Channels" field focuses it; Tab out of it, or through an
-                // effect's controls, takes its focus away.
-                if moves_focus && (app.dialog_mixer().is_some() || app.dialog_effect().is_some()) {
+                // Tab into a mixer's "Channels" field focuses it; Tab out of it, or through any
+                // other dialog control, takes its focus away.
+                if moves_focus && app.node_dialog_open() {
                     let field = match app.mixer_focus() {
                         Some(MixerFocus::Channels) => mixer_strip::CHANNELS_INPUT,
                         _ => mixer_strip::NO_FIELD,

@@ -18,6 +18,8 @@ pub enum DialogFocus {
     Mixer(MixerFocus),
     /// An effect dialog's control, by index into its kind's parameters.
     Parameter(usize),
+    /// The dialog's "Delete" button, last in Tab order.
+    Delete,
 }
 
 /// Something the user did in a mixer's or effect's dialog.
@@ -44,7 +46,7 @@ pub enum DialogMessage {
     /// [`DialogMessage::FocusAdjust`] does; other controls ignore it (the right and left arrows).
     FocusSlide(i32),
     /// Press the focused button or toggle (Space or Enter); with a delete confirmation open,
-    /// cancel it, its default.
+    /// press its focused button.
     FocusPress,
     /// Give the open dialog's keyboard focus to a control, or take it away: a press on a control
     /// or on the dialog's background.
@@ -80,7 +82,7 @@ pub enum DialogMessage {
 
 impl DialogMessage {
     /// Whether this is a key the dialog's focus takes: Tab, Shift-Tab, the arrows, Space or
-    /// Enter. An open delete confirmation holds these.
+    /// Enter. An open delete confirmation takes these instead.
     pub(crate) fn is_key(&self) -> bool {
         matches!(
             self,
@@ -119,6 +121,17 @@ pub(crate) enum Command {
     StepChannels(NodeId, i32),
     /// Record what was typed in the node dialog's field: the focus left a mixer's "Channels".
     CommitNodeText,
+    /// Delete this node: its delete confirmation's "Delete" was pressed.
+    DeleteNode(NodeId),
+}
+
+/// The delete confirmation's button with the keyboard focus: what Space or Enter presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfirmFocus {
+    /// "Cancel", the default.
+    Cancel,
+    /// "Delete".
+    Delete,
 }
 
 /// What [`NodeDialog::update`] reads from the rest of the interface.
@@ -133,18 +146,26 @@ pub(crate) struct Context<'a> {
     pub open: Option<NodeId>,
 }
 
-/// The open node dialog's keyboard focus and the slider being dragged.
+/// The open node dialog's keyboard focus, the slider being dragged, and its delete
+/// confirmation.
 #[derive(Debug, Default)]
 pub(crate) struct NodeDialog {
     /// The open dialog's control with the keyboard focus.
     focus: Option<DialogFocus>,
     /// The parameter being dragged, applied live and not yet recorded.
     live: Option<Live>,
+    /// The node whose deletion is waiting to be confirmed, and the confirmation's focused button.
+    confirming: Option<(NodeId, ConfirmFocus)>,
 }
 
 impl NodeDialog {
     /// Handles `message` against the project as `cx` shows it, returning what `App` must do.
     pub(crate) fn update(&mut self, message: DialogMessage, cx: &Context<'_>) -> Vec<Command> {
+        if message.is_key()
+            && let Some((node, focus)) = self.confirming
+        {
+            return self.confirm_key(&message, node, focus);
+        }
         match message {
             DialogMessage::Slide { node, name, value } => {
                 if let Some(refusal) = self.refusal(cx, node, &name) {
@@ -174,24 +195,17 @@ impl NodeDialog {
             } => self.toggle_mode(cx, node, channel, mode),
             DialogMessage::FocusNext | DialogMessage::FocusPrevious => {
                 let forward = matches!(message, DialogMessage::FocusNext);
-                let next = if let Some((_, channels)) = mixer(cx) {
-                    DialogFocus::Mixer(MixerFocus::moved(self.mixer_focus(), channels, forward))
-                } else if let Some(parameters) = self.effect(cx) {
-                    let order = tab_order(parameters.infos());
-                    match effect_panel::moved(self.effect_focus(), &order, forward) {
-                        Some(i) => DialogFocus::Parameter(i),
-                        None => return Vec::new(),
-                    }
-                } else {
-                    return Vec::new();
-                };
-                self.set_focus(Some(next))
+                match effect_panel::moved(self.focus, &self.tab_order(cx), forward) {
+                    Some(next) => self.set_focus(Some(next)),
+                    None => Vec::new(),
+                }
             }
             DialogMessage::SetFocus(focus) => {
                 let open = match focus {
                     None => true,
                     Some(DialogFocus::Mixer(_)) => mixer(cx).is_some(),
                     Some(DialogFocus::Parameter(_)) => self.effect(cx).is_some(),
+                    Some(DialogFocus::Delete) => open_node(cx).is_some(),
                 };
                 if open {
                     self.set_focus(focus)
@@ -223,6 +237,12 @@ impl NodeDialog {
                 }
             }
             DialogMessage::FocusPress => {
+                if self.focus == Some(DialogFocus::Delete) {
+                    if let Some(node) = open_node(cx) {
+                        self.ask_delete(node);
+                    }
+                    return Vec::new();
+                }
                 if self.effect(cx).is_some() {
                     return self.press_parameter_focus(cx);
                 }
@@ -266,14 +286,85 @@ impl NodeDialog {
         self.live.as_ref()
     }
 
-    /// Takes the keyboard focus away, without recording a field: another node was selected.
-    pub(crate) fn clear_focus(&mut self) {
+    /// The node whose deletion is waiting to be confirmed, if any.
+    pub(crate) fn confirming(&self) -> Option<NodeId> {
+        self.confirming.map(|(node, _)| node)
+    }
+
+    /// The delete confirmation's button with the keyboard focus, if it is open.
+    pub(crate) fn confirm_focus(&self) -> Option<ConfirmFocus> {
+        self.confirming.map(|(_, focus)| focus)
+    }
+
+    /// Opens the confirmation to delete node `node`, with "Cancel" focused.
+    pub(crate) fn ask_delete(&mut self, node: NodeId) {
+        self.confirming = Some((node, ConfirmFocus::Cancel));
+    }
+
+    /// Closes the delete confirmation, if open.
+    pub(crate) fn cancel_delete(&mut self) {
+        self.confirming = None;
+    }
+
+    /// Takes the keyboard focus away and closes any delete confirmation, without recording a
+    /// field: another node, or none, was selected.
+    pub(crate) fn close(&mut self) {
         self.focus = None;
+        self.confirming = None;
     }
 
     /// Gives the keyboard focus to the open mixer's "Channels" field: it is being typed in.
     pub(crate) fn focus_channels(&mut self) {
         self.focus = Some(DialogFocus::Mixer(MixerFocus::Channels));
+    }
+
+    /// Key `message` with the confirmation to delete `node` open and `focus` on one of its
+    /// buttons: Tab and Shift-Tab switch buttons, Space or Enter presses the focused one, and the
+    /// arrows do nothing.
+    fn confirm_key(
+        &mut self,
+        message: &DialogMessage,
+        node: NodeId,
+        focus: ConfirmFocus,
+    ) -> Vec<Command> {
+        match message {
+            DialogMessage::FocusNext | DialogMessage::FocusPrevious => {
+                let other = match focus {
+                    ConfirmFocus::Cancel => ConfirmFocus::Delete,
+                    ConfirmFocus::Delete => ConfirmFocus::Cancel,
+                };
+                self.confirming = Some((node, other));
+                Vec::new()
+            }
+            DialogMessage::FocusPress => {
+                self.confirming = None;
+                match focus {
+                    ConfirmFocus::Cancel => Vec::new(),
+                    ConfirmFocus::Delete => vec![Command::DeleteNode(node)],
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The open dialog's controls in Tab order: a mixer's or effect's controls, then "Delete";
+    /// empty with no dialog open.
+    fn tab_order(&self, cx: &Context<'_>) -> Vec<DialogFocus> {
+        if open_node(cx).is_none() {
+            return Vec::new();
+        }
+        let mut order: Vec<DialogFocus> = if let Some((_, channels)) = mixer(cx) {
+            MixerFocus::order(channels)
+                .map(DialogFocus::Mixer)
+                .collect()
+        } else if let Some(parameters) = self.effect(cx) {
+            let order = tab_order(parameters.infos());
+            order.into_iter().map(DialogFocus::Parameter).collect()
+        } else {
+            Vec::new()
+        };
+        order.push(DialogFocus::Delete);
+        order
     }
 
     /// Node `node`'s parameters as its dialog shows them, with the slider being dragged.
@@ -442,6 +533,11 @@ fn set_parameter(node: NodeId, name: String, value: f32) -> Command {
     })
 }
 
+/// The open node, if it exists.
+fn open_node(cx: &Context<'_>) -> Option<NodeId> {
+    cx.open.filter(|&node| cx.state.node(node).is_some())
+}
+
 /// The open node and its channel count, if it is a mixer.
 fn mixer(cx: &Context<'_>) -> Option<(NodeId, usize)> {
     let node = cx.open?;
@@ -570,10 +666,13 @@ mod tests {
         assert_eq!(f.dialog.focus(), Some(f.on("band 1 gain")?));
         f.send(DialogMessage::FocusPrevious);
         assert_eq!(f.dialog.focus(), Some(f.on("band 1 frequency")?));
-        // Shift-Tab from the first control wraps to the last.
+        // "Delete" comes last; Shift-Tab from the first control wraps to it.
         f.send(DialogMessage::SetFocus(Some(f.on("high-pass enabled")?)));
         f.send(DialogMessage::FocusPrevious);
+        assert_eq!(f.dialog.focus(), Some(DialogFocus::Delete));
+        f.send(DialogMessage::FocusPrevious);
         assert_eq!(f.dialog.focus(), Some(f.on("low-pass order")?));
+        f.send(DialogMessage::FocusNext);
         f.send(DialogMessage::FocusNext);
         assert_eq!(f.dialog.focus(), Some(f.on("high-pass enabled")?));
         Ok(())
@@ -776,6 +875,14 @@ mod tests {
         }
         f.send(DialogMessage::FocusPrevious);
         assert_eq!(f.dialog.mixer_focus(), Some(MixerFocus::Pan(0)));
+        // Past the last channel's pan comes "Delete", then the field again.
+        f.send(DialogMessage::SetFocus(Some(DialogFocus::Mixer(
+            MixerFocus::Pan(1),
+        ))));
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.focus(), Some(DialogFocus::Delete));
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.mixer_focus(), Some(MixerFocus::Channels));
         // Clicking away from the field records it too; elsewhere it does not.
         f.dialog.focus_channels();
         assert_eq!(
@@ -843,6 +950,45 @@ mod tests {
         ))));
         f.apply(DialogMessage::FocusPress)?;
         assert_eq!(Mode::from_value(f.value("channel 3 mode")), Mode::Play);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_tab_reaches_delete_on_a_dialog_with_no_controls() -> TestResult {
+        let mut f = Fixture::new(NodeKind::Bus(audio_buffers::Layout::Stereo))?;
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.focus(), Some(DialogFocus::Delete));
+        f.send(DialogMessage::FocusPrevious);
+        assert_eq!(f.dialog.focus(), Some(DialogFocus::Delete));
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_press_on_delete_asks_and_the_confirmation_takes_the_keys() -> TestResult {
+        let mut f = Fixture::mixer(1)?;
+        let node = f.node;
+        f.send(DialogMessage::SetFocus(Some(DialogFocus::Delete)));
+        assert_eq!(f.send(DialogMessage::FocusPress), []);
+        assert_eq!(f.dialog.confirming(), Some(node));
+        assert_eq!(f.dialog.confirm_focus(), Some(ConfirmFocus::Cancel));
+        // Tab and Shift-Tab switch buttons; the arrows do nothing; the dialog's focus stays.
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.confirm_focus(), Some(ConfirmFocus::Delete));
+        assert_eq!(f.send(DialogMessage::FocusAdjust(1)), []);
+        f.send(DialogMessage::FocusPrevious);
+        assert_eq!(f.dialog.confirm_focus(), Some(ConfirmFocus::Cancel));
+        assert_eq!(f.dialog.focus(), Some(DialogFocus::Delete));
+        // Space or Enter on Cancel closes it.
+        assert_eq!(f.send(DialogMessage::FocusPress), []);
+        assert_eq!(f.dialog.confirming(), None);
+        // On Delete, it asks App to delete the node.
+        f.dialog.ask_delete(node);
+        f.send(DialogMessage::FocusPrevious);
+        assert_eq!(
+            f.send(DialogMessage::FocusPress),
+            [Command::DeleteNode(node)]
+        );
+        assert_eq!(f.dialog.confirming(), None);
         Ok(())
     }
 }

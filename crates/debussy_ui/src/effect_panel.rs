@@ -25,7 +25,7 @@ const CONTROL_WIDTH: f32 = 104.0;
 /// The control after `from` (`forward`) or before it in `order`, wrapping at the ends. From no
 /// control, or one not in `order`, forward is the first and back the last; `None` if `order` is
 /// empty.
-pub(crate) fn moved(from: Option<usize>, order: &[usize], forward: bool) -> Option<usize> {
+pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: bool) -> Option<T> {
     let count = order.len();
     if count == 0 {
         return None;

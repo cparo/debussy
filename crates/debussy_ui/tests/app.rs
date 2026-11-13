@@ -1177,8 +1177,11 @@ fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error
     app.update(Message::NodeText(bus, "1".into()));
     app.update(Message::DeleteSelection);
     assert!(app.session().state().node(bus).is_some());
+    // Delete leaves a selected node alone: its dialog's confirmation deletes it.
     app.update(Message::Select(Some(debussy_ui::Selection::Node(bus))));
     app.update(Message::DeleteSelection);
+    assert!(app.session().state().node(bus).is_some());
+    app.update(Message::DeleteNode(bus));
     assert!(app.session().state().node(bus).is_none());
     // Undo the delete, the output move, the node move and the add.
     for _ in 0..4 {
@@ -1357,7 +1360,8 @@ fn test_solo_is_exclusive_within_a_mixer() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_delete_node_asks_first_and_cancel_is_default() -> Result<(), Box<dyn Error>> {
+fn test_delete_node_asks_first_and_tab_moves_between_cancel_and_delete()
+-> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
     app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
     app.update(Message::AskDeleteNode(mixer));
@@ -1367,15 +1371,18 @@ fn test_delete_node_asks_first_and_cancel_is_default() -> Result<(), Box<dyn Err
     assert!(app.session().state().node(mixer).is_some());
     for cancel in [Message::ClearRange, Message::CancelDelete] {
         app.update(Message::AskDeleteNode(mixer));
-        // The confirmation holds the keyboard.
+        // The confirmation takes the keyboard: Tab moves between its buttons, not the dialog's.
         app.update(Message::Dialog(DialogMessage::FocusNext));
         assert_eq!(app.mixer_focus(), None);
         app.update(cancel);
         assert!(app.session().state().node(mixer).is_some());
     }
+    // Tab moves to Delete, which Enter or Space presses.
     app.update(Message::AskDeleteNode(mixer));
-    app.update(Message::DeleteNode(mixer));
+    app.update(Message::Dialog(DialogMessage::FocusNext));
+    app.update(Message::Dialog(DialogMessage::FocusPress));
     assert!(app.session().state().node(mixer).is_none());
+    assert_eq!(app.selection(), None);
     Ok(())
 }
 
