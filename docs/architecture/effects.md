@@ -18,6 +18,10 @@ state.
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
+Each kind is one `EffectKind` row in `audio_effects::EFFECTS`: its kind id, its name, the function
+that builds it, and its curve function (see "Effect curves")
+([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)).
+
 ## Effect presets
 
 A preset is a name, an effect kind and values for some of its parameters. Choosing one in a node's

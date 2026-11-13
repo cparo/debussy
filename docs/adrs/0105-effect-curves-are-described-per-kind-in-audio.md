@@ -32,6 +32,8 @@ table, keyed by kind id, was not checked against `EFFECTS`. More displays are co
 - Each `EffectKind` row has a `curve` field: the kind's curve function, or `None`. The function
   lives in the effect's module and reads the declaration-order `values` through the controls
   processing uses. A slice of the wrong length gives `None`.
+- The row also builds the effect, through a `build` field, so a kind's registration in
+  `audio_effects` is that one row. `effect(kind)` looks the row up.
 - `debussy_ui` draws a `Curve` by matching on its variant, with one `render` per variant. It has no
   per-kind table, display trait or parameter-by-name lookup.
 - The display's cache is keyed on the curve, the tone and the size, and no longer on the values.
