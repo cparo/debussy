@@ -15,6 +15,7 @@
 //! - `effect_display`: [`EffectDisplay`], the picture above an effect's controls.
 //! - `equal_heights`: a row whose children all take its tallest child's height.
 //! - `response_display`: the equalisers' display, their frequency response.
+//! - `plot`: the effect displays' plot toolkit: frame, axes, grid, labels and curve.
 //! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
 //! - `typeface`: the `Typeface` seam and the in-house stroke font behind it.
 //! - `click`: the click, the tempo and the meter.
@@ -49,6 +50,7 @@ mod launcher;
 mod menu;
 mod mixer_strip;
 mod patch_board;
+mod plot;
 mod range_selection;
 mod raster;
 mod recording;

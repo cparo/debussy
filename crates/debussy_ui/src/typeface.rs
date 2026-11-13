@@ -1,6 +1,6 @@
 //! Text drawn into a [`Mask`]: the [`Typeface`] seam, and [`StrokeFont`], an in-house face of
 //! straight strokes covering the labels the equaliser displays need
-//! (`docs/architecture/effect-displays.md` "Equaliser displays").
+//! (`docs/architecture/effect-displays.md` "Display plots").
 
 use crate::stroke::Mask;
 

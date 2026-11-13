@@ -75,6 +75,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Dependency rules](crates.md#dependency-rules)
 - [Effect Displays](effect-displays.md)
   - [Effect displays](effect-displays.md#effect-displays-1)
+  - [Display plots](effect-displays.md#display-plots)
   - [Equaliser displays](effect-displays.md#equaliser-displays)
   - [Dynamics display](effect-displays.md#dynamics-display)
   - [Amplifier display](effect-displays.md#amplifier-display)

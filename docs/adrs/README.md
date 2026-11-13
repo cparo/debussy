@@ -127,4 +127,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0101](0101-the-dynamics-display-plots-the-steady-state.md) | The dynamics display plots the steady-state transfer curve on fixed dBFS axes with red full-scale lines | Accepted | [Dynamics display](../architecture/effect-displays.md#dynamics-display) |
 | [ADR-0102](0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md) | The amplifier is a memoryless waveshaper with pre-amp bias, a Butterworth DC filter and optional polyphase oversampling | Accepted | [Amplifier](../architecture/effects.md#amplifier) |
 | [ADR-0103](0103-the-amplifier-display-plots-the-recentred-static.md) | The amplifier display plots the recentred static curve on linear ±3 dBFS axes | Accepted | [Amplifier display](../architecture/effect-displays.md#amplifier-display) |
+| [ADR-0104](0104-effect-displays-share-a-plot-toolkit-the-curve.md) | Effect displays share a plot toolkit; the curve stays inside the plot and crowded labels are thinned | Accepted | [Display plots](../architecture/effect-displays.md#display-plots) |
 
