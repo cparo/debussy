@@ -10,15 +10,20 @@ use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mou
 use crate::app::Message;
 use crate::theme;
 
-/// `control` in a focus ring, drawn when `focused`.
+/// `control` in a focus ring, drawn when `focused`; a focused ring carries the id
+/// [`FOCUSED`](crate::reveal::FOCUSED), so it can be scrolled into view.
 pub(crate) fn ringed<'a>(
     control: impl Into<Element<'a, Message>>,
     focused: bool,
 ) -> Element<'a, Message> {
-    container(control)
+    let ring = container(control)
         .padding(2)
-        .style(theme::focus_ring(focused))
-        .into()
+        .style(theme::focus_ring(focused));
+    if focused {
+        ring.id(crate::reveal::FOCUSED).into()
+    } else {
+        ring.into()
+    }
 }
 
 /// `content`, sending `on_press` when the left button is pressed over it, whether or not

@@ -4,15 +4,15 @@
 
 use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
 use iced::{Element, Length};
-use project_model::NodeId;
 use signal_graph::{ParameterInfo, Scale};
 
-use crate::app::{App, DialogFocus, Message};
+use crate::app::Message;
 use crate::effect_display::display_area;
 use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
+use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::{NodeParameters, tab_order};
-use crate::theme;
+use crate::theme::{self, Tone};
 use crate::view::toggle_button;
 
 /// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
@@ -25,7 +25,7 @@ const CONTROL_WIDTH: f32 = 104.0;
 /// The control after `from` (`forward`) or before it in `order`, wrapping at the ends. From no
 /// control, or one not in `order`, forward is the first and back the last; `None` if `order` is
 /// empty.
-pub(crate) fn moved(from: Option<usize>, order: &[usize], forward: bool) -> Option<usize> {
+pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: bool) -> Option<T> {
     let count = order.len();
     if count == 0 {
         return None;
@@ -42,106 +42,99 @@ pub(crate) fn moved(from: Option<usize>, order: &[usize], forward: bool) -> Opti
     Some(order[next])
 }
 
-impl App {
-    /// The display and controls of effect node `id`; empty for a kind this build does not know.
-    /// The display comes first; then the preset picker, if the kind has presets, and the
-    /// ungrouped parameters, in a row; then one strip per group, scrolling horizontally.
-    pub(crate) fn effect_panel(&self, id: NodeId) -> Element<'_, Message> {
-        let Some(parameters) = self.parameters(id) else {
-            return Space::new().into();
-        };
-        let Some(kind) = parameters.kind() else {
-            return Space::new().into();
-        };
-        let infos = parameters.infos();
-        let display = display_area(
-            kind,
-            &parameters.values(),
-            self.tone(),
-            self.sample_rate(),
-            self.scale_factor(),
-        );
-        // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's
-        // run as a strip.
-        let order = tab_order(infos);
-        let split = order.partition_point(|&i| infos[i].group.is_empty());
-        let (ungrouped, grouped) = order.split_at(split);
-        let ungrouped = row(self.preset_picker(&parameters, kind))
-            .extend(ungrouped.iter().map(|&i| self.control(&parameters, i)))
-            .spacing(16);
-        let strips = grouped
-            .chunk_by(|&a, &b| infos[a].group == infos[b].group)
-            .map(|run| {
-                let group = run.first().map_or("", |&i| infos[i].group.as_str());
-                container(
-                    column![text(capitalised(group)).size(13)]
-                        .extend(run.iter().map(|&i| self.control(&parameters, i)))
-                        .spacing(8),
-                )
-                .padding(6)
-                .style(theme::strip)
-                .into()
-            });
-        let strips = equal_heights(strips, 8.0);
-        column![
-            display,
-            ungrouped,
-            // Embedded, so the scrollbar takes its own row below the strips instead of
-            // covering their lowest controls.
-            scrollable(strips).direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default().spacing(STRIP_SCROLLBAR_GAP),
-            )),
-        ]
-        .spacing(10)
-        .into()
-    }
+/// The display and controls of the effect whose parameters are `parameters`, with the control
+/// at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate` and
+/// `scale` physical pixels per logical pixel, comes first; then the preset picker, if the kind
+/// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
+/// horizontally.
+pub(crate) fn effect_panel<'a>(
+    parameters: &NodeParameters<'a>,
+    focus: Option<usize>,
+    tone: Tone,
+    sample_rate: u32,
+    scale: f32,
+) -> Element<'a, Message> {
+    let Some(kind) = parameters.kind() else {
+        return Space::new().into();
+    };
+    let infos = parameters.infos();
+    let display = display_area(kind, &parameters.values(), tone, sample_rate, scale);
+    // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's run
+    // as a strip.
+    let order = tab_order(infos);
+    let split = order.partition_point(|&i| infos[i].group.is_empty());
+    let (ungrouped, grouped) = order.split_at(split);
+    let control = |i: usize| control(parameters, i, focus == Some(i));
+    let ungrouped = row(preset_picker(parameters, kind))
+        .extend(ungrouped.iter().map(|&i| control(i)))
+        .spacing(16);
+    let strips = grouped
+        .chunk_by(|&a, &b| infos[a].group == infos[b].group)
+        .map(|run| {
+            let group = run.first().map_or("", |&i| infos[i].group.as_str());
+            container(
+                column![text(capitalised(group)).size(13)]
+                    .extend(run.iter().map(|&i| control(i)))
+                    .spacing(8),
+            )
+            .padding(6)
+            .style(theme::strip)
+            .into()
+        });
+    let strips = equal_heights(strips, 8.0);
+    column![
+        display,
+        ungrouped,
+        // Embedded, so the scrollbar takes its own row below the strips instead of covering
+        // their lowest controls.
+        scrollable(strips).direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default().spacing(STRIP_SCROLLBAR_GAP),
+        )),
+    ]
+    .spacing(10)
+    .into()
+}
 
-    /// A pick list of effect kind `kind`'s presets for the node of `parameters`, showing the
-    /// preset its values match or, if none, "Custom"; `None` for a kind with no presets.
-    fn preset_picker<'a>(
-        &'a self,
-        parameters: &NodeParameters<'_>,
-        kind: &str,
-    ) -> Option<Element<'a, Message>> {
-        let names: Vec<&'static str> = audio_effects::presets(kind).map(|p| p.name).collect();
-        if names.is_empty() {
-            return None;
-        }
-        let id = parameters.node();
-        let selected = parameters.matching_preset().map(|p| p.name);
-        let picker = pick_list(names, selected, move |preset| Message::ApplyPreset {
-            node: id,
-            preset,
-        })
-        .placeholder("Custom")
-        .text_size(12);
-        Some(
-            column![text("Preset").size(12), picker]
-                .spacing(4)
-                .width(Length::Fixed(CONTROL_WIDTH))
-                .into(),
-        )
+/// A pick list of effect kind `kind`'s presets for the node of `parameters`, showing the preset
+/// its values match or, if none, "Custom"; `None` for a kind with no presets.
+fn preset_picker<'a>(parameters: &NodeParameters<'_>, kind: &str) -> Option<Element<'a, Message>> {
+    let names: Vec<&'static str> = audio_effects::presets(kind).map(|p| p.name).collect();
+    if names.is_empty() {
+        return None;
     }
+    let id = parameters.node();
+    let selected = parameters.matching_preset().map(|p| p.name);
+    let picker = pick_list(names, selected, move |preset| {
+        Message::Dialog(DialogMessage::ApplyPreset { node: id, preset })
+    })
+    .placeholder("Custom")
+    .text_size(12);
+    Some(
+        column![text("Preset").size(12), picker]
+            .spacing(4)
+            .width(Length::Fixed(CONTROL_WIDTH))
+            .into(),
+    )
+}
 
-    /// The control for parameter `infos()[index]` of `parameters`, ringed while it has the
-    /// keyboard focus and taking the focus when pressed. A pick list keeps the keyboard and
-    /// wheel; a slider or toggle leaves them to the focused control.
-    fn control<'a>(
-        &'a self,
-        parameters: &NodeParameters<'a>,
-        index: usize,
-    ) -> Element<'a, Message> {
-        let info = &parameters.infos()[index];
-        let keys = matches!(info.scale, Scale::Choice(_));
-        ringed(
-            focus_target(
-                input(parameters, info),
-                Message::SetFocus(Some(DialogFocus::Parameter(index))),
-                keys,
-            ),
-            self.effect_focus() == Some(index),
-        )
-    }
+/// The control for parameter `infos()[index]` of `parameters`, ringed while it has the keyboard
+/// focus (`focused`) and taking the focus when pressed. A pick list keeps the keyboard and wheel;
+/// a slider or toggle leaves them to the focused control.
+fn control<'a>(
+    parameters: &NodeParameters<'a>,
+    index: usize,
+    focused: bool,
+) -> Element<'a, Message> {
+    let info = &parameters.infos()[index];
+    let keys = matches!(info.scale, Scale::Choice(_));
+    ringed(
+        focus_target(
+            input(parameters, info),
+            Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Parameter(index)))),
+            keys,
+        ),
+        focused,
+    )
 }
 
 /// The input for parameter `info` of `parameters`. A toggle is one button named for the
@@ -151,15 +144,19 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
     let id = parameters.node();
     let value = parameters.value(&info.name);
     let (min, max) = (info.min, info.max);
-    let slide = move |value: f32| Message::Slide {
-        node: id,
-        name: info.name.clone(),
-        value: value.clamp(min, max),
+    let slide = move |value: f32| {
+        Message::Dialog(DialogMessage::Slide {
+            node: id,
+            name: info.name.clone(),
+            value: value.clamp(min, max),
+        })
     };
-    let set = move |value: f32| Message::SetParameter {
-        node: id,
-        name: info.name.clone(),
-        value,
+    let set = move |value: f32| {
+        Message::Dialog(DialogMessage::SetParameter {
+            node: id,
+            name: info.name.clone(),
+            value,
+        })
     };
     let frozen = parameters.is_frozen(info);
     if !frozen && info.scale == Scale::Toggle {
@@ -178,17 +175,17 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
         _ if frozen => text("Stop to change").size(11).into(),
         Scale::Linear => slider(min..=max, value, slide)
             .step((max - min) / 1000.0)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .into(),
         Scale::Logarithmic => slider(min.ln()..=max.ln(), value.max(min).ln(), move |v| {
             slide(v.exp())
         })
         .step((max.ln() - min.ln()) / 1000.0)
-        .on_release(Message::Release)
+        .on_release(Message::Dialog(DialogMessage::Release))
         .into(),
         Scale::Integer => slider(min..=max, value, slide)
             .step(1.0_f32)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .into(),
         Scale::Choice(options) => {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small index

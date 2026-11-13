@@ -9,13 +9,15 @@ use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
-use iced::{Alignment, Element, Fill, Length, Size};
+use iced::{Alignment, Element, Fill, Length, Padding, Size};
 use project_model::{Endpoint, NodeKind, Side, TrackId};
 
 use crate::app::{App, Message, NewNode};
 use crate::click::{COUNT_IN_BARS, format_bpm};
+use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
+use crate::node_dialog::{ConfirmFocus, DialogFocus, DialogMessage};
 use crate::patch_board::{
     BoardView, Divider, GUTTER_WIDTH, GutterView, PIN_RADIUS, Selection, gutter_pin_x,
 };
@@ -47,6 +49,9 @@ static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
 });
 /// The padding inside a node's dialog.
 const DIALOG_PADDING: f32 = 12.0;
+/// The space kept clear at the right of a node dialog's body for its vertical scrollbar: the
+/// scrollbar's default width and a gap.
+const BODY_SCROLLBAR_ROOM: f32 = 14.0;
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
@@ -686,10 +691,17 @@ impl App {
         .align_y(Alignment::Center);
         let footer = row![
             Space::new().width(Fill),
-            tool(
-                Face::Label("Delete"),
-                Some(Message::AskDeleteNode(id)),
-                false
+            ringed(
+                focus_target(
+                    tool(
+                        Face::Label("Delete"),
+                        Some(Message::AskDeleteNode(id)),
+                        false
+                    ),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Delete))),
+                    false,
+                ),
+                self.focus() == Some(DialogFocus::Delete),
             ),
         ];
         let body: Element<'_, Message> = match &node.kind {
@@ -710,28 +722,52 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { .. } => self.effect_panel(id),
+            NodeKind::Effect { .. } => match self.parameters(id) {
+                Some(parameters) => crate::effect_panel::effect_panel(
+                    &parameters,
+                    self.effect_focus(),
+                    self.tone(),
+                    self.sample_rate(),
+                    self.scale_factor(),
+                ),
+                None => Space::new().into(),
+            },
             NodeKind::Bus(_) => Space::new().into(),
         };
+        // Room on the right for the body's scrollbar, which floats over its content, so it never
+        // covers the rightmost controls.
+        let body = container(body).padding(Padding {
+            right: BODY_SCROLLBAR_ROOM,
+            ..Padding::ZERO
+        });
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
             .padding(DIALOG_PADDING)
             .width(Length::Fixed(size.width))
             .height(Length::Fixed(size.height))
             .style(theme::panel);
         // A press on the dialog's background, not on a control, takes the keyboard focus away.
-        let dialog = mouse_area(dialog).on_press(Message::SetFocus(None));
-        if self.confirming_delete != Some(id) {
+        let dialog = mouse_area(dialog).on_press(Message::Dialog(DialogMessage::SetFocus(None)));
+        if self.dialog.confirming() != Some(id) {
             return Some(dialog.into());
         }
         let title = crate::patch_board::title(&node.kind);
+        let delete_focused = self.dialog.confirm_focus() == Some(ConfirmFocus::Delete);
         let confirm = container(
             column![
                 text(format!("Delete the {title} node?")).size(14),
                 row![
                     Space::new().width(Fill),
-                    // Cancel is the default: lit, and what Enter or Space does.
-                    tool(Face::Label("Cancel"), Some(Message::CancelDelete), true),
-                    tool(Face::Label("Delete"), Some(Message::DeleteNode(id)), false),
+                    // The focused button is lit: what Enter or Space does. Cancel is the default.
+                    tool(
+                        Face::Label("Cancel"),
+                        Some(Message::CancelDelete),
+                        !delete_focused
+                    ),
+                    tool(
+                        Face::Label("Delete"),
+                        Some(Message::DeleteNode(id)),
+                        delete_focused
+                    ),
                 ]
                 .spacing(6),
             ]

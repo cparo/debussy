@@ -13,8 +13,8 @@ use audio_buffers::Layout;
 use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, DialogFocus, ImportedTrack, Menu, Message, MixerFocus,
-    NewNode, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ImportedTrack, Menu, Message,
+    MixerFocus, NewNode, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -369,11 +369,11 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
     let (mut app, _processor, _, mixer) = app()?;
     assert!(!app.session().can_undo());
     for value in [-1.0, -3.0, -7.5] {
-        app.update(Message::Slide {
+        app.update(Message::Dialog(DialogMessage::Slide {
             node: mixer,
             name: GAIN.to_owned(),
             value,
-        });
+        }));
     }
     // Live in the graph and shown, but not yet an undo step or in the model.
     assert_eq!(
@@ -384,7 +384,7 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
     );
     assert_eq!(app.parameter_value(mixer, GAIN), -7.5);
     assert!(!app.session().can_undo());
-    app.update(Message::Release);
+    app.update(Message::Dialog(DialogMessage::Release));
     assert!(app.session().can_undo());
     assert_eq!(app.parameter_value(mixer, GAIN), -7.5);
     app.update(Message::Undo);
@@ -402,20 +402,20 @@ fn test_slider_drag_is_live_and_release_records_one_step() -> Result<(), Box<dyn
 #[test]
 fn test_mute_and_solo_are_steps() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
-    app.update(Message::SetParameter {
+    app.update(Message::Dialog(DialogMessage::SetParameter {
         node: mixer,
         name: MODE.to_owned(),
         value: Mode::Mute.value(),
-    });
+    }));
     assert_eq!(
         Mode::from_value(app.parameter_value(mixer, MODE)),
         Mode::Mute
     );
-    app.update(Message::SetParameter {
+    app.update(Message::Dialog(DialogMessage::SetParameter {
         node: mixer,
         name: MODE.to_owned(),
         value: Mode::Solo.value(),
-    });
+    }));
     assert_eq!(
         Mode::from_value(app.parameter_value(mixer, MODE)),
         Mode::Solo
@@ -448,16 +448,16 @@ fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> 
     };
     // A new dynamics node is at its defaults: the Compressor.
     assert_eq!(matching(&app), Some("Compressor"));
-    app.update(Message::SetParameter {
+    app.update(Message::Dialog(DialogMessage::SetParameter {
         node: dynamics,
         name: "knee".to_owned(),
         value: 2.0,
-    });
+    }));
     assert_eq!(matching(&app), None);
-    app.update(Message::ApplyPreset {
+    app.update(Message::Dialog(DialogMessage::ApplyPreset {
         node: dynamics,
         preset: "Limiter",
-    });
+    }));
     assert_eq!(matching(&app), Some("Limiter"));
     assert_eq!(app.parameter_value(dynamics, "lookahead"), 5.0);
     // Values the preset leaves alone return to their defaults.
@@ -468,16 +468,16 @@ fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> 
     // While playing, a preset that would change a stopped-only value is refused; others apply.
     app.update(Message::Play);
     block(&mut processor)?;
-    app.update(Message::ApplyPreset {
+    app.update(Message::Dialog(DialogMessage::ApplyPreset {
         node: dynamics,
         preset: "Limiter",
-    });
+    }));
     assert!(app.status().is_some());
     assert_eq!(app.parameter_value(dynamics, "lookahead"), 0.0);
-    app.update(Message::ApplyPreset {
+    app.update(Message::Dialog(DialogMessage::ApplyPreset {
         node: dynamics,
         preset: "Gate",
-    });
+    }));
     assert_eq!(matching(&app), Some("Gate"));
     Ok(())
 }
@@ -487,10 +487,10 @@ fn test_preset_of_another_kind_is_ignored() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     let low_pass = add_effect(&mut app, "low-pass")?;
     let revision = app.session().revision();
-    app.update(Message::ApplyPreset {
+    app.update(Message::Dialog(DialogMessage::ApplyPreset {
         node: low_pass,
         preset: "Compressor",
-    });
+    }));
     assert_eq!(app.session().revision(), revision);
     Ok(())
 }
@@ -506,17 +506,17 @@ fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<d
     assert_eq!(app.parameter_value(eq, "band 1 frequency"), 100.0);
     assert_eq!(app.parameter_value(eq, "band 4 frequency"), 8_000.0);
     assert_eq!(app.parameter_value(eq, "high-pass cutoff"), 80.0);
-    app.update(Message::Slide {
+    app.update(Message::Dialog(DialogMessage::Slide {
         node: eq,
         name: "band 2 gain".to_owned(),
         value: 4.5,
-    });
-    app.update(Message::Release);
-    app.update(Message::SetParameter {
+    }));
+    app.update(Message::Dialog(DialogMessage::Release));
+    app.update(Message::Dialog(DialogMessage::SetParameter {
         node: eq,
         name: "band 2 enabled".to_owned(),
         value: 1.0,
-    });
+    }));
     let NodeKind::Effect { parameters, .. } =
         &app.session().state().node(eq).ok_or("no node")?.kind
     else {
@@ -532,95 +532,15 @@ fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<d
 }
 
 #[test]
-fn test_tab_moves_focus_through_effect_controls_and_arrows_adjust() -> Result<(), Box<dyn Error>> {
-    let (mut app, _processor, _, _) = app()?;
-    let eq = add_effect(&mut app, "parametric-eq")?;
-    // The EQ's controls are all grouped, so Tab visits them as declared: the high-pass stage
-    // (enabled, cutoff, order), then each band (enabled, type, frequency, gain, q).
-    app.update(Message::FocusNext);
-    assert_eq!(app.effect_focus(), Some(0));
-    assert_eq!(app.mixer_focus(), None);
-    // Space or Enter flips a toggle.
-    app.update(Message::FocusPress);
-    assert_eq!(app.parameter_value(eq, "high-pass enabled"), 1.0);
-    for _ in 0..6 {
-        app.update(Message::FocusNext);
-    }
-    assert_eq!(app.focus(), Some(DialogFocus::Parameter(6)));
-    // A linear slider moves 1 % of its range a press, each an undo step.
-    app.update(Message::FocusAdjust(1));
-    app.update(Message::FocusAdjust(1));
-    assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
-    app.update(Message::Undo);
-    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
-    // Right and left step a slider too.
-    app.update(Message::FocusSlide(1));
-    assert!((app.parameter_value(eq, "band 1 gain") - 0.96).abs() < 1e-5);
-    app.update(Message::FocusSlide(-1));
-    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
-    // Pressing a slider does nothing.
-    app.update(Message::FocusPress);
-    assert!((app.parameter_value(eq, "band 1 gain") - 0.48).abs() < 1e-5);
-    // A logarithmic slider moves 1 % of its logarithm's range.
-    app.update(Message::FocusPrevious);
-    app.update(Message::FocusAdjust(-1));
-    let step = (20_000.0_f32.ln() - 20.0_f32.ln()) / 100.0;
-    let expected = (100.0_f32.ln() - step).exp();
-    assert!((app.parameter_value(eq, "band 1 frequency") - expected).abs() < 1e-2);
-    // Shift-Tab from the first control wraps to the last.
-    app.update(Message::SetFocus(Some(DialogFocus::Parameter(0))));
-    app.update(Message::FocusPrevious);
-    assert_eq!(app.effect_focus(), Some(25));
-    // Selecting elsewhere drops the focus.
-    app.update(Message::Select(None));
-    assert_eq!(app.focus(), None);
-    app.update(Message::FocusNext);
-    assert_eq!(app.focus(), None);
-    Ok(())
-}
-
-#[test]
-fn test_focus_adjust_steps_choices_and_integers() -> Result<(), Box<dyn Error>> {
-    let (mut app, _processor, _, _) = app()?;
-    let eq = add_effect(&mut app, "parametric-eq")?;
-    // Band 1's type: a choice of four, stepped one option a press and held at the ends.
-    app.update(Message::SetFocus(Some(DialogFocus::Parameter(4))));
-    app.update(Message::FocusAdjust(-1));
-    assert_eq!(app.parameter_value(eq, "band 1 type"), 0.0);
-    for _ in 0..5 {
-        app.update(Message::FocusAdjust(1));
-    }
-    assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
-    // Right and left leave a choice alone.
-    app.update(Message::FocusSlide(-1));
-    assert_eq!(app.parameter_value(eq, "band 1 type"), 3.0);
-    // The high-pass order: an integer, from 2 by one a press, held at 1.
-    app.update(Message::SetFocus(Some(DialogFocus::Parameter(2))));
-    app.update(Message::FocusAdjust(1));
-    assert_eq!(app.parameter_value(eq, "high-pass order"), 3.0);
-    for _ in 0..4 {
-        app.update(Message::FocusAdjust(-1));
-    }
-    assert_eq!(app.parameter_value(eq, "high-pass order"), 1.0);
-    // An integer is a slider: right steps it.
-    app.update(Message::FocusSlide(1));
-    assert_eq!(app.parameter_value(eq, "high-pass order"), 2.0);
-    // A mixer's focus is not taken while an effect's dialog is open.
-    app.update(Message::SetFocus(Some(DialogFocus::Mixer(
-        MixerFocus::Channels,
-    ))));
-    assert_eq!(app.effect_focus(), Some(2));
-    Ok(())
-}
-
-#[test]
 fn test_filter_order_changes_only_while_stopped() -> Result<(), Box<dyn Error>> {
     let (mut app, mut processor, _, _) = app()?;
     let filter = add_effect(&mut app, "high-pass")?;
-    let order = |value| Message::SetParameter {
-        node: filter,
-        name: "order".to_owned(),
-        value,
+    let order = |value| {
+        Message::Dialog(DialogMessage::SetParameter {
+            node: filter,
+            name: "order".to_owned(),
+            value,
+        })
     };
     app.update(Message::Play);
     block(&mut processor)?;
@@ -628,13 +548,13 @@ fn test_filter_order_changes_only_while_stopped() -> Result<(), Box<dyn Error>> 
     assert!(app.status().is_some());
     assert_eq!(app.parameter_value(filter, "order"), 2.0);
     // The cutoff may move while playing.
-    app.update(Message::Slide {
+    app.update(Message::Dialog(DialogMessage::Slide {
         node: filter,
         name: "cutoff".to_owned(),
         value: 120.0,
-    });
+    }));
     assert_eq!(app.parameter_value(filter, "cutoff"), 120.0);
-    app.update(Message::Release);
+    app.update(Message::Dialog(DialogMessage::Release));
     app.update(Message::Pause);
     block(&mut processor)?;
     app.update(order(4.0));
@@ -1257,8 +1177,11 @@ fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error
     app.update(Message::NodeText(bus, "1".into()));
     app.update(Message::DeleteSelection);
     assert!(app.session().state().node(bus).is_some());
+    // Delete leaves a selected node alone: its dialog's confirmation deletes it.
     app.update(Message::Select(Some(debussy_ui::Selection::Node(bus))));
     app.update(Message::DeleteSelection);
+    assert!(app.session().state().node(bus).is_some());
+    app.update(Message::DeleteNode(bus));
     assert!(app.session().state().node(bus).is_none());
     // Undo the delete, the output move, the node move and the add.
     for _ in 0..4 {
@@ -1350,38 +1273,38 @@ fn test_commit_node_text_clamps_mixer_channels() -> Result<(), Box<dyn Error>> {
 fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
     // With no mixer dialog open, Tab does nothing.
-    app.update(Message::FocusNext);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), None);
     app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
-    app.update(Message::FocusNext);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Channels));
     // Up on the field adds a channel, as one step.
-    app.update(Message::FocusAdjust(1));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
     assert_eq!(channels(&app, mixer), Some(2));
-    app.update(Message::FocusNext);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(0)));
     // Space or Enter on mute toggles it.
-    app.update(Message::FocusPress);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
     assert_eq!(mode(&app, mixer, 0), Mode::Mute);
-    app.update(Message::FocusPress);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
     assert_eq!(mode(&app, mixer, 0), Mode::Play);
-    app.update(Message::FocusNext);
-    app.update(Message::FocusNext);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(0)));
     // Gain moves a whole dB a press, each an undo step.
-    app.update(Message::FocusAdjust(1));
-    app.update(Message::FocusAdjust(1));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
     assert_eq!(app.parameter_value(mixer, GAIN), 2.0);
     app.update(Message::Undo);
     assert_eq!(app.parameter_value(mixer, GAIN), 1.0);
     // Up on pan moves it left.
-    app.update(Message::FocusNext);
-    app.update(Message::FocusAdjust(1));
+    app.update(Message::Dialog(DialogMessage::FocusNext));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
     assert_eq!(app.parameter_value(mixer, "channel 1 pan"), -0.01);
     // Past channel 1's pan comes channel 2's mute, and back again.
-    app.update(Message::FocusNext);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Mute(1)));
-    app.update(Message::FocusPrevious);
+    app.update(Message::Dialog(DialogMessage::FocusPrevious));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Pan(0)));
     // Selecting elsewhere drops the focus.
     app.update(Message::Select(None));
@@ -1413,10 +1336,12 @@ fn mode(app: &App, mixer: NodeId, channel: usize) -> Mode {
 fn test_solo_is_exclusive_within_a_mixer() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
     set_channels(&mut app, mixer, "3");
-    let toggle = |channel, mode| Message::ToggleMode {
-        node: mixer,
-        channel,
-        mode,
+    let toggle = |channel, mode| {
+        Message::Dialog(DialogMessage::ToggleMode {
+            node: mixer,
+            channel,
+            mode,
+        })
     };
     app.update(toggle(0, Mode::Solo));
     app.update(toggle(2, Mode::Mute));
@@ -1435,25 +1360,29 @@ fn test_solo_is_exclusive_within_a_mixer() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_delete_node_asks_first_and_cancel_is_default() -> Result<(), Box<dyn Error>> {
+fn test_delete_node_asks_first_and_tab_moves_between_cancel_and_delete()
+-> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
     app.update(Message::Select(Some(debussy_ui::Selection::Node(mixer))));
     app.update(Message::AskDeleteNode(mixer));
     let _ = app.view();
     // Enter or Space cancels; so do Escape and the Cancel button.
-    app.update(Message::FocusPress);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
     assert!(app.session().state().node(mixer).is_some());
     for cancel in [Message::ClearRange, Message::CancelDelete] {
         app.update(Message::AskDeleteNode(mixer));
-        // The confirmation holds the keyboard.
-        app.update(Message::FocusNext);
+        // The confirmation takes the keyboard: Tab moves between its buttons, not the dialog's.
+        app.update(Message::Dialog(DialogMessage::FocusNext));
         assert_eq!(app.mixer_focus(), None);
         app.update(cancel);
         assert!(app.session().state().node(mixer).is_some());
     }
+    // Tab moves to Delete, which Enter or Space presses.
     app.update(Message::AskDeleteNode(mixer));
-    app.update(Message::DeleteNode(mixer));
+    app.update(Message::Dialog(DialogMessage::FocusNext));
+    app.update(Message::Dialog(DialogMessage::FocusPress));
     assert!(app.session().state().node(mixer).is_none());
+    assert_eq!(app.selection(), None);
     Ok(())
 }
 
@@ -1464,17 +1393,17 @@ fn test_pressing_controls_moves_focus_and_commits_the_field() -> Result<(), Box<
     app.update(Message::NodeText(mixer, "3".into()));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Channels));
     // Pressing a slider focuses it and records what was typed.
-    app.update(Message::SetFocus(Some(DialogFocus::Mixer(
-        MixerFocus::Gain(1),
+    app.update(Message::Dialog(DialogMessage::SetFocus(Some(
+        DialogFocus::Mixer(MixerFocus::Gain(1)),
     ))));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(1)));
     assert_eq!(channels(&app, mixer), Some(3));
-    app.update(Message::FocusAdjust(-1));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(-1)));
     assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);
     // A press on the background takes the focus away; arrows then do nothing.
-    app.update(Message::SetFocus(None));
+    app.update(Message::Dialog(DialogMessage::SetFocus(None)));
     assert_eq!(app.mixer_focus(), None);
-    app.update(Message::FocusAdjust(-1));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(-1)));
     assert_eq!(app.parameter_value(mixer, "channel 2 gain"), -1.0);
     Ok(())
 }

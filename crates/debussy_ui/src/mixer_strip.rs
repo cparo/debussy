@@ -11,10 +11,10 @@ use iced::widget::{
 use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, Theme, mouse};
 use project_model::NodeId;
 
-use crate::app::DialogFocus;
 use crate::app::{App, Message};
 use crate::effect_panel::STRIP_SCROLLBAR_GAP;
 use crate::focus_target::{focus_target, ringed};
+use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::theme::{self, Accent, Place, tokens, tone_of};
 
 /// The gain slider's step, and an arrow key's change to it, in dB.
@@ -52,7 +52,7 @@ const LABEL_SPACING: f32 = 2.0;
 
 /// A mixer dialog control that can hold the keyboard focus. Tab visits them in this order: the
 /// "Channels" field, then each channel's mute, solo, gain and pan, from the first channel to the
-/// last.
+/// last; the dialog's "Delete" button follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MixerFocus {
     /// The "Channels" field.
@@ -71,18 +71,6 @@ impl MixerFocus {
     /// The controls on one strip.
     const PER_CHANNEL: usize = 4;
 
-    /// Where this control falls in Tab order.
-    fn index(self) -> usize {
-        let at = |ch: usize, offset: usize| 1 + ch * Self::PER_CHANNEL + offset;
-        match self {
-            MixerFocus::Channels => 0,
-            MixerFocus::Mute(ch) => at(ch, 0),
-            MixerFocus::Solo(ch) => at(ch, 1),
-            MixerFocus::Gain(ch) => at(ch, 2),
-            MixerFocus::Pan(ch) => at(ch, 3),
-        }
-    }
-
     /// The control at `index` in Tab order.
     fn at(index: usize) -> Self {
         let Some(i) = index.checked_sub(1) else {
@@ -97,18 +85,9 @@ impl MixerFocus {
         }
     }
 
-    /// The control after `from` (`forward`) or before it, in a mixer of `channels` channels,
-    /// wrapping at the ends. From no control, forward is the "Channels" field and back the last
-    /// pan slider.
-    pub(crate) fn moved(from: Option<Self>, channels: usize, forward: bool) -> Self {
-        let count = 1 + channels * Self::PER_CHANNEL;
-        let next = match (from, forward) {
-            (None, true) => 0,
-            (None, false) => count - 1,
-            (Some(focus), true) => (focus.index().min(count - 1) + 1) % count,
-            (Some(focus), false) => (focus.index().min(count - 1) + count - 1) % count,
-        };
-        Self::at(next)
+    /// The controls of a mixer of `channels` channels, in Tab order.
+    pub(crate) fn order(channels: usize) -> impl Iterator<Item = Self> {
+        (0..1 + channels * Self::PER_CHANNEL).map(Self::at)
     }
 }
 
@@ -241,7 +220,9 @@ impl App {
                         ],
                     ]
                     .align_y(Alignment::Center),
-                    Message::SetFocus(Some(DialogFocus::Mixer(MixerFocus::Channels))),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Mixer(
+                        MixerFocus::Channels,
+                    )))),
                     true,
                 ),
                 self.mixer_focus() == Some(MixerFocus::Channels),
@@ -270,17 +251,19 @@ impl App {
         let gain = self.parameter_value(id, &gain_name);
         let pan = self.parameter_value(id, &pan_name);
         let mode = Mode::from_value(self.parameter_value(id, &mode_name));
-        let set_mode = |mode: Mode| Message::ToggleMode {
-            node: id,
-            channel: ch,
-            mode,
+        let set_mode = |mode: Mode| {
+            Message::Dialog(DialogMessage::ToggleMode {
+                node: id,
+                channel: ch,
+                mode,
+            })
         };
         // A press on a control focuses it; sliders leave the arrow keys to the focused control.
         let target = |control: Element<'static, Message>, focus: MixerFocus| {
             ringed(
                 focus_target(
                     control,
-                    Message::SetFocus(Some(DialogFocus::Mixer(focus))),
+                    Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Mixer(focus)))),
                     false,
                 ),
                 self.mixer_focus() == Some(focus),
@@ -292,14 +275,14 @@ impl App {
                 .width(Length::Fixed(SLIDER_WIDTH))
                 .height(Length::Fixed(GAIN_HEIGHT)),
             vertical_slider(SILENCE_DB..=MAX_GAIN_DB, gain, move |value| {
-                Message::Slide {
+                Message::Dialog(DialogMessage::Slide {
                     node: id,
                     name: gain_name.clone(),
                     value,
-                }
+                })
             })
             .step(GAIN_STEP_DB)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .width(SLIDER_WIDTH)
             .height(Length::Fixed(GAIN_HEIGHT)),
         ];
@@ -308,13 +291,15 @@ impl App {
             canvas(Tic { at: 0.5 })
                 .width(Length::Fixed(SLIDER_WIDTH))
                 .height(Length::Fixed(PAN_HEIGHT)),
-            vertical_slider(-1.0..=1.0, -pan, move |value: f32| Message::Slide {
-                node: id,
-                name: pan_name.clone(),
-                value: -value,
+            vertical_slider(-1.0..=1.0, -pan, move |value: f32| {
+                Message::Dialog(DialogMessage::Slide {
+                    node: id,
+                    name: pan_name.clone(),
+                    value: -value,
+                })
             })
             .step(PAN_STEP)
-            .on_release(Message::Release)
+            .on_release(Message::Dialog(DialogMessage::Release))
             .width(SLIDER_WIDTH)
             .height(Length::Fixed(PAN_HEIGHT)),
         ];
@@ -383,15 +368,9 @@ mod tests {
     }
 
     #[test]
-    fn test_moved_goes_down_each_strip_then_across() {
+    fn test_order_goes_down_each_strip_then_across() {
         use MixerFocus::{Channels, Gain, Mute, Pan, Solo};
-        let mut order = vec![];
-        let mut focus = None;
-        for _ in 0..10 {
-            let next = MixerFocus::moved(focus, 2, true);
-            order.push(next);
-            focus = Some(next);
-        }
+        let order: Vec<MixerFocus> = MixerFocus::order(2).collect();
         assert_eq!(
             order,
             [
@@ -404,20 +383,9 @@ mod tests {
                 Solo(1),
                 Gain(1),
                 Pan(1),
-                Channels
             ]
         );
-    }
-
-    #[test]
-    fn test_moved_backwards_and_from_a_removed_channel() {
-        use MixerFocus::{Channels, Gain, Mute, Pan};
-        assert_eq!(MixerFocus::moved(None, 2, false), Pan(1));
-        assert_eq!(MixerFocus::moved(Some(Channels), 2, false), Pan(1));
-        assert_eq!(MixerFocus::moved(Some(Mute(1)), 2, false), Pan(0));
-        // Focus on a channel since removed counts from the last control.
-        assert_eq!(MixerFocus::moved(Some(Gain(5)), 1, true), Channels);
-        assert_eq!(MixerFocus::moved(Some(Gain(5)), 1, false), Gain(0));
+        assert_eq!(MixerFocus::order(0).collect::<Vec<_>>(), [Channels]);
     }
 
     #[test]

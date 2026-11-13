@@ -3,6 +3,7 @@
 use iced::keyboard::{Event, Key, key::Named};
 
 use crate::app::Message;
+use crate::node_dialog::DialogMessage;
 
 /// The message a key press stands for, if any. The window sees only presses no widget took, so
 /// keys typed into a text field, or Delete on a patch board selection, never arrive here.
@@ -16,15 +17,25 @@ pub fn shortcut(event: Event) -> Option<Message> {
     match key.as_ref() {
         Key::Named(Named::Escape) if modifiers.is_empty() => Some(Message::ClearRange),
         Key::Named(Named::Tab) if modifiers.shift() && !modifiers.command() => {
-            Some(Message::FocusPrevious)
+            Some(Message::Dialog(DialogMessage::FocusPrevious))
         }
-        Key::Named(Named::Tab) if modifiers.is_empty() => Some(Message::FocusNext),
-        Key::Named(Named::ArrowUp) if modifiers.is_empty() => Some(Message::FocusAdjust(1)),
-        Key::Named(Named::ArrowDown) if modifiers.is_empty() => Some(Message::FocusAdjust(-1)),
-        Key::Named(Named::ArrowRight) if modifiers.is_empty() => Some(Message::FocusSlide(1)),
-        Key::Named(Named::ArrowLeft) if modifiers.is_empty() => Some(Message::FocusSlide(-1)),
+        Key::Named(Named::Tab) if modifiers.is_empty() => {
+            Some(Message::Dialog(DialogMessage::FocusNext))
+        }
+        Key::Named(Named::ArrowUp) if modifiers.is_empty() => {
+            Some(Message::Dialog(DialogMessage::FocusAdjust(1)))
+        }
+        Key::Named(Named::ArrowDown) if modifiers.is_empty() => {
+            Some(Message::Dialog(DialogMessage::FocusAdjust(-1)))
+        }
+        Key::Named(Named::ArrowRight) if modifiers.is_empty() => {
+            Some(Message::Dialog(DialogMessage::FocusSlide(1)))
+        }
+        Key::Named(Named::ArrowLeft) if modifiers.is_empty() => {
+            Some(Message::Dialog(DialogMessage::FocusSlide(-1)))
+        }
         Key::Named(Named::Space | Named::Enter) if modifiers.is_empty() => {
-            Some(Message::FocusPress)
+            Some(Message::Dialog(DialogMessage::FocusPress))
         }
         Key::Named(Named::Delete | Named::Backspace) if modifiers.is_empty() => {
             Some(Message::DeleteRange)
@@ -105,30 +116,33 @@ mod tests {
         let named = |n| Key::Named(n);
         assert_eq!(
             shortcut(press(named(Named::Tab), none)),
-            Some(Message::FocusNext)
+            Some(Message::Dialog(DialogMessage::FocusNext))
         );
         assert_eq!(
             shortcut(press(named(Named::Tab), Modifiers::SHIFT)),
-            Some(Message::FocusPrevious)
+            Some(Message::Dialog(DialogMessage::FocusPrevious))
         );
         assert_eq!(
             shortcut(press(named(Named::ArrowUp), none)),
-            Some(Message::FocusAdjust(1))
+            Some(Message::Dialog(DialogMessage::FocusAdjust(1)))
         );
         assert_eq!(
             shortcut(press(named(Named::ArrowDown), none)),
-            Some(Message::FocusAdjust(-1))
+            Some(Message::Dialog(DialogMessage::FocusAdjust(-1)))
         );
         assert_eq!(
             shortcut(press(named(Named::ArrowRight), none)),
-            Some(Message::FocusSlide(1))
+            Some(Message::Dialog(DialogMessage::FocusSlide(1)))
         );
         assert_eq!(
             shortcut(press(named(Named::ArrowLeft), none)),
-            Some(Message::FocusSlide(-1))
+            Some(Message::Dialog(DialogMessage::FocusSlide(-1)))
         );
         for key in [Named::Space, Named::Enter] {
-            assert_eq!(shortcut(press(named(key), none)), Some(Message::FocusPress));
+            assert_eq!(
+                shortcut(press(named(key), none)),
+                Some(Message::Dialog(DialogMessage::FocusPress))
+            );
         }
         assert_eq!(shortcut(press(named(Named::Tab), Modifiers::COMMAND)), None);
     }

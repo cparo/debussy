@@ -12,6 +12,8 @@ use iced::{Alignment, Element, Length, Subscription, Task};
 use crate::app::{App, Message};
 use crate::launcher::{Launcher, ProjectEntry};
 use crate::mixer_strip::{self, MixerFocus};
+use crate::node_dialog::DialogMessage;
+use crate::reveal;
 use crate::shortcuts;
 use crate::theme::{self, Tone};
 use crate::view::{self, Face, RENAME_INPUT, group, tool};
@@ -83,18 +85,22 @@ impl Shell {
             Message::StartRename(_) => iced::widget::operation::focus(RENAME_INPUT),
             _ => Task::none(),
         };
-        let moves_focus = matches!(message, Message::FocusNext | Message::FocusPrevious);
+        let moves_focus = matches!(
+            message,
+            Message::Dialog(DialogMessage::FocusNext | DialogMessage::FocusPrevious)
+        );
         match &mut self.app {
             Some(app) => {
                 app.update(message);
-                // Tab into a mixer's "Channels" field focuses it; Tab out of it, or through an
-                // effect's controls, takes its focus away.
-                if moves_focus && (app.dialog_mixer().is_some() || app.dialog_effect().is_some()) {
+                // Tab into a mixer's "Channels" field focuses it; Tab out of it, or through any
+                // other dialog control, takes its focus away. Either way the newly focused
+                // control is scrolled into view.
+                if moves_focus && app.node_dialog_open() {
                     let field = match app.mixer_focus() {
                         Some(MixerFocus::Channels) => mixer_strip::CHANNELS_INPUT,
                         _ => mixer_strip::NO_FIELD,
                     };
-                    return iced::widget::operation::focus(field);
+                    return iced::widget::operation::focus(field).chain(reveal::reveal());
                 }
             }
             None => {
