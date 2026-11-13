@@ -3,18 +3,22 @@
 
 use signal_graph::{Node, ParameterInfo};
 
-use crate::amplifier::Amplifier;
-use crate::dynamics::Dynamics;
-use crate::filters::{Butterworth, Response};
-use crate::parametric::ParametricEq;
+use crate::amplifier::{self, Amplifier};
+use crate::curve::CurveFn;
+use crate::dynamics::{self, Dynamics};
+use crate::filters::{self, Butterworth, Response};
+use crate::parametric::{self, ParametricEq};
 
 /// A built-in effect kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct EffectKind {
     /// The stable id saved projects name it by, such as `"high-pass"`.
     pub id: &'static str,
     /// The name shown for it, such as `"High-pass filter"`.
     pub name: &'static str,
+    /// What builds the curve its parameter values ask for, for its display; `None` for a kind
+    /// with no display (`docs/architecture/effects.md` "Effect curves").
+    pub curve: Option<CurveFn>,
 }
 
 /// Every built-in effect kind, in the order a menu lists them.
@@ -22,22 +26,27 @@ pub const EFFECTS: &[EffectKind] = &[
     EffectKind {
         id: "high-pass",
         name: "High-pass filter",
+        curve: Some(filters::high_pass_curve),
     },
     EffectKind {
         id: "low-pass",
         name: "Low-pass filter",
+        curve: Some(filters::low_pass_curve),
     },
     EffectKind {
         id: "parametric-eq",
         name: "Parametric EQ",
+        curve: Some(parametric::curve),
     },
     EffectKind {
         id: "dynamics",
         name: "Dynamics",
+        curve: Some(dynamics::curve),
     },
     EffectKind {
         id: "amplifier",
         name: "Amplifier",
+        curve: Some(amplifier::curve),
     },
 ];
 

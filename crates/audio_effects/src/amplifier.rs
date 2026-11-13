@@ -131,16 +131,18 @@ impl ShaperCurve {
     }
 }
 
-/// The curve an `amplifier` node's parameters ask for, given each parameter's value by name; a
-/// name `value` does not know should give its default. Built by the same mapping as processing,
-/// so a display of it cannot differ.
-pub fn amplifier_curve(value: impl Fn(&str) -> f32) -> ShaperCurve {
-    ShaperCurve {
-        drive: db_to_gain(value("drive")),
-        bias: value("bias"),
-        shape: Shape::from_value(value("shape")),
-        makeup: db_to_gain(value("makeup")),
-    }
+/// The curve of an `amplifier` effect whose parameters stand at `values`, in declaration order
+/// (see [`crate::CurveFn`]). Read through [`Control`] and built by the same mapping as
+/// processing, so a display of it cannot differ.
+pub(crate) fn curve(values: &[f32], _sample_rate: u32) -> Option<crate::Curve> {
+    let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
+    let value = |control: Control| values[control as usize];
+    Some(crate::Curve::Shaper(ShaperCurve {
+        drive: db_to_gain(value(Control::Drive)),
+        bias: value(Control::Bias),
+        shape: Shape::from_value(value(Control::Shape)),
+        makeup: db_to_gain(value(Control::Makeup)),
+    }))
 }
 
 /// Every shape, in `shape` parameter order.
@@ -441,29 +443,26 @@ mod tests {
         assert!((again.iter().sum::<f32>() - 1.0).abs() < 1e-6);
     }
 
+    /// The shaper curve at the defaults with `changes` by name.
+    fn shaper(changes: &[(&str, f32)]) -> Result<ShaperCurve, Box<dyn std::error::Error>> {
+        let values = crate::curve::values_with("amplifier", changes).ok_or("unknown kind")?;
+        match curve(&values, 48_000) {
+            Some(crate::Curve::Shaper(shaper)) => Ok(shaper),
+            other => Err(format!("not a shaper curve: {other:?}").into()),
+        }
+    }
+
     #[test]
-    fn test_amplifier_curve_passes_through_the_origin() -> Result<(), Error> {
-        let infos = infos()?;
-        let default = |name: &str| {
-            infos
-                .iter()
-                .find(|i| i.name == name)
-                .map_or(f32::NAN, |i| i.default)
-        };
+    fn test_curve_passes_through_the_origin() -> Result<(), Box<dyn std::error::Error>> {
         for shape in [0.0, 1.0, 2.0] {
             for bias in [-0.6, 0.0, 0.4] {
-                let curve = amplifier_curve(|name| match name {
-                    "shape" => shape,
-                    "bias" => bias,
-                    "drive" => 12.0,
-                    _ => default(name),
-                });
+                let curve = shaper(&[("shape", shape), ("bias", bias), ("drive", 12.0)])?;
                 assert!(curve.output(0.0).abs() < 1e-7);
                 assert!(curve.output(0.5) > 0.0 && curve.output(-0.5) < 0.0);
             }
         }
         // Defaults: warm at unity, so small signals pass unchanged.
-        let curve = amplifier_curve(default);
+        let curve = shaper(&[])?;
         assert!((curve.output(1e-3) - 1e-3).abs() < 1e-7);
         Ok(())
     }

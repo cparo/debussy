@@ -82,6 +82,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
 - [Effects](effects.md)
   - [Effect kinds](effects.md#effect-kinds)
   - [Effect presets](effects.md#effect-presets)
+  - [Effect curves](effects.md#effect-curves)
   - [Filters](effects.md#filters)
   - [High-pass and low-pass filters](effects.md#high-pass-and-low-pass-filters)
   - [Parametric equaliser](effects.md#parametric-equaliser)

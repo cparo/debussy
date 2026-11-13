@@ -2,9 +2,9 @@
 //! linear axes of ±3 dBFS each way (`docs/architecture/effect-displays.md` "Amplifier display",
 //! drawn as in "Display plots").
 
-use audio_effects::{ShaperCurve, amplifier_curve};
+use audio_effects::ShaperCurve;
 
-use crate::effect_display::{DisplayContext, DisplayParameter, EffectDisplay, Pixels};
+use crate::effect_display::{DisplayContext, Pixels};
 use crate::plot::{Axis, Canvas, columns};
 use crate::theme::{self, FULL_SCALE, GRID};
 
@@ -22,28 +22,9 @@ fn sample_axis() -> Axis {
     Axis::linear(-EDGE, EDGE)
 }
 
-/// The display of the `amplifier` kind: its shaper curve.
-pub(crate) struct AmplifierDisplay;
-
-impl EffectDisplay for AmplifierDisplay {
-    fn draw(
-        &self,
-        parameters: &[DisplayParameter<'_>],
-        context: &DisplayContext<'_>,
-    ) -> Option<Pixels> {
-        let value = |name: &str| {
-            parameters
-                .iter()
-                .find(|p| p.name == name)
-                .map_or(f32::NAN, |p| p.value)
-        };
-        render(&amplifier_curve(value), context)
-    }
-}
-
 /// `curve` drawn on its grid for `context`, on a transparent background: input sample across and
 /// output sample up.
-fn render(curve: &ShaperCurve, context: &DisplayContext<'_>) -> Option<Pixels> {
+pub(crate) fn render(curve: &ShaperCurve, context: &DisplayContext) -> Option<Pixels> {
     let mut canvas = Canvas::new(context)?;
     let plot = canvas.plot(sample_axis(), sample_axis());
     canvas.grid(&plot, &LINES, &LINES);
@@ -59,6 +40,9 @@ fn render(curve: &ShaperCurve, context: &DisplayContext<'_>) -> Option<Pixels> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audio_effects::Curve;
+
+    use crate::effect_display::values_with;
     use crate::plot::Plot;
     use crate::plot::probe::{red_near, rows_of};
     use crate::theme::Tone;
@@ -71,26 +55,21 @@ mod tests {
     /// The display at the `amplifier` defaults, with `changes` by name, 600 pixels wide at
     /// scale 1.
     fn draw(changes: &[(&str, f32)]) -> Option<Pixels> {
-        let infos = audio_effects::parameter_infos("amplifier")?;
-        let parameters: Vec<DisplayParameter<'_>> = infos
-            .iter()
-            .map(|info| DisplayParameter {
-                name: &info.name,
-                value: changes
-                    .iter()
-                    .find(|(n, _)| *n == info.name)
-                    .map_or(info.default, |&(_, v)| v),
-                unit: &info.unit,
-            })
-            .collect();
         let context = DisplayContext {
-            kind: "amplifier",
             tone: Tone::Dark,
-            sample_rate: 48_000,
             width: 600,
             height: 320,
         };
-        AmplifierDisplay.draw(&parameters, &context)
+        render(&shaper(changes)?, &context)
+    }
+
+    /// The `amplifier` curve at its defaults with `changes` by name.
+    fn shaper(changes: &[(&str, f32)]) -> Option<ShaperCurve> {
+        let values = values_with("amplifier", changes)?;
+        match audio_effects::curve("amplifier", &values, 48_000)? {
+            Curve::Shaper(curve) => Some(curve),
+            _ => None,
+        }
     }
 
     /// Whether the curve passes within 2 pixels of output `v` at input `input`.
@@ -111,11 +90,7 @@ mod tests {
         for (shape, drive) in [(0.0, 0.0), (0.0, 12.0), (2.0, 0.0), (2.0, 12.0)] {
             let changes = [("shape", shape), ("drive", drive)];
             let pixels = draw(&changes).ok_or("no picture")?;
-            let curve = amplifier_curve(|name| match name {
-                "shape" => shape,
-                "drive" => drive,
-                _ => 0.0,
-            });
+            let curve = shaper(&changes).ok_or("no curve")?;
             for input in [-1.2, -0.5, 0.25, 0.8] {
                 let expected = curve.output(input);
                 assert!(

@@ -202,7 +202,7 @@ pub(crate) struct Canvas {
 
 impl Canvas {
     /// A canvas of `context`'s size, if it fits in memory's index range.
-    pub(crate) fn new(context: &DisplayContext<'_>) -> Option<Canvas> {
+    pub(crate) fn new(context: &DisplayContext) -> Option<Canvas> {
         let width = usize::try_from(context.width).ok()?;
         let height = usize::try_from(context.height).ok()?;
         // `height` is `DISPLAY_HEIGHT` logical pixels; at most a few thousand.
@@ -587,9 +587,7 @@ mod tests {
     #[test]
     fn test_canvas_finishes_at_the_requested_size() -> Result<(), Box<dyn std::error::Error>> {
         let context = DisplayContext {
-            kind: "",
             tone: Tone::Light,
-            sample_rate: 48_000,
             width: 900,
             height: 480,
         };

@@ -125,23 +125,25 @@ impl TransferCurve {
     }
 }
 
-/// The steady-state curve a `dynamics` node's parameters ask for, given each parameter's value
-/// by name; a name `value` does not know should give its default. Built by the same mapping as
-/// processing, so a display of it cannot differ.
-pub fn dynamics_curve(value: impl Fn(&str) -> f32) -> TransferCurve {
+/// The steady-state curve of a `dynamics` effect whose parameters stand at `values`, in
+/// declaration order (see [`crate::CurveFn`]). Read through [`Control`] and built by the same
+/// mapping as processing, so a display of it cannot differ.
+pub(crate) fn curve(values: &[f32], _sample_rate: u32) -> Option<crate::Curve> {
+    let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
+    let value = |control: Control| values[control as usize];
     let curve = Curve {
-        threshold: value("threshold"),
-        slope_above: slope_above(value("ratio above")),
-        ratio_below: value("ratio below"),
-        knee: value("knee"),
-        range: value("range"),
-        makeup: value("makeup"),
+        threshold: value(Control::Threshold),
+        slope_above: slope_above(value(Control::RatioAbove)),
+        ratio_below: value(Control::RatioBelow),
+        knee: value(Control::Knee),
+        range: value(Control::Range),
+        makeup: value(Control::Makeup),
     };
-    let ceiling = (value("ceiling enabled") >= 0.5).then(|| Ceiling {
-        level: value("ceiling"),
-        knee: value("ceiling knee"),
+    let ceiling = (value(Control::CeilingEnabled) >= 0.5).then(|| Ceiling {
+        level: value(Control::Ceiling),
+        knee: value(Control::CeilingKnee),
     });
-    TransferCurve { curve, ceiling }
+    Some(crate::Curve::Transfer(TransferCurve { curve, ceiling }))
 }
 
 /// The lookahead of `milliseconds` at `sample_rate`, in whole frames.
@@ -421,34 +423,28 @@ mod tests {
         Ok(())
     }
 
+    /// The transfer curve at the defaults with `changes` by name.
+    fn transfer(changes: &[(&str, f32)]) -> Result<TransferCurve, Box<dyn std::error::Error>> {
+        let values = crate::curve::values_with("dynamics", changes).ok_or("unknown kind")?;
+        match curve(&values, 48_000) {
+            Some(crate::Curve::Transfer(transfer)) => Ok(transfer),
+            other => Err(format!("not a transfer curve: {other:?}").into()),
+        }
+    }
+
     #[test]
-    fn test_dynamics_curve_reads_parameters_by_name() -> Result<(), Error> {
-        let dynamics = Dynamics::new()?;
-        let infos: Vec<ParameterInfo> = dynamics
-            .parameters()
-            .iter()
-            .map(|p| p.info().clone())
-            .collect();
-        let default = |name: &str| {
-            infos
-                .iter()
-                .find(|i| i.name == name)
-                .map_or(f32::NAN, |i| i.default)
-        };
-        let TransferCurve { curve, ceiling } = dynamics_curve(default);
+    fn test_curve_reads_parameters_in_declaration_order() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let TransferCurve { curve, ceiling } = transfer(&[])?;
         assert_eq!(
             (curve.threshold, curve.slope_above, curve.knee),
             (-18.0, 0.25, 6.0)
         );
         assert_eq!(ceiling, None);
         // Above the knee at 4:1: −18 + 18/4.
-        assert!((dynamics_curve(default).output_db(0.0) - (-13.5)).abs() < 1e-4);
-        let limiter = |name: &str| match name {
-            "ceiling enabled" => 1.0,
-            "ratio above" => MAX_RATIO,
-            _ => default(name),
-        };
-        let TransferCurve { curve, ceiling } = dynamics_curve(limiter);
+        assert!((transfer(&[])?.output_db(0.0) - (-13.5)).abs() < 1e-4);
+        let limiter = [("ceiling enabled", 1.0), ("ratio above", MAX_RATIO)];
+        let TransferCurve { curve, ceiling } = transfer(&limiter)?;
         assert_eq!(curve.slope_above, 0.0);
         assert_eq!(
             ceiling,
