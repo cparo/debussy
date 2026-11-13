@@ -14,6 +14,9 @@ use iced::{Rectangle, Task, Vector};
 /// The id of the focused control's focus ring; only one control has it at a time.
 pub(crate) const FOCUSED: &str = "dialog-focus";
 
+/// The space left between a revealed control and the edge of the view, in logical pixels.
+const MARGIN: f32 = 12.0;
+
 /// Scrolls the control with the keyboard focus into view, if one is drawn.
 pub(crate) fn reveal<T: Send + 'static>() -> Task<T> {
     operate(Locate::default()).then(|target| operate::<()>(Reveal { target }).discard())
@@ -58,7 +61,8 @@ impl Operation<Rectangle> for Locate {
     }
 }
 
-/// Scrolls every scrollable whose content holds `target` until `target` shows whole.
+/// Scrolls every scrollable whose content holds `target` until `target` shows whole, with
+/// [`MARGIN`] around it where the content allows.
 struct Reveal {
     /// The control's bounds, in the layout's unscrolled coordinates.
     target: Rectangle,
@@ -80,17 +84,18 @@ impl<T> Operation<T> for Reveal {
         if !content_bounds.contains(self.target.center()) {
             return;
         }
+        let target = self.target.expand(MARGIN);
         let x = delta(
             translation.x,
             bounds.width,
-            self.target.x - content_bounds.x,
-            self.target.width,
+            target.x - content_bounds.x,
+            target.width,
         );
         let y = delta(
             translation.y,
             bounds.height,
-            self.target.y - content_bounds.y,
-            self.target.height,
+            target.y - content_bounds.y,
+            target.height,
         );
         if x != 0.0 || y != 0.0 {
             state.scroll_by(AbsoluteOffset { x, y }, bounds, content_bounds);
@@ -139,7 +144,8 @@ mod tests {
             &mut state,
         );
         assert_eq!(state.0.len(), 1);
-        assert_eq!((state.0[0].x, state.0[0].y), (500.0, 0.0));
+        // Its end, plus the margin, comes to the view's end; vertically it fits with its margin.
+        assert_eq!((state.0[0].x, state.0[0].y), (500.0 + MARGIN, 0.0));
         // A scrollable elsewhere is left alone.
         let elsewhere = Rectangle::new((0.0, 500.0).into(), (1200.0, 200.0).into());
         Operation::<()>::scrollable(

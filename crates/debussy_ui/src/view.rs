@@ -9,7 +9,7 @@ use iced::widget::{
     Space, button, canvas, column, container, mouse_area, opaque, pick_list, pin, progress_bar,
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
-use iced::{Alignment, Element, Fill, Length, Size};
+use iced::{Alignment, Element, Fill, Length, Padding, Size};
 use project_model::{Endpoint, NodeKind, Side, TrackId};
 
 use crate::app::{App, Message, NewNode};
@@ -49,6 +49,9 @@ static LOGO: LazyLock<svg::Handle> = LazyLock::new(|| {
 });
 /// The padding inside a node's dialog.
 const DIALOG_PADDING: f32 = 12.0;
+/// The space kept clear at the right of a node dialog's body for its vertical scrollbar: the
+/// scrollbar's default width and a gap.
+const BODY_SCROLLBAR_ROOM: f32 = 14.0;
 /// The id of the track name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
@@ -731,6 +734,12 @@ impl App {
             },
             NodeKind::Bus(_) => Space::new().into(),
         };
+        // Room on the right for the body's scrollbar, which floats over its content, so it never
+        // covers the rightmost controls.
+        let body = container(body).padding(Padding {
+            right: BODY_SCROLLBAR_ROOM,
+            ..Padding::ZERO
+        });
         let dialog = container(column![header, scrollable(body).height(Fill), footer].spacing(12))
             .padding(DIALOG_PADDING)
             .width(Length::Fixed(size.width))
