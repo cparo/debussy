@@ -16,11 +16,12 @@
 //!   oversampling, and [`ShaperCurve`], its curve (`docs/architecture/effects.md` "Amplifier").
 //! - `delay`: [`Delay`], a whole-frame tap delay, free or tempo-synced, in stereo or ping-pong
 //!   (`docs/architecture/delay-and-reverb.md` "Delay").
-//! - `chorus`: [`Chorus`], 1 to 4 LFO-swept delay voices per channel
+//! - `chorus`: the chorus, 1 to 4 LFO-swept delay voices per channel
 //!   (`docs/architecture/modulation.md` "Chorus").
-//! - `flanger`: [`Flanger`], an LFO-swept short delay with feedback
+//! - `flanger`: the flanger, an LFO-swept short delay with feedback
 //!   (`docs/architecture/modulation.md` "Flanger").
-//! - `modulated_delay`: the LFO and lines the chorus and flanger share.
+//! - `modulated_delay`: the node the chorus and flanger share: the LFO, lines, spread and mix
+//!   around each kind's sweep.
 //! - `reverb`: [`Reverb`], a feedback delay network or Dattorro's plate behind a pre-delay
 //!   (`docs/architecture/delay-and-reverb.md` "Reverb").
 //! - `tap`: a whole-frame tap that crossfades when it changes, for `delay` and `reverb`.
@@ -56,13 +57,11 @@ mod tap;
 mod utility;
 
 pub use amplifier::{Amplifier, Shape, ShaperCurve};
-pub use chorus::{Chorus, MAX_VOICES};
 pub use curve::{Curve, CurveFn, curve};
 pub use delay::{Delay, MAX_DELAY_MS, MAX_OFFSET_MS};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
 pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
-pub use flanger::{Flanger, MAX_FEEDBACK_PERCENT};
 pub use impulse::ImpulseCurve;
 pub use mixer::{
     Control, MAX_CHANNELS, MAX_GAIN_DB, Mixer, Mode, SILENCE_DB, mixer_parameter_infos,
