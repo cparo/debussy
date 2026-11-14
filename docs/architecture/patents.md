@@ -35,4 +35,6 @@ spread and tempo-synced periods, without a smooth-random shape
 ([ADR-0119](../adrs/0119-lfo-shapes-are-sine-triangle-saws-square-and.md)), and the chorus and
 flanger: LFO-modulated delays read by 4-point Hermite interpolation, with in-node flanger
 feedback and without through-zero flanging
-([ADR-0120](../adrs/0120-chorus-and-flanger-are-lfo-modulated-delays-read.md)).
+([ADR-0120](../adrs/0120-chorus-and-flanger-are-lfo-modulated-delays-read.md)), and pink noise:
+white noise through a cascade of first-order sections with alternating real poles and zeros, one
+pole per octave ([ADR-0122](../adrs/0122-pink-noise-is-a-seeded-alternating-pole-zero.md)).

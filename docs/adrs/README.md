@@ -144,4 +144,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0118](0118-modulation-sources-live-in-a-new-real-time-core.md) | Modulation sources live in a new real-time-core modulation crate | Accepted | [Crate map](../architecture/crates.md#crate-map) |
 | [ADR-0119](0119-lfo-shapes-are-sine-triangle-saws-square-and.md) | LFO shapes are sine, triangle, saws, square and sample-and-hold, without smooth random | Accepted | [LFO](../architecture/modulation.md#lfo) |
 | [ADR-0120](0120-chorus-and-flanger-are-lfo-modulated-delays-read.md) | Chorus and flanger are LFO-modulated delays read by 4-point Hermite interpolation | Accepted | [Modulated delay](../architecture/modulation.md#modulated-delay) |
+| [ADR-0121](0121-chorus-and-flanger-displays-plot-the-gain-over-10.md) | Chorus and flanger displays plot the gain over 10 s of pink noise | Accepted | [Modulation display](../architecture/effect-displays.md#modulation-display) |
+| [ADR-0122](0122-pink-noise-is-a-seeded-alternating-pole-zero.md) | Pink noise is a seeded alternating pole-zero filter cascade | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 

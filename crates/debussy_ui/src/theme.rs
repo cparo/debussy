@@ -476,6 +476,27 @@ pub fn mix(a: Color, b: Color, amount: f32) -> Color {
     }
 }
 
+/// Where on the spectrum ramp the audio colour sits: below it the ramp rises from the background
+/// to the audio colour, above it from the audio colour to the hot end.
+pub const SPECTRUM_KNEE: f32 = 0.7;
+
+/// The colour of a level `t` (0 to 1) of the way up the spectrum ramp drawn over `background`:
+/// `background` at 0, `audio` at [`SPECTRUM_KNEE`], and at 1 a hot end, `audio` darkened on a
+/// light background or lightened on a dark one.
+pub fn spectrum_colour(t: f32, background: Color, audio: Color) -> Color {
+    let light = background.r + background.g + background.b > 1.5;
+    let hot = if light {
+        mix(audio, Color::BLACK, 0.6)
+    } else {
+        mix(audio, Color::WHITE, 0.75)
+    };
+    if t < SPECTRUM_KNEE {
+        mix(background, audio, t / SPECTRUM_KNEE)
+    } else {
+        mix(audio, hot, (t - SPECTRUM_KNEE) / (1.0 - SPECTRUM_KNEE))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,6 +506,18 @@ mod tests {
         assert_eq!(tone_of(&theme(Tone::Dark)), Tone::Dark);
         assert_eq!(tone_of(&theme(Tone::Light)), Tone::Light);
         assert_eq!(Tone::Dark.toggled(), Tone::Light);
+    }
+
+    #[test]
+    fn test_spectrum_colour_runs_from_background_through_audio_to_hot() {
+        let audio = tokens(Tone::Dark).audio;
+        assert_eq!(spectrum_colour(0.0, CHARCOAL, audio), CHARCOAL);
+        assert_eq!(spectrum_colour(SPECTRUM_KNEE, CHARCOAL, audio), audio);
+        // Lighter on a dark background, darker on a light one.
+        let dark_hot = spectrum_colour(1.0, CHARCOAL, audio);
+        assert!(dark_hot.g > audio.g);
+        let light_hot = spectrum_colour(1.0, Color::WHITE, audio);
+        assert!(light_hot.g < audio.g);
     }
 
     #[test]

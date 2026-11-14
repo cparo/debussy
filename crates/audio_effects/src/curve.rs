@@ -4,6 +4,7 @@
 
 use crate::amplifier::ShaperCurve;
 use crate::dynamics::TransferCurve;
+use crate::gain_spectrogram::SpectrogramCurve;
 use crate::impulse::ImpulseCurve;
 use crate::registry::EFFECTS;
 use crate::response::FrequencyResponse;
@@ -23,6 +24,9 @@ pub enum Curve {
     /// The output level over time after a unit impulse into both channels: `delay` and
     /// `reverb`.
     Impulse(ImpulseCurve),
+    /// The gain over time and frequency against pink noise, in two lanes: `chorus` and
+    /// `flanger`.
+    Spectrogram(SpectrogramCurve),
 }
 
 /// Builds one effect kind's curve from its parameter values (in the order the effect declares
@@ -74,6 +78,7 @@ mod tests {
             "dynamics" => Some("transfer"),
             "amplifier" => Some("shaper"),
             "delay" | "reverb" => Some("impulse"),
+            "chorus" | "flanger" => Some("spectrogram"),
             _ => None,
         }
     }
@@ -85,6 +90,7 @@ mod tests {
             Curve::Transfer(_) => "transfer",
             Curve::Shaper(_) => "shaper",
             Curve::Impulse(_) => "impulse",
+            Curve::Spectrogram(_) => "spectrogram",
         }
     }
 

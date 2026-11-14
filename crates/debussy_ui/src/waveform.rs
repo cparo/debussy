@@ -16,7 +16,7 @@ use crate::app::Message;
 use crate::grid::grid_lines;
 use crate::raster::{Raster, draw_tiled};
 use crate::services::Services;
-use crate::theme::{CURSOR, mix, tokens, tone_of};
+use crate::theme::{CURSOR, mix, spectrum_colour, tokens, tone_of};
 
 /// Waveform columns per lane; the canvas scales them to its width.
 pub const LANE_COLUMNS: usize = 1024;
@@ -558,12 +558,6 @@ fn draw_spectrum(
 ) {
     let width = size.width / lane.spectrum.len().max(1) as f32;
     let height = size.height / SPECTRUM_BANDS as f32;
-    let light = background.r + background.g + background.b > 1.5;
-    let hot = if light {
-        mix(audio, iced::Color::BLACK, 0.6)
-    } else {
-        mix(audio, iced::Color::WHITE, 0.75)
-    };
     for (i, column) in lane.spectrum.iter().enumerate() {
         let Some(bands) = column else {
             continue;
@@ -573,11 +567,7 @@ fn draw_spectrum(
             if t <= 0.0 {
                 continue;
             }
-            let color = if t < 0.7 {
-                mix(background, audio, t / 0.7)
-            } else {
-                mix(audio, hot, (t - 0.7) / 0.3)
-            };
+            let color = spectrum_colour(t, background, audio);
             raster.fill_rect(
                 i as f32 * width,
                 size.height - (band + 1) as f32 * height,

@@ -41,8 +41,10 @@ a new node at its defaults shows the preset that has no values. The presets are
 kind's parameter values ask for, for its display, in a project whose tempo makes a whole note
 `frames_per_whole_note` frames long (`Tempo::frames_per_whole_note`): a `Curve`, one of a
 magnitude response over frequency (`Response`), a steady-state level transfer (`Transfer`), a
-static sample shaper (`Shaper`) or an impulse response (`Impulse`,
-`docs/architecture/effect-displays.md` "Impulse response display"). The set of variants is
+static sample shaper (`Shaper`), an impulse response (`Impulse`,
+`docs/architecture/effect-displays.md` "Impulse response display") or a gain over time and
+frequency against pink noise (`Spectrogram`, `docs/architecture/effect-displays.md` "Modulation
+display"). The set of variants is
 closed. Building a curve is cheap; any simulation waits until it is read
 ([ADR-0115](../adrs/0115-delay-and-reverb-displays-plot-a-simulated-impulse.md)).
 

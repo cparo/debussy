@@ -48,7 +48,8 @@ both channels; the right channel reads it at `spread / 360` cycles from the left
 frequency is `rate` in hertz, shown while `sync` is off, or the reciprocal of a synced LFO period
 (see "LFO"), with `note` and `feel` shown while it is on. The base delay, depth, spread, feedback
 and `mix` ramp; the LFO's frequency and shape change at once, its phase continuing. Buffers are
-allocated when the node is prepared. Latency is 0. Neither kind has a curve.
+allocated when the node is prepared. Latency is 0. Both kinds' curve is a `Spectrogram`
+(`docs/architecture/effect-displays.md` "Modulation display").
 
 ## Chorus
 

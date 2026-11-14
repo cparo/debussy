@@ -110,3 +110,34 @@ when the picture is drawn.
   point the slice's peak absolute output in dB at the slice's middle; silence and undefined
   values lie on the bottom edge
   ([ADR-0115](../adrs/0115-delay-and-reverb-displays-plot-a-simulated-impulse.md)).
+
+## Modulation display
+
+A `Spectrogram` curve, which `chorus` and `flanger` give, is drawn by
+`crates/debussy_ui/src/gain_display.rs`. It plots the node's gain over 10 seconds
+(`audio_effects::SPECTROGRAM_SPAN`) of seeded pink noise (`dsp::Pink`), the same noise into both
+channels: per channel, the output's level against the noise's, by time and frequency.
+`SpectrogramCurve::gains` computes it by running the effect's own per-frame processing, at its
+values with no ramps and LFO phase 0, for the project tempo's whole note, at the project's sample
+rate or 48 kHz (`gain_spectrogram::MAX_RATE`), whichever is lower. Building the curve copies the
+values; the simulation runs only when the picture is drawn.
+
+- The effect runs for half a second and half an analysis window before time 0. The window is a
+  Hann window (`dsp::Stft`) of the power of two nearest 43 ms at the simulated rate (2048 frames
+  at 44.1 and 48 kHz), centred on the middle of each column's equal slice of the span. There are
+  as many columns as the lane has physical pixels, up to 480 (`SPECTROGRAM_MAX_COLUMNS`); with
+  fewer columns than pixels, each column spans whole pixels.
+- A cell's gain is `10·log10(Σ|Y|² / Σ|X|²)` over the bins whose centres lie in its row's band, `Y`
+  the output and `X` the noise; a band narrower than one bin interpolates the power of the two
+  bins around its centre. A band whose centre is at or above the Nyquist frequency, or where the
+  noise has no power, is undefined.
+- Two lanes stack as in "Impulse response display", left channel above right, tagged `L` and `R`
+  at 3.16 kHz. Time runs linearly from 0 to 10 s with that section's marks, labelled below the
+  bottom lane only.
+- Each lane's vertical axis runs from 20 Hz at the bottom to 20 kHz at the top on a log scale,
+  rows log-spaced, with grey lines and labels at `100Hz`, `1kHz` and `10kHz`, thinned as in
+  "Display plots".
+- There is one row per physical pixel of each lane's height. A cell's colour is on the spectrum ramp
+  (`theme::spectrum_colour`) over charcoal: −48 dB and below and undefined cells are left as
+  background, 0 dB is the tone's audio colour, and +12 dB and above the ramp's hot end
+  ([ADR-0121](../adrs/0121-chorus-and-flanger-displays-plot-the-gain-over-10.md)).
