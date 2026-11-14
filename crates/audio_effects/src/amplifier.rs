@@ -5,7 +5,7 @@ use std::f32::consts::{FRAC_2_PI, FRAC_PI_2};
 
 use audio_buffers::Layout;
 use dsp::{Factor, Oversampler, db_to_gain};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::error::Error;
 use crate::filters::{Cascade, Response};
@@ -186,12 +186,13 @@ impl Running {
         mix
     }
 
-    /// Takes the parameter values, once per block.
-    fn set(&mut self, value: impl Fn(Control) -> f32) {
-        self.drive.set_target(value(Control::Drive));
-        self.bias.set_target(value(Control::Bias));
-        self.makeup.set_target(value(Control::Makeup));
-        let shape = Shape::from_value(value(Control::Shape));
+    /// Takes the parameter readings, once per block; each ramp reaches its target by the next
+    /// control point while a curve drives its parameter.
+    fn set(&mut self, read: impl Fn(Control) -> Reading) {
+        self.drive.approach(read(Control::Drive));
+        self.bias.approach(read(Control::Bias));
+        self.makeup.approach(read(Control::Makeup));
+        let shape = Shape::from_value(read(Control::Shape).value);
         if shape != self.shape {
             // A change mid-fade starts from the mix heard now, so the output does not jump.
             self.fading_from = Self::mix(&self.fading_from, self.shape, self.fade_in.current());
@@ -322,7 +323,7 @@ impl Node for Amplifier {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(|control| parameters[control as usize].get());
+        running.set(|control| parameters[control as usize].read());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
@@ -335,6 +336,27 @@ impl Node for Amplifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut amplifier = Amplifier::new()?;
+        amplifier.prepare(48_000, 64);
+        let infos: Vec<ParameterInfo> = amplifier
+            .parameters
+            .iter()
+            .map(|p| p.info().clone())
+            .collect();
+        let running = amplifier.running.as_mut().ok_or("not prepared")?;
+        running.set(|control| automated(off_default(&infos[control as usize])));
+        assert_lands(&mut [
+            ("drive", &mut running.drive),
+            ("bias", &mut running.bias),
+            ("makeup", &mut running.makeup),
+        ]);
+        Ok(())
+    }
 
     fn infos() -> Result<Vec<ParameterInfo>, Error> {
         Ok(Amplifier::new()?
@@ -407,7 +429,7 @@ mod tests {
         amplifier.prepare(48_000, 64);
         let parameters = amplifier.parameters.clone();
         let running = amplifier.running.as_mut().ok_or("not prepared")?;
-        let set = |running: &mut Running| running.set(|c| parameters[c as usize].get());
+        let set = |running: &mut Running| running.set(|c| parameters[c as usize].read());
         // A steady input deep in the shapes' knees, where they differ most; let the DC filter
         // settle so only the shaper moves the output.
         let x = 0.8;

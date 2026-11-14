@@ -3,7 +3,7 @@
 
 use dsp::TapDelay;
 use modulation::Lfo;
-use signal_graph::{ParameterInfo, Ramp, Scale};
+use signal_graph::{ParameterInfo, Ramp, Reading, Scale};
 
 use crate::gain_spectrogram::SpectrogramCurve;
 use crate::modulated_delay::{LfoDefaults, ModulatedDelay, Sweep, controls, ms_to_frames};
@@ -79,15 +79,17 @@ impl Sweep for Comb {
         }
     }
 
-    fn set(&mut self, value: &dyn Fn(usize) -> f32) {
-        let value = |control: Control| value(control as usize);
+    fn set(&mut self, read: &dyn Fn(usize) -> Reading) {
+        let read = |control: Control| read(control as usize);
+        let rate = self.sample_rate;
         self.delay
-            .set_target(ms_to_frames(value(Control::Delay), self.sample_rate));
-        self.depth.set_target(value(Control::Depth) / 100.0);
+            .approach(read(Control::Delay).map(|ms| ms_to_frames(ms, rate)));
+        self.depth.approach(read(Control::Depth).map(|v| v / 100.0));
         let limit = MAX_FEEDBACK_PERCENT / 100.0;
-        let feedback = (value(Control::Feedback) / 100.0).clamp(-limit, limit);
-        self.feedback
-            .set_target(if feedback.is_nan() { 0.0 } else { feedback });
+        self.feedback.approach(read(Control::Feedback).map(|v| {
+            let feedback = (v / 100.0).clamp(-limit, limit);
+            if feedback.is_nan() { 0.0 } else { feedback }
+        }));
     }
 
     fn ramps(&mut self) -> impl Iterator<Item = &mut Ramp> {
@@ -145,6 +147,19 @@ pub(crate) fn curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point() {
+        let infos = Comb::infos();
+        let mut comb = Comb::new(48_000);
+        comb.set(&|i| automated(off_default(&infos[i])));
+        assert_lands(&mut [
+            ("delay", &mut comb.delay),
+            ("depth", &mut comb.depth),
+            ("feedback", &mut comb.feedback),
+        ]);
+    }
     use signal_graph::Node;
 
     #[test]
@@ -188,22 +203,22 @@ mod tests {
     fn test_set_holds_feedback_below_one() {
         let mut comb = Comb::new(48_000);
         comb.set(&|i| {
-            if i == Control::Feedback as usize {
+            Reading::fixed(if i == Control::Feedback as usize {
                 300.0
             } else {
                 1.0
-            }
+            })
         });
         assert_eq!(comb.feedback.target(), 0.95);
         comb.set(&|i| {
-            if i == Control::Feedback as usize {
+            Reading::fixed(if i == Control::Feedback as usize {
                 -300.0
             } else {
                 1.0
-            }
+            })
         });
         assert_eq!(comb.feedback.target(), -0.95);
-        comb.set(&|_| f32::NAN);
+        comb.set(&|_| Reading::fixed(f32::NAN));
         assert_eq!(comb.feedback.target(), 0.0);
     }
 
@@ -211,11 +226,11 @@ mod tests {
     fn test_frame_writes_input_alone_when_the_loop_is_not_finite() {
         let mut comb = Comb::new(48_000);
         comb.set(&|i| {
-            if i == Control::Feedback as usize {
+            Reading::fixed(if i == Control::Feedback as usize {
                 90.0
             } else {
                 1.0
-            }
+            })
         });
         let mut lines = [TapDelay::new(64), TapDelay::new(64)];
         let lfo = Lfo::new(48_000, 0);

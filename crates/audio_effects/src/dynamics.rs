@@ -3,7 +3,7 @@
 
 use audio_buffers::Layout;
 use dsp::{Ballistics, Ceiling, Curve, DelayLine, ceiling_gain_db, curve_gain_db, db_to_gain};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::error::Error;
 
@@ -223,21 +223,22 @@ impl Dynamics {
 }
 
 impl Running {
-    /// Takes the parameter values, once per block: new ramp targets, ballistics times and
-    /// detector.
-    fn set(&mut self, value: impl Fn(Control) -> f32) {
+    /// Takes the parameter readings, once per block: new ramp targets, each reached by the next
+    /// control point while a curve drives its parameter, and ballistics times and detector.
+    fn set(&mut self, read: impl Fn(Control) -> Reading) {
+        let value = |control: Control| read(control).value;
         let ramps = &mut self.ramps;
-        ramps.threshold.set_target(value(Control::Threshold));
+        ramps.threshold.approach(read(Control::Threshold));
         ramps
             .slope_above
-            .set_target(slope_above(value(Control::RatioAbove)));
-        ramps.ratio_below.set_target(value(Control::RatioBelow));
-        ramps.knee.set_target(value(Control::Knee));
-        ramps.range.set_target(value(Control::Range));
-        ramps.ceiling.set_target(value(Control::Ceiling));
-        ramps.ceiling_knee.set_target(value(Control::CeilingKnee));
-        ramps.ceiling_mix.set_target(value(Control::CeilingEnabled));
-        ramps.makeup.set_target(value(Control::Makeup));
+            .approach(read(Control::RatioAbove).map(slope_above));
+        ramps.ratio_below.approach(read(Control::RatioBelow));
+        ramps.knee.approach(read(Control::Knee));
+        ramps.range.approach(read(Control::Range));
+        ramps.ceiling.approach(read(Control::Ceiling));
+        ramps.ceiling_knee.approach(read(Control::CeilingKnee));
+        ramps.ceiling_mix.approach(read(Control::CeilingEnabled));
+        ramps.makeup.approach(read(Control::Makeup));
         let times = [
             value(Control::Attack),
             value(Control::Release),
@@ -335,7 +336,7 @@ impl Node for Dynamics {
             times: [f32::NAN; 3],
             delays: [DelayLine::new(frames), DelayLine::new(frames)],
         };
-        running.set(|control| self.get(control));
+        running.set(|control| self.parameters[control as usize].read());
         self.running = Some(running);
     }
 
@@ -347,7 +348,7 @@ impl Node for Dynamics {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(|control| parameters[control as usize].get());
+        running.set(|control| parameters[control as usize].read());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
@@ -363,6 +364,33 @@ impl Node for Dynamics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut dynamics = Dynamics::new()?;
+        dynamics.prepare(48_000, 64);
+        let infos: Vec<ParameterInfo> = dynamics
+            .parameters
+            .iter()
+            .map(|p| p.info().clone())
+            .collect();
+        let running = dynamics.running.as_mut().ok_or("not prepared")?;
+        running.set(|control| automated(off_default(&infos[control as usize])));
+        let r = &mut running.ramps;
+        assert_lands(&mut [
+            ("threshold", &mut r.threshold),
+            ("slope above", &mut r.slope_above),
+            ("ratio below", &mut r.ratio_below),
+            ("knee", &mut r.knee),
+            ("range", &mut r.range),
+            ("ceiling", &mut r.ceiling),
+            ("ceiling knee", &mut r.ceiling_knee),
+            ("makeup", &mut r.makeup),
+        ]);
+        Ok(())
+    }
 
     #[test]
     fn test_new_declares_parameters_in_groups() -> Result<(), Error> {

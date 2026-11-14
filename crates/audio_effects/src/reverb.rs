@@ -5,7 +5,7 @@ use std::f32::consts::TAU;
 
 use audio_buffers::Layout;
 use dsp::{FOLD_DOWN_GAIN, OnePole, OnePoleCoefficients, TapDelay};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::error::Error;
 use crate::impulse::{ImpulseCurve, SPAN_DB};
@@ -579,14 +579,15 @@ impl Running {
             mix: ramp(value(Control::Mix) / 100.0),
         };
         running.set_decay(decay);
-        running.set(&value);
+        running.set(&|control| Reading::fixed(value(control)));
         // Start at the pre-delay, with no crossfade in.
         running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
         running
     }
 
     /// Takes the parameter values, once per block.
-    fn set(&mut self, value: &impl Fn(Control) -> f32) {
+    fn set(&mut self, read: &impl Fn(Control) -> Reading) {
+        let value = |control| read(control).value;
         let frames = f64::from(value(Control::PreDelay)) * f64::from(self.sample_rate) / 1000.0;
         let max = self.pre_delay[0].max_tap();
         for tap in &mut self.taps {
@@ -599,9 +600,11 @@ impl Running {
             self.room.clear();
             self.plate.clear();
         }
-        self.decay_log.set_target(value(Control::Decay).log2());
-        self.damping_log.set_target(value(Control::Damping).log2());
-        self.mix.set_target(value(Control::Mix) / 100.0);
+        // Each reaches its target by the next control point while automated.
+        self.decay_log.approach(read(Control::Decay).map(f32::log2));
+        self.damping_log
+            .approach(read(Control::Damping).map(f32::log2));
+        self.mix.approach(read(Control::Mix).map(|v| v / 100.0));
         self.plate.renormalise();
     }
 
@@ -747,7 +750,7 @@ impl Node for Reverb {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(&|control: Control| parameters[control as usize].get());
+        running.set(&|control: Control| parameters[control as usize].read());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
@@ -760,6 +763,21 @@ impl Node for Reverb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let infos = crate::parameter_infos("reverb").ok_or("no reverb")?;
+        let mut running = Running::new(48_000, |control| infos[control as usize].default);
+        running.set(&|control| automated(off_default(&infos[control as usize])));
+        assert_lands(&mut [
+            ("decay", &mut running.decay_log),
+            ("damping", &mut running.damping_log),
+            ("mix", &mut running.mix),
+        ]);
+        Ok(())
+    }
 
     #[test]
     fn test_new_declares_parameters_in_groups() -> Result<(), Error> {

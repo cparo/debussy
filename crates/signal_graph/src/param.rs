@@ -329,6 +329,20 @@ impl Parameter {
             .then(|| self.shared.ramp_frames.load(Ordering::Relaxed) as usize)
     }
 
+    /// The value a node uses and how soon to reach it, read together, once per block.
+    pub fn read(&self) -> Reading {
+        if self.is_automated() {
+            let value = f32::from_bits(self.shared.curve_bits.load(Ordering::Relaxed));
+            let frames = self.shared.ramp_frames.load(Ordering::Relaxed) as usize;
+            Reading {
+                value,
+                within: Some(frames),
+            }
+        } else {
+            Reading::fixed(self.base())
+        }
+    }
+
     /// Whether `other` is a handle to the same parameter.
     pub fn same(&self, other: &Parameter) -> bool {
         Arc::ptr_eq(&self.shared, &other.shared)
@@ -353,6 +367,37 @@ impl Parameter {
     /// Releases the parameter from its curve: it returns to the value as set. Real-time safe.
     pub(crate) fn release(&self) {
         self.shared.automated.store(false, Ordering::Relaxed);
+    }
+}
+
+/// A parameter's value as a node reads it once per block, with how soon a reader should reach
+/// it: by the next control point while a curve drives the parameter, otherwise over
+/// [`RAMP_SECONDS`]. A value derived from one parameter keeps that parameter's timing through
+/// [`Reading::map`]. Never allocates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reading {
+    /// The value.
+    pub value: f32,
+    /// The frames to the next control point while automated; `None` otherwise.
+    pub within: Option<usize>,
+}
+
+impl Reading {
+    /// A reading of `value` from a parameter no curve drives.
+    pub fn fixed(value: f32) -> Self {
+        Reading {
+            value,
+            within: None,
+        }
+    }
+
+    /// This reading's value passed through `f`, reached as soon as this one.
+    #[must_use]
+    pub fn map(self, f: impl FnOnce(f32) -> f32) -> Self {
+        Reading {
+            value: f(self.value),
+            ..self
+        }
     }
 }
 
@@ -410,9 +455,18 @@ impl Ramp {
     /// Sets a target derived from `parameter`: while a curve drives the parameter, reached by the
     /// next control point (see [`Parameter::control_ramp`]); otherwise over [`RAMP_SECONDS`].
     pub fn follow(&mut self, target: f32, parameter: &Parameter) {
-        match parameter.control_ramp() {
-            Some(samples) => self.set_target_over(target, samples),
-            None => self.set_target(target),
+        self.approach(Reading {
+            value: target,
+            within: parameter.control_ramp(),
+        });
+    }
+
+    /// Sets `reading`'s value as the target, reached within its frames while automated,
+    /// otherwise over [`RAMP_SECONDS`].
+    pub fn approach(&mut self, reading: Reading) {
+        match reading.within {
+            Some(samples) => self.set_target_over(reading.value, samples),
+            None => self.set_target(reading.value),
         }
     }
 
@@ -684,6 +738,38 @@ mod tests {
         assert_eq!(smoothed_slow.current(), 1.0);
         smoothed.update();
         assert_eq!(smoothed.next_value(), 1.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_gives_the_value_and_its_timing_together() -> Result<(), Error> {
+        let parameter = Parameter::new(ParameterInfo::new("gain", 0.0, 4.0, 1.0))?;
+        assert_eq!(parameter.read(), Reading::fixed(1.0));
+        parameter.automate(3.0, 32);
+        let reading = parameter.read();
+        assert_eq!(
+            reading,
+            Reading {
+                value: 3.0,
+                within: Some(32)
+            }
+        );
+        assert_eq!(
+            reading.map(|v| v * 2.0),
+            Reading {
+                value: 6.0,
+                within: Some(32)
+            }
+        );
+        let mut ramp = Ramp::new(0.0, 48_000);
+        ramp.approach(reading);
+        for _ in 0..31 {
+            ramp.next_value();
+        }
+        assert!(ramp.is_ramping());
+        assert_eq!(ramp.next_value(), 3.0);
+        parameter.release();
+        assert_eq!(parameter.read(), Reading::fixed(1.0));
         Ok(())
     }
 

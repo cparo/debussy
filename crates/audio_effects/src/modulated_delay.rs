@@ -5,7 +5,7 @@
 use audio_buffers::Layout;
 use dsp::TapDelay;
 use modulation::{Lfo, Shape, sync};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::error::Error;
 
@@ -52,8 +52,9 @@ pub(crate) trait Sweep: Send + Sized {
     /// The kind's state at `sample_rate`, before any values are set.
     fn new(sample_rate: u32) -> Self;
 
-    /// Takes the kind's own parameter values, by its own index, once per block.
-    fn set(&mut self, value: &dyn Fn(usize) -> f32);
+    /// Takes the kind's own parameter readings, by its own index, once per block; a ramp of a
+    /// continuous value reaches its target by the next control point while automated.
+    fn set(&mut self, read: &dyn Fn(usize) -> Reading);
 
     /// Every ramp the kind holds, so the node can start them at their targets.
     fn ramps(&mut self) -> impl Iterator<Item = &mut Ramp>;
@@ -195,7 +196,7 @@ impl<S: Sweep> Running<S> {
             mix: Ramp::new(0.0, sample_rate),
             sweep: S::new(sample_rate),
         };
-        running.set(value);
+        running.set(&|i| Reading::fixed(value(i)));
         // Start at the values, with no ramp in.
         let ramps = [&mut running.spread, &mut running.mix]
             .into_iter()
@@ -206,9 +207,9 @@ impl<S: Sweep> Running<S> {
         running
     }
 
-    /// Takes every parameter's value, by index, once per block.
-    fn set(&mut self, value: &dyn Fn(usize) -> f32) {
-        let lfo = |control: LfoControl| value(control as usize);
+    /// Takes every parameter's reading, by index, once per block.
+    fn set(&mut self, read: &dyn Fn(usize) -> Reading) {
+        let lfo = |control: LfoControl| read(control as usize).value;
         if lfo(LfoControl::Sync) >= 0.5 {
             let period = sync::period_frames(
                 self.frames_per_whole_note,
@@ -220,10 +221,10 @@ impl<S: Sweep> Running<S> {
             self.lfo.set_frequency(f64::from(lfo(LfoControl::Rate)));
         }
         self.lfo.set_shape(shape(lfo(LfoControl::Shape)));
-        self.sweep.set(&|i| value(LFO_CONTROLS + i));
+        self.sweep.set(&|i| read(LFO_CONTROLS + i));
         let spread = LFO_CONTROLS + S::CONTROLS;
-        self.spread.set_target(value(spread) / 360.0);
-        self.mix.set_target(value(spread + 1) / 100.0);
+        self.spread.approach(read(spread).map(|v| v / 360.0));
+        self.mix.approach(read(spread + 1).map(|v| v / 100.0));
     }
 
     /// One frame of `left`, `right`.
@@ -274,6 +275,13 @@ fn get(parameters: &[Parameter], index: usize) -> f32 {
     parameters.get(index).map_or(0.0, Parameter::get)
 }
 
+/// The reading of `parameters[index]`, or a fixed 0 if there is none.
+fn read(parameters: &[Parameter], index: usize) -> Reading {
+    parameters
+        .get(index)
+        .map_or(Reading::fixed(0.0), Parameter::read)
+}
+
 impl<S: Sweep> Node for ModulatedDelay<S> {
     fn inputs(&self) -> Vec<Port> {
         vec![Port::audio("in", Layout::Stereo)]
@@ -312,7 +320,7 @@ impl<S: Sweep> Node for ModulatedDelay<S> {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(&|i| get(parameters, i));
+        running.set(&|i| read(parameters, i));
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
@@ -325,6 +333,17 @@ impl<S: Sweep> Node for ModulatedDelay<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_spread_and_mix_on_the_control_point()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let infos = crate::parameter_infos("flanger").ok_or("no flanger")?;
+        let mut running = Running::<Comb>::new(48_000, None, &|i| infos[i].default);
+        running.set(&|i| automated(off_default(&infos[i])));
+        assert_lands(&mut [("spread", &mut running.spread), ("mix", &mut running.mix)]);
+        Ok(())
+    }
     use crate::chorus::Voices;
     use crate::flanger::Comb;
 
