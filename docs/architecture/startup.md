@@ -28,7 +28,10 @@ outside it cancels. Opening never creates a project
 A project opened from the Finder ([Documents opened from the Finder](platform.md#documents-opened-from-the-finder)),
 at launch or later, is opened as if chosen in the Open browser, from the start screen or over an
 open project, under the same conditions; one asked for before the window starts opens once it
-does, and asking for the project already open does nothing. The command line ignores the `-psn_`
+does, and asking for the project already open does nothing. This holds only in a `Debussy.app`
+process; beside a process started from the bare binary, the Finder opens the project in a new
+process instead (see [Documents opened from the Finder](platform.md#documents-opened-from-the-finder)).
+The command line ignores the `-psn_`
 argument older macOS passes to apps the Finder launches
 ([ADR-0132](../adrs/0132-finder-open-document-events-arrive-through-an.md)).
 

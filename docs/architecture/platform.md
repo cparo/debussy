@@ -43,5 +43,8 @@ binary and `crates/macos_platform/bundle/Info.plist`, and signed ad hoc. Its bun
 Projects opened from the Finder arrive as an `odoc` Apple Event, read in `macos_platform` by a
 handler that `macos_platform::documents::on_open_documents` installs when the application posts
 `NSApplicationWillFinishLaunchingNotification`; it must be called before the window's event loop
-starts. Each file URL is passed on as a path, and no Apple type crosses the crate's interface
+starts. Each file URL is passed on as a path, and no Apple type crosses the crate's interface.
+The Finder sends the event to a running instance of `Debussy.app`; a `debussy` process started
+from the binary outside the bundle (`cargo run`, `target/*/debussy`) is not one, so opening a
+project from the Finder alongside it launches a separate `Debussy.app` process
 ([ADR-0132](../adrs/0132-finder-open-document-events-arrive-through-an.md)).

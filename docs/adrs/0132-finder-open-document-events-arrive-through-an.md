@@ -59,3 +59,12 @@ paths through a channel and treats each as a request to switch projects.
 - Opens that arrive before the window exists wait in the channel and apply once it starts.
 - A multi-document `odoc` opens its projects one after another; the last one wins.
 - `-psn_` arguments are ignored by the command-line parser.
+- Launch Services sends `odoc` to a running process it knows as `Debussy.app` (bundle
+  identifier `io.github.cparo.debussy`), and launches the app when there is none. A process
+  started from the binary outside the bundle, as `cargo run` or a command-line invocation of
+  `target/*/debussy` does, has no bundle identifier and is not such a process. With only that
+  process running, double-clicking a project launches a second process, `Debussy.app`, which
+  opens the project; the first never sees the event. The developer found this in manual testing
+  and accepted it: it affects development runs, and the command-line imports and exports
+  ([ADR-0057](0057-the-first-binary-imports-and-exports-from-the.md)) are separate runs by design.
+  Nothing stops two processes from opening the same project.
