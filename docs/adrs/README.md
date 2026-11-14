@@ -140,4 +140,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0114](0114-the-delay-s-feedback-low-pass-is-a-first-order-one.md) | The delay's feedback low-pass is a first-order one-pole | Accepted | [Delay](../architecture/delay-and-reverb.md#delay) |
 | [ADR-0115](0115-delay-and-reverb-displays-plot-a-simulated-impulse.md) | Delay and reverb displays plot a simulated impulse response | Accepted | [Impulse response display](../architecture/effect-displays.md#impulse-response-display) |
 | [ADR-0116](0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md) | A parameter may be shown only while a toggle is on or off | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
+| [ADR-0117](0117-block-0-1-6-s-uninhabited-static-lint-is-accepted.md) | block 0.1.6's uninhabited-static lint is accepted until iced moves to wgpu 29 | Accepted | [Dependency licences](../architecture/licensing.md#dependency-licences) |
 
