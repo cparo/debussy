@@ -156,4 +156,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0130](0130-export-asks-for-the-format-and-its-settings-before.md) | Export asks for the format and its settings before the save dialog, and remembers them | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 | [ADR-0131](0131-debussy-ships-as-a-debussy-app-bundle-that.md) | Debussy ships as a Debussy.app bundle that declares the project as a package type | Accepted | [App bundle](../architecture/platform.md#app-bundle) |
 | [ADR-0132](0132-finder-open-document-events-arrive-through-an.md) | Finder open-document events arrive through an Apple Event handler installed at will-finish-launching | Accepted | [Documents opened from the Finder](../architecture/platform.md#documents-opened-from-the-finder) |
+| [ADR-0133](0133-one-process-at-a-time-opens-a-project-enforced-by.md) | One process at a time opens a project, enforced by an advisory lock on a lock file inside the bundle | Accepted | [Project bundle](../architecture/project.md#project-bundle) |
 

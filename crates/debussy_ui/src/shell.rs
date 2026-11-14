@@ -151,11 +151,11 @@ impl Shell {
         if !switch && !panel && !escape {
             return false;
         }
-        // Asking for the project already open changes nothing.
-        if let Message::OpenDocument(path) = message
-            && self.app.is_some()
-            && self.path.as_deref() == Some(path.as_path())
+        // Asking for the project already open changes nothing but closing the browser.
+        if let Message::OpenListed(path) | Message::OpenDocument(path) = message
+            && self.is_open(path)
         {
+            self.browsing = None;
             return true;
         }
         if let Some(app) = &mut self.app {
@@ -218,6 +218,12 @@ impl Shell {
     /// Opens the project at `path`, or creates it at `create` hertz, in place of the open
     /// project. If that fails, the open project carries on and the status line says why.
     fn switch(&mut self, path: &Path, create: Option<u32>) {
+        // Reopening the open project would collide with this process's own lock on it
+        // (`docs/architecture/startup.md` "Application startup").
+        if create.is_none() && self.is_open(path) {
+            self.browsing = None;
+            return;
+        }
         let Some(launcher) = &mut self.launcher else {
             return;
         };
@@ -244,6 +250,17 @@ impl Shell {
                 None => self.status = Some(message),
             },
         }
+    }
+
+    /// Whether `path` names the project open now, comparing canonical paths where both resolve.
+    fn is_open(&self, path: &Path) -> bool {
+        self.app.is_some()
+            && self.path.as_deref().is_some_and(|open| {
+                match (open.canonicalize(), path.canonicalize()) {
+                    (Ok(open), Ok(path)) => open == path,
+                    _ => open == path,
+                }
+            })
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
@@ -831,6 +848,27 @@ mod tests {
         assert_eq!(calls.borrow().prepared, vec![(path, None)]);
         assert_eq!(shell.app.as_ref().map(App::sample_rate), Some(44_100));
         assert!(shell.browsing.is_none(), "the browser closes");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_opening_the_open_project_does_nothing() -> Result<(), Box<dyn Error>> {
+        let path = PathBuf::from("/Users/a/Music/Debussy/Older.debussy");
+        let (mut shell, calls) = shell(None, picking("/Users/a/Music/Debussy/Older.debussy"));
+        let _ = shell.update(Message::OpenListed(path.clone()));
+        assert_eq!(calls.borrow().prepared.len(), 1);
+        calls.borrow_mut().listed = listing().listed;
+        let _ = shell.update(Message::OpenProject);
+        let _ = shell.update(Message::OpenListed(path.clone()));
+        assert!(shell.browsing.is_none(), "the browser closes");
+        let _ = shell.update(Message::OpenProject);
+        let _ = shell.update(Message::BrowseProjects);
+        assert!(shell.browsing.is_none(), "the browser closes");
+        assert_eq!(
+            calls.borrow().prepared,
+            vec![(path, None)],
+            "never prepared again"
+        );
         Ok(())
     }
 

@@ -128,6 +128,7 @@ fn test_save_then_open_round_trips_random_sessions() -> Result<(), Box<dyn Error
         }
         let mut bundle = Bundle::create(&path, 48_000)?;
         bundle.save(&session)?;
+        drop(bundle);
         let (bundle, loaded) = Bundle::open(&path)?;
         assert_eq!(bundle.sample_rate(), 48_000);
         assert_eq!(loaded.state(), session.state());
@@ -163,6 +164,7 @@ fn test_version_files_are_stamped_kept_and_removed() -> Result<(), Box<dyn Error
     // Saving again keeps the same files; reopening keeps them too.
     bundle.save(&session)?;
     assert_eq!(names(&path)?, before);
+    drop(bundle);
     let (mut bundle, mut session) = Bundle::open(&path)?;
     bundle.save(&session)?;
     assert_eq!(names(&path)?, before);
@@ -170,6 +172,7 @@ fn test_version_files_are_stamped_kept_and_removed() -> Result<(), Box<dyn Error
     session.remove_version("First")?;
     bundle.save(&session)?;
     assert_eq!(names(&path)?.len(), 1);
+    drop(bundle);
     let (_, reopened) = Bundle::open(&path)?;
     assert_eq!(reopened.versions().keys().collect::<Vec<_>>(), ["Second"]);
     Ok(())
@@ -384,6 +387,7 @@ fn test_clean_up_deletes_only_unreferenced_audio() -> Result<(), Box<dyn Error>>
         fs::write(audio.join(name), b"x")?;
     }
     fs::create_dir(audio.join("folder.wav"))?;
+    drop(bundle);
     let (_, _) = Bundle::open(&path)?;
     let mut left: Vec<String> = fs::read_dir(&audio)?
         .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
@@ -420,6 +424,59 @@ fn test_create_refuses_bad_rate_and_existing_path() -> Result<(), Box<dyn Error>
 }
 
 #[test]
+fn test_open_refuses_a_bundle_already_open() -> Result<(), Box<dyn Error>> {
+    let path = scratch("locked")?;
+    drop(Bundle::create(&path, 48_000)?);
+    let (_held, _) = Bundle::open(&path)?;
+    // flock locks belong to the open file, so a second open in this process is refused too.
+    let error = Bundle::open(&path).err().ok_or("a locked bundle opened")?;
+    assert!(
+        matches!(&error, StorageError::Locked(p) if *p == path),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .ends_with("is open in another Debussy process")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_open_succeeds_after_the_holder_drops() -> Result<(), Box<dyn Error>> {
+    let path = scratch("unlocked")?;
+    drop(Bundle::create(&path, 48_000)?);
+    let held = Bundle::open(&path)?;
+    assert!(Bundle::open(&path).is_err());
+    drop(held);
+    Bundle::open(&path)?;
+    Ok(())
+}
+
+#[test]
+fn test_create_holds_the_lock() -> Result<(), Box<dyn Error>> {
+    let path = scratch("create-lock")?;
+    let created = Bundle::create(&path, 48_000)?;
+    assert!(path.join("lock").is_file());
+    assert!(matches!(Bundle::open(&path), Err(StorageError::Locked(_))));
+    drop(created);
+    Bundle::open(&path)?;
+    Ok(())
+}
+
+#[test]
+fn test_open_creates_a_missing_lock_file() -> Result<(), Box<dyn Error>> {
+    let path = scratch("no-lock")?;
+    drop(Bundle::create(&path, 48_000)?);
+    // A bundle saved by an older build has no lock file.
+    fs::remove_file(path.join("lock"))?;
+    let (_held, _) = Bundle::open(&path)?;
+    assert!(path.join("lock").is_file());
+    assert!(matches!(Bundle::open(&path), Err(StorageError::Locked(_))));
+    Ok(())
+}
+
+#[test]
 fn test_board_positions_round_trip_and_bad_ones_are_refused() -> Result<(), Box<dyn Error>> {
     let path = scratch("board-positions")?;
     let mut bundle = Bundle::create(&path, 48_000)?;
@@ -428,6 +485,7 @@ fn test_board_positions_round_trip_and_bad_ones_are_refused() -> Result<(), Box<
     session.move_node(mixer, Some(project_model::Position { x: 320.0, y: -12.5 }))?;
     session.move_output(Some(96.0))?;
     bundle.save(&session)?;
+    drop(bundle);
     let (_, opened) = Bundle::open(&path)?;
     assert_eq!(opened.state(), session.state());
     // An older file without them opens to the automatic layout.

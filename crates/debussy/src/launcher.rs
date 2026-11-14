@@ -247,6 +247,23 @@ mod tests {
         assert!(!missing.exists(), "opening never creates");
     }
 
+    #[test]
+    fn test_prepare_refuses_a_project_open_elsewhere() -> Result<()> {
+        let dir = temp_dir("launcher-locked")?;
+        let path = dir.join("Song.debussy");
+        let _held = Bundle::create(&path, 48_000)?;
+        let mut launcher = AppLauncher::new(dir.join("settings.json"), None, None);
+        let result = launcher.prepare(&path, None);
+        let Err(message) = result else {
+            bail!("opened a project another holder has locked");
+        };
+        assert!(
+            message.contains("open in another Debussy process"),
+            "{message}"
+        );
+        Ok(())
+    }
+
     /// A fresh, empty directory for one test, named `name`.
     fn temp_dir(name: &str) -> Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!("debussy-{name}-{}", std::process::id()));

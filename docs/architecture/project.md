@@ -122,6 +122,8 @@ A project is a directory named `<name>.debussy`, containing:
 - `audio/` — the project's audio files;
 - `cache/` — derived data such as waveform summaries, which may be deleted at any time and
   regenerated.
+- `lock` — empty; a process holds an exclusive advisory lock on it while it has the project open
+  ([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
 A reader must refuse a `format_version` newer than it supports and must migrate older ones ([ADR-0013](../adrs/0013-a-project-is-a-bundle-directory-with-versioned.md)).
 macOS presents the bundle as a single document of type `io.github.cparo.debussy.project`
@@ -168,6 +170,10 @@ not plain names inside `audio/`. Every clip is checked against its track, ids mu
 every connection must join existing endpoints, never from the output or into a track, with a pan
 from −1 to 1. The tempo and meter must be within the limits in [Musical time](#musical-time). Curves have
 their own limits (see `docs/architecture/automation.md` "Curves in the project"). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+
+Opening or creating a bundle first takes its lock, creating a missing `lock` file. A bundle locked
+by another process, or whose lock cannot be taken, is refused
+([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
 ## Cleanup
 
