@@ -152,7 +152,9 @@ impl Running {
             .set_target(ms_to_frames(value(Control::Depth), rate));
         self.spread.set_target(value(Control::Spread) / 360.0);
         self.mix.set_target(value(Control::Mix) / 100.0);
-        let voices = value(Control::Voices).round().clamp(1.0, 4.0);
+        #[allow(clippy::cast_precision_loss)] // a handful of voices
+        let most = MAX_VOICES as f32;
+        let voices = value(Control::Voices).round().clamp(1.0, most);
         let gain = voices.sqrt().recip();
         for (i, (offset, g)) in (0_u8..).zip(self.offsets.iter_mut().zip(&mut self.gains)) {
             let i = f32::from(i);

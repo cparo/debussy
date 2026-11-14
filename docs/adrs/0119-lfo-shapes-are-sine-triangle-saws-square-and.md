@@ -45,6 +45,8 @@ period are built in-house on the evidence above.
 ## Consequences
 
 - The chorus and flanger offer sine and triangle only.
+- No shape is band-limited: they serve modulation rates, where aliasing of their corners does
+  not arise; an audio-rate oscillator would need band-limited shapes of its own.
 - A smooth random shape needs a new ADR with a claims check of whatever design it uses.
 - The evidence rests on web searches and Google Patents pages, not a patent database query; the
   note lists its gaps.

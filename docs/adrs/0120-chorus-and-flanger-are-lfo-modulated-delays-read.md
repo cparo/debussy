@@ -23,9 +23,12 @@ modulated delay, the Hermite read, the chorus or the flanger.
 - One LFO per node drives both channels; the right channel reads it `spread` degrees ahead.
 - The chorus has 1 to 4 voices at evenly spaced LFO phases, sweeping from `delay` up to
   `delay + depth`, summed × 1/√n, with no feedback. `voices` changes live by ramping each voice's
-  gain; all four always run.
+  gain and LFO offset; all four always run. A voice whose offset moves (voice 1 goes from ½ to
+  ⅓ of a cycle when 2 voices become 3) glides briefly in pitch over the ramp time, with no
+  click.
 - The flanger sweeps `delay·(1 + depth·lfo)` and keeps its feedback, −95 to +95 %, inside the
-  node.
+  node. Its `delay`, 0.1 to 10 ms, is on a logarithmic scale, so the short delays that set a
+  flanger's highest notches get as much of the control as the long ones.
 - The kind ids, parameter names, groups, ranges and choice orders in
   `docs/architecture/modulation.md` are saved format. The LFO note list is 1/16 to 4/1.
 - Neither kind has a display curve (`curve: None`), as ADR-0105 allows.
@@ -44,6 +47,10 @@ modulated delay, the Hermite read, the chorus or the flanger.
 - **Flanger feedback through the graph.** Graph feedback delays are at least 1 ms (ADR-0031),
   longer than a flanger's shortest delays.
 - **A chorus sweep centred on `delay`.** At 5 ms with 10 ms depth it would go below zero.
+- **Jumping a voice's LFO offset on a change of `voices`.** No pitch glide, but the delay would
+  jump by up to `depth` at once, a click.
+- **A linear flanger `delay`.** Half the control would cover 5 to 10 ms, where the comb's
+  notches are closest together and change least to the ear.
 
 ## Consequences
 

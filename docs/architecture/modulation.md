@@ -21,7 +21,7 @@ takes no locks and does no I/O after it is made (see `docs/architecture/engine.m
   | `Square` | 1 below `p = ½`, −1 from it |
   | `SampleAndHold` | one uniform random value from −1 to 1 per cycle |
 
-  No shape is band-limited; they are for modulation rates, not audio-rate oscillators.
+  No shape is band-limited.
 - **Offset reads.** A reader asks for the value at a phase offset (in cycles) from the clock and
   a stream number. Periodic shapes read the clock's phase plus the offset; `SampleAndHold`
   reads the random value of the offset phase's cycle in its stream. A random value is a pure
@@ -30,8 +30,8 @@ takes no locks and does no I/O after it is made (see `docs/architecture/engine.m
 - **Tempo sync.** `modulation::sync` holds the note arithmetic that tempo-synced parameters share:
   the whole-note length a node runs at (the graph's, or two seconds when none is given or it is
   not positive), the delay's note values (`synced_frames`), and an LFO period (`period_frames`)
-  of note value × feel (straight ×1, dotted ×1.5, triplet ×2/3). LFO note values are, by index,
-  1/16 (0), 1/8, 1/4, 1/2, 1/1, 2/1 and 4/1 (6) of a whole note. A synced LFO's period follows
+  of note value × feel (see `docs/architecture/delay-and-reverb.md` "Delay"). LFO note values
+  are, by index, 1/16 (0), 1/8, 1/4, 1/2, 1/1, 2/1 and 4/1 (6) of a whole note. A synced LFO's period follows
   the tempo; its phase runs free and is not aligned to bars.
 
 No smooth-random shape (random points joined by interpolation) is built
@@ -55,8 +55,9 @@ allocated when the node is prepared. Latency is 0. Neither kind has a curve.
 `chorus` reads 1 to 4 voices per channel and outputs `x·(1 − mix) + wet·mix`, with no feedback.
 Voice `i` of `n` reads the LFO at offset `i / n` (plus the spread on the right) and delays by
 `delay + depth·(1 + lfo) / 2` milliseconds, so it sweeps from `delay` up to `delay + depth`. The
-wet signal is the voices' sum × 1/√n. All four voices always run; each voice's gain ramps, so
-`voices` changes while playing.
+wet signal is the voices' sum × 1/√n. All four voices always run; on a change of `voices`, each
+voice's gain and LFO offset ramp to their new values over the ramp time, so a voice whose offset
+moves glides briefly in pitch.
 
 | Name | Group | Range | Default |
 |---|---|---|---|
