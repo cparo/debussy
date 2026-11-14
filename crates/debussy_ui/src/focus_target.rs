@@ -1,6 +1,6 @@
 //! A wrapper that makes a mixer or effect dialog control take the dialog's keyboard focus when
 //! pressed, and, for a slider or toggle, keeps the keyboard and wheel from it so the arrow keys reach the focused
-//! control rather than the hovered one (`docs/architecture/user-interface.md` "Layout").
+//! control rather than the hovered one (`docs/architecture/node-dialogs.md` "Mixer dialogs").
 
 use iced::advanced::widget::{Operation, Tree, Widget};
 use iced::advanced::{Clipboard, Layout, Shell, layout, overlay, renderer};

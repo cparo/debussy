@@ -1,15 +1,19 @@
 //! A built-in effect's dialog body: one control per parameter, chosen by its scale and grouped
-//! into strips as tall as the tallest; and the keyboard focus that Tab and presses move through
-//! them (`docs/architecture/user-interface.md` "Layout").
+//! into strips as tall as the tallest, each automatable one beside its curve port button; and the
+//! keyboard focus that Tab and presses move through them (`docs/architecture/node-dialogs.md`
+//! "Node dialogs").
 
-use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
-use iced::{Element, Length};
+use iced::widget::{
+    Space, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
+};
+use iced::{Alignment, Element, Fill, Length};
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
 use crate::effect_display::display_area;
 use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
+use crate::icon::Icon;
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
 use crate::theme::{self, Tone};
@@ -21,6 +25,55 @@ pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
+
+/// A curve port button's side, in logical pixels.
+const PORT_BUTTON: f32 = 20.0;
+/// The width a curve port button takes in its focus ring: the button and the ring's padding.
+const PORT_ROOM: f32 = PORT_BUTTON + 4.0;
+
+/// A parameter's curve port button: the curve icon while `port` is `None`, else the port's number
+/// on a lavender face. A press assigns or takes away the port of parameter `name` and gives the
+/// button the keyboard focus `focus`; it is ringed while `focused`.
+pub(crate) fn port_button<'a>(
+    port: Option<u32>,
+    name: String,
+    focus: DialogFocus,
+    focused: bool,
+) -> Element<'a, Message> {
+    let face: Element<'a, Message> = match port {
+        None => svg(Icon::Curve.handle())
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(theme::tool_icon(false, true))
+            .into(),
+        Some(number) => text(number.to_string()).size(11).center().into(),
+    };
+    let face = button(container(face).center(Fill))
+        .on_press(Message::Dialog(DialogMessage::TogglePort(name)))
+        .padding(0)
+        .width(Length::Fixed(PORT_BUTTON))
+        .height(Length::Fixed(PORT_BUTTON))
+        .style(theme::control_button(port.is_some()));
+    let tip = match port {
+        None => Icon::Curve.name().to_owned(),
+        Some(number) => format!("{} {number}", Icon::Curve.name()),
+    };
+    let face = tooltip(
+        face,
+        container(text(tip).size(12))
+            .padding([4, 8])
+            .style(theme::popup),
+        tooltip::Position::FollowCursor,
+    );
+    ringed(
+        focus_target(
+            face,
+            Message::Dialog(DialogMessage::SetFocus(Some(focus))),
+            false,
+        ),
+        focused,
+    )
+}
 
 /// The control after `from` (`forward`) or before it in `order`, wrapping at the ends. From no
 /// control, or one not in `order`, forward is the first and back the last; `None` if `order` is
@@ -43,14 +96,14 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
 }
 
 /// The display and controls of the effect whose parameters are `parameters`, with the control
-/// at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate`, for a
+/// or port button at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate`, for a
 /// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
 /// pixel, comes first; then the preset picker, if the kind
 /// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
 /// horizontally.
 pub(crate) fn effect_panel<'a>(
     parameters: &NodeParameters<'a>,
-    focus: Option<usize>,
+    focus: Option<DialogFocus>,
     tone: Tone,
     sample_rate: u32,
     frames_per_whole_note: f64,
@@ -73,7 +126,7 @@ pub(crate) fn effect_panel<'a>(
     let order = parameters.shown_order();
     let split = order.partition_point(|&i| infos[i].group.is_empty());
     let (ungrouped, grouped) = order.split_at(split);
-    let control = |i: usize| control(parameters, i, focus == Some(i));
+    let control = |i: usize| control(parameters, i, focus);
     let ungrouped = row(preset_picker(parameters, kind))
         .extend(ungrouped.iter().map(|&i| control(i)))
         .spacing(16);
@@ -128,28 +181,43 @@ fn preset_picker<'a>(parameters: &NodeParameters<'_>, kind: &str) -> Option<Elem
 }
 
 /// The control for parameter `infos()[index]` of `parameters`, ringed while it has the keyboard
-/// focus (`focused`) and taking the focus when pressed. A pick list keeps the keyboard and wheel;
-/// a slider or toggle leaves them to the focused control.
+/// focus `focus` and taking the focus when pressed, after its curve port button if it is
+/// automatable, or a space as wide if not, so strips stay aligned. A pick list keeps the keyboard
+/// and wheel; a slider or toggle leaves them to the focused control.
 fn control<'a>(
     parameters: &NodeParameters<'a>,
     index: usize,
-    focused: bool,
+    focus: Option<DialogFocus>,
 ) -> Element<'a, Message> {
     let info = &parameters.infos()[index];
     let keys = matches!(info.scale, Scale::Choice(_));
-    ringed(
+    let port: Element<'a, Message> = if info.is_automatable() {
+        port_button(
+            parameters.port(&info.name),
+            info.name.clone(),
+            DialogFocus::Port(index),
+            focus == Some(DialogFocus::Port(index)),
+        )
+    } else {
+        Space::new().width(Length::Fixed(PORT_ROOM)).into()
+    };
+    let control = ringed(
         focus_target(
             input(parameters, info),
             Message::Dialog(DialogMessage::SetFocus(Some(DialogFocus::Parameter(index)))),
             keys,
         ),
-        focused,
-    )
+        focus == Some(DialogFocus::Parameter(index)),
+    );
+    row![port, control]
+        .spacing(2)
+        .align_y(Alignment::End)
+        .into()
 }
 
 /// The input for parameter `info` of `parameters`. A toggle is one button named for the
 /// parameter, lit while on; any other is labelled with its name, and a slider shows its value as
-/// a tooltip.
+/// a tooltip. A slider a curve drives is greyed out and follows it.
 fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Element<'a, Message> {
     let id = parameters.node();
     let value = parameters.value(&info.name);
@@ -169,6 +237,14 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
         })
     };
     let frozen = parameters.is_frozen(info);
+    let driven = parameters.is_driven(&info.name);
+    let styled = |s: iced::widget::Slider<'a, f32, Message>| -> Element<'a, Message> {
+        if driven {
+            s.style(theme::slider_driven).into()
+        } else {
+            s.into()
+        }
+    };
     if !frozen && info.scale == Scale::Toggle {
         let on = value >= 0.5;
         return container(toggle_button(
@@ -183,20 +259,23 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
     let input: Element<'a, Message> = match &info.scale {
         // Shown, not offered, until playback stops (ADR-0088).
         _ if frozen => text("Stop to change").size(11).into(),
-        Scale::Linear => slider(min..=max, value, slide)
-            .step(info.step.unwrap_or((max - min) / 1000.0))
-            .on_release(Message::Dialog(DialogMessage::Release))
-            .into(),
-        Scale::Logarithmic => slider(min.ln()..=max.ln(), value.max(min).ln(), move |v| {
-            slide(v.exp())
-        })
-        .step((max.ln() - min.ln()) / 1000.0)
-        .on_release(Message::Dialog(DialogMessage::Release))
-        .into(),
-        Scale::Integer => slider(min..=max, value, slide)
-            .step(1.0_f32)
-            .on_release(Message::Dialog(DialogMessage::Release))
-            .into(),
+        Scale::Linear => styled(
+            slider(min..=max, value, slide)
+                .step(info.step.unwrap_or((max - min) / 1000.0))
+                .on_release(Message::Dialog(DialogMessage::Release)),
+        ),
+        Scale::Logarithmic => styled(
+            slider(min.ln()..=max.ln(), value.max(min).ln(), move |v| {
+                slide(v.exp())
+            })
+            .step((max.ln() - min.ln()) / 1000.0)
+            .on_release(Message::Dialog(DialogMessage::Release)),
+        ),
+        Scale::Integer => styled(
+            slider(min..=max, value, slide)
+                .step(1.0_f32)
+                .on_release(Message::Dialog(DialogMessage::Release)),
+        ),
         Scale::Choice(options) => {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small index
             let selected = options.get(value.round().max(0.0) as usize).cloned();

@@ -14,7 +14,8 @@ use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ImportedTrack, Menu, Message,
-    MixerFocus, NewNode, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    MixerFocus, NewNode, Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles,
+    TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -1006,17 +1007,17 @@ fn test_tracks_are_added_renamed_and_deleted_as_steps() -> Result<(), Box<dyn Er
     let track = app.session().state().tracks[1].clone();
     assert_eq!(track.name, "Track 2");
     assert_eq!(track.layout, Layout::Stereo);
-    app.update(Message::StartRename(track.id));
+    app.update(Message::StartRename(Renaming::Track(track.id)));
     app.update(Message::RenameText("  Piano ".into()));
     app.update(Message::FinishRename);
     assert_eq!(app.session().state().tracks[1].name, "Piano");
     // Renaming to nothing, or to the same name, is not a step.
-    app.update(Message::StartRename(track.id));
+    app.update(Message::StartRename(Renaming::Track(track.id)));
     app.update(Message::RenameText(String::new()));
     app.update(Message::FinishRename);
     assert_eq!(app.session().state().tracks[1].name, "Piano");
     // Doing something else finishes a rename.
-    app.update(Message::StartRename(track.id));
+    app.update(Message::StartRename(Renaming::Track(track.id)));
     app.update(Message::RenameText("Keys".into()));
     app.update(Message::ZoomIn);
     assert_eq!(app.session().state().tracks[1].name, "Keys");
@@ -1290,6 +1291,18 @@ fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Er
     assert_eq!(mode(&app, mixer, 0), Mode::Play);
     app.update(Message::Dialog(DialogMessage::FocusNext));
     app.update(Message::Dialog(DialogMessage::FocusNext));
+    // The gain's curve port button comes before the gain; arrows leave it alone, and Space or
+    // Enter assigns its port and takes it away, each a step.
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::GainPort(0)));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
+    assert_eq!(app.parameter_value(mixer, GAIN), 0.0);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert_eq!(curve_ports(&app, mixer), [(GAIN.to_owned(), 1)]);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert_eq!(curve_ports(&app, mixer), []);
+    app.update(Message::Undo);
+    assert_eq!(curve_ports(&app, mixer), [(GAIN.to_owned(), 1)]);
+    app.update(Message::Dialog(DialogMessage::FocusNext));
     assert_eq!(app.mixer_focus(), Some(MixerFocus::Gain(0)));
     // Gain moves a whole dB a press, each an undo step.
     app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
@@ -1297,7 +1310,9 @@ fn test_tab_moves_focus_down_strips_and_arrows_adjust() -> Result<(), Box<dyn Er
     assert_eq!(app.parameter_value(mixer, GAIN), 2.0);
     app.update(Message::Undo);
     assert_eq!(app.parameter_value(mixer, GAIN), 1.0);
-    // Up on pan moves it left.
+    // Up on pan, after its port button, moves it left.
+    app.update(Message::Dialog(DialogMessage::FocusNext));
+    assert_eq!(app.mixer_focus(), Some(MixerFocus::PanPort(0)));
     app.update(Message::Dialog(DialogMessage::FocusNext));
     app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
     assert_eq!(app.parameter_value(mixer, "channel 1 pan"), -0.01);
@@ -1325,6 +1340,15 @@ fn test_step_mixer_channels_stays_in_range() -> Result<(), Box<dyn Error>> {
     app.update(Message::StepMixerChannels(mixer, 1));
     assert_eq!(channels(&app, mixer), Some(128));
     Ok(())
+}
+
+/// Node `node`'s curve ports, by parameter name.
+fn curve_ports(app: &App, node: NodeId) -> Vec<(String, u32)> {
+    app.session()
+        .state()
+        .node(node)
+        .map(|n| n.curve_ports.clone().into_iter().collect())
+        .unwrap_or_default()
 }
 
 /// Mixer `mixer`'s channel `channel` mode.
@@ -1493,7 +1517,7 @@ fn test_tick_follows_playhead_that_jumps_past_the_edge() -> Result<(), Box<dyn E
 fn test_update_autosaves_after_rename() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, calls, _) = app()?;
     let track = app.session().state().tracks[0].id;
-    app.update(Message::StartRename(track));
+    app.update(Message::StartRename(Renaming::Track(track)));
     app.update(Message::RenameText("Lead".into()));
     assert_eq!(calls.borrow().saves, 0);
     app.update(Message::FinishRename);
@@ -1505,7 +1529,7 @@ fn test_update_autosaves_after_rename() -> Result<(), Box<dyn Error>> {
 fn test_update_autosaves_a_rename_finished_by_quit() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, calls, _) = app()?;
     let track = app.session().state().tracks[0].id;
-    app.update(Message::StartRename(track));
+    app.update(Message::StartRename(Renaming::Track(track)));
     app.update(Message::RenameText("Lead".into()));
     app.update(Message::Quit);
     assert_eq!(app.session().state().tracks[0].name, "Lead");
@@ -1904,7 +1928,7 @@ fn test_close_discards_the_pass_disarms_and_saves() -> Result<(), Box<dyn Error>
     let track = vocal(&app)?;
     app.update(Message::Arm(track));
     app.update(Message::Record);
-    app.update(Message::StartRename(track));
+    app.update(Message::StartRename(Renaming::Track(track)));
     app.update(Message::RenameText("Lead".into()));
     let saves = calls.borrow().saves;
     app.close();
@@ -2322,5 +2346,273 @@ fn test_device_menu_rereads_the_devices_when_opened() -> Result<(), Box<dyn Erro
     app.update(Message::OpenMenu(Menu::Device));
     assert_eq!(app.menu(), Some(Menu::Device));
     assert_eq!(app.device_choices().len(), before + 1);
+    Ok(())
+}
+
+/// The app's only curve, with its points.
+fn only_curve(
+    app: &App,
+) -> Result<(project_model::CurveId, Vec<modulation::Point>), Box<dyn Error>> {
+    let lane = app.session().state().curves.first().ok_or("no curve")?;
+    Ok((lane.id, lane.curve.points().to_vec()))
+}
+
+/// A press on curve lane `curve`, 1000 pixels wide.
+fn curve_press(
+    curve: project_model::CurveId,
+    frame: f64,
+    value: f32,
+    hit: Option<debussy_ui::Grab>,
+) -> Message {
+    Message::CurvePress {
+        curve,
+        frame,
+        value,
+        hit,
+        width: 1000.0,
+    }
+}
+
+#[test]
+fn test_add_curve_adds_curve_1_and_is_refused_while_playing() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let lane = app.session().state().curves.first().ok_or("no curve")?;
+    assert_eq!(lane.name, "Curve 1");
+    assert_eq!(lane.curve.points(), [modulation::Point::new(0, 0.5)]);
+    app.update(Message::AddCurve);
+    assert_eq!(app.session().state().curves[1].name, "Curve 2");
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(Message::AddCurve);
+    assert_eq!(app.session().state().curves.len(), 2);
+    assert_eq!(app.status(), Some("Stop playback to add a curve."));
+    Ok(())
+}
+
+#[test]
+fn test_curve_rename_and_delete_are_steps() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(Message::StartRename(Renaming::Curve(curve)));
+    app.update(Message::RenameText("Swell".into()));
+    app.update(Message::FinishRename);
+    assert_eq!(app.session().state().curves[0].name, "Swell");
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().curves[0].name, "Curve 1");
+    app.update(Message::DeleteCurve(curve));
+    assert!(app.session().state().curves.is_empty());
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().curves.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn test_curve_press_on_an_empty_lane_adds_a_point_in_one_step() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(curve_press(curve, 1000.2, 0.52, None));
+    let (_, points) = only_curve(&app)?;
+    assert_eq!(points.len(), 2);
+    assert_eq!((points[1].frame, points[1].value), (1000, 0.52));
+    assert_eq!(app.curve_point(), Some((curve, 1)));
+    app.update(Message::Undo);
+    assert_eq!(only_curve(&app)?.1.len(), 1);
+    // While playing, a press on a point only selects it, and adding is refused.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(curve_press(
+        curve,
+        0.0,
+        0.5,
+        Some(debussy_ui::Grab::Anchor(0)),
+    ));
+    assert_eq!(app.curve_point(), Some((curve, 0)));
+    assert!(!app.is_dragging());
+    assert_eq!(app.status(), Some("Stop playback to edit curves."));
+    app.update(curve_press(curve, 500.0, 0.5, None));
+    assert_eq!(only_curve(&app)?.1.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn test_curve_press_away_from_the_line_seeks_instead_of_adding() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    let revision = app.session().revision();
+    // The curve is flat at 0.5; on a 128-pixel lane, 8 pixels is 0.0625.
+    app.update(curve_press(curve, 2000.0, 0.5 + 9.0 / 128.0, None));
+    assert_eq!(app.session().revision(), revision);
+    assert_eq!(app.return_point(), 2000);
+    app.update(curve_press(curve, 3000.0, 0.5 - 9.0 / 128.0, None));
+    assert_eq!(app.return_point(), 3000);
+    // Within 8 pixels it adds a point and does not seek.
+    app.update(curve_press(curve, 4000.0, 0.5 + 7.0 / 128.0, None));
+    assert_eq!(only_curve(&app)?.1.len(), 2);
+    assert_eq!(app.return_point(), 3000);
+    // Seeking is allowed while playing.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(curve_press(curve, 1000.0, 0.95, None));
+    assert_eq!(app.return_point(), 1000);
+    assert_eq!(only_curve(&app)?.1.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn test_curve_anchor_drag_is_one_step_recorded_on_release() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(curve_press(curve, 1000.0, 0.5, None));
+    let revision = app.session().revision();
+    app.update(curve_press(
+        curve,
+        1000.0,
+        0.5,
+        Some(debussy_ui::Grab::Anchor(1)),
+    ));
+    assert!(app.is_dragging());
+    for (frame, value) in [(1100.0, 0.3), (1200.0, 0.75)] {
+        app.update(Message::CurveMove {
+            frame,
+            value,
+            alt: false,
+        });
+    }
+    // Shown, not yet recorded.
+    assert_eq!(app.session().revision(), revision);
+    assert_eq!(only_curve(&app)?.1[1].frame, 1000);
+    app.update(Message::LaneRelease);
+    assert!(!app.is_dragging());
+    let (_, points) = only_curve(&app)?;
+    assert_eq!((points[1].frame, points[1].value), (1200, 0.75));
+    app.update(Message::Undo);
+    assert_eq!(only_curve(&app)?.1[1].frame, 1000);
+    Ok(())
+}
+
+#[test]
+fn test_curve_handle_drag_keeps_the_last_valid_shape() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(curve_press(curve, 900.0, 0.5, None));
+    let before = only_curve(&app)?.1[1].in_handle;
+    app.update(curve_press(
+        curve,
+        600.0,
+        0.25,
+        Some(debussy_ui::Grab::In(1)),
+    ));
+    // 100 frames further back: valid. Then past the anchor: refused, so it stays.
+    app.update(Message::CurveMove {
+        frame: 500.0,
+        value: 0.25,
+        alt: false,
+    });
+    app.update(Message::CurveMove {
+        frame: 1000.0,
+        value: 0.25,
+        alt: false,
+    });
+    app.update(Message::LaneRelease);
+    let after = only_curve(&app)?.1[1].in_handle;
+    assert!((after.d_frame - (before.d_frame - 100.0)).abs() < 1e-9);
+    Ok(())
+}
+
+#[test]
+fn test_delete_removes_the_selected_curve_point() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(curve_press(curve, 1000.0, 0.5, None));
+    app.update(Message::DeleteRange);
+    assert_eq!(only_curve(&app)?.1, [modulation::Point::new(0, 0.5)]);
+    assert_eq!(app.curve_point(), None);
+    Ok(())
+}
+
+#[test]
+fn test_curve_lanes_line_up_with_the_boards_curve_pins() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    let centres = app.curve_centres();
+    // Below the mono track's header and lane: its own header, then half its lane.
+    assert_eq!(centres, [(curve, 26.0 + 128.0 + 26.0 + 64.0)]);
+    let board = app.board(iced::Size::new(400.0, 400.0));
+    let pin = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Curve(curve),
+        output: true,
+        port: 0,
+        side: None,
+    };
+    assert_eq!(board.pins.get(&pin).map(|p| p.y), Some(centres[0].1));
+    Ok(())
+}
+
+#[test]
+fn test_curve_wires_only_to_a_curve_port_and_drives_the_slider() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(Message::StepMixerChannels(mixer, 1));
+    app.update(Message::Select(Some(Selection::Node(mixer))));
+    app.update(Message::Dialog(DialogMessage::TogglePort(GAIN.to_owned())));
+    assert_eq!(curve_ports(&app, mixer), [(GAIN.to_owned(), 1)]);
+    let from = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Curve(curve),
+        output: true,
+        port: 0,
+        side: None,
+    };
+    let audio = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Node(mixer),
+        output: false,
+        port: 1,
+        side: None,
+    };
+    let connections = app.session().state().connections.len();
+    app.update(Message::StartWire(from));
+    app.update(Message::FinishWire(Some(audio)));
+    assert_eq!(app.session().state().connections.len(), connections);
+    let port = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::CurvePort(mixer, 1),
+        port: 0,
+        ..audio
+    };
+    app.update(Message::StartWire(from));
+    app.update(Message::FinishWire(Some(port)));
+    assert_eq!(app.session().state().curve_into(mixer, 1), Some(curve));
+    // The slider shows the curve's value at the playhead, mapped into the gain's range.
+    let infos = audio_effects::mixer_parameter_infos(1);
+    let info = infos.iter().find(|i| i.name == GAIN).ok_or("no gain")?;
+    let driven = signal_graph::map_to_parameter(0.5, info);
+    assert_eq!(app.parameter_value(mixer, GAIN), driven);
+    // Dragging and arrows leave the model alone while it is driven.
+    let revision = app.session().revision();
+    app.update(Message::Dialog(DialogMessage::Slide {
+        node: mixer,
+        name: GAIN.to_owned(),
+        value: -3.0,
+    }));
+    app.update(Message::Dialog(DialogMessage::Release));
+    app.update(Message::Dialog(DialogMessage::SetFocus(Some(
+        DialogFocus::Mixer(MixerFocus::Gain(0)),
+    ))));
+    app.update(Message::Dialog(DialogMessage::FocusAdjust(1)));
+    assert_eq!(app.session().revision(), revision);
+    assert_eq!(app.parameter_value(mixer, GAIN), driven);
+    // Taking the port away unwires it, and the slider shows the model's value again.
+    app.update(Message::Dialog(DialogMessage::TogglePort(GAIN.to_owned())));
+    assert_eq!(app.session().state().curve_into(mixer, 1), None);
+    assert_eq!(app.parameter_value(mixer, GAIN), 0.0);
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().curve_into(mixer, 1), Some(curve));
     Ok(())
 }

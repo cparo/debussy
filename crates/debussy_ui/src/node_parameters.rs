@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use audio_effects::Preset;
 use project_model::{Edit, NodeId, NodeKind, State};
-use signal_graph::{ParameterInfo, Scale};
+use signal_graph::{ParameterInfo, Scale, map_to_parameter};
 
 /// The share of a slider's range (of its logarithm, if logarithmic) an arrow key moves it.
 const ARROW_STEP: f32 = 0.01;
@@ -42,16 +42,19 @@ impl ParameterCatalog {
     }
 
     /// Node `node` of `state`'s parameters as its dialog shows them, with the parameter being
-    /// dragged anywhere `live` and whether playback is running; `None` unless it is a mixer or a
-    /// built-in effect this build knows.
+    /// dragged anywhere `live`, whether playback is running, and the playhead's timeline frame,
+    /// where a wired curve is read; `None` unless it is a mixer or a built-in effect this build
+    /// knows.
     pub(crate) fn view<'a>(
         &'a self,
         state: &'a State,
         node: NodeId,
         live: Option<&'a Live>,
         playing: bool,
+        playhead: u64,
     ) -> Option<NodeParameters<'a>> {
-        let (kind, infos, stored) = match &state.node(node)?.kind {
+        let model = state.node(node)?;
+        let (kind, infos, stored) = match &model.kind {
             NodeKind::Effect { kind, parameters } => (
                 Some(kind.as_str()),
                 self.effects.get(kind.as_str())?.as_slice(),
@@ -67,10 +70,26 @@ impl ParameterCatalog {
             ),
             _ => return None,
         };
-        Some(NodeParameters::new(
-            node, kind, infos, stored, live, playing,
-        ))
+        Some(
+            NodeParameters::new(node, kind, infos, stored, live, playing).driven_by(Drive {
+                state,
+                ports: &model.curve_ports,
+                playhead,
+            }),
+        )
     }
+}
+
+/// Where a node's curve-driven parameters come from: the project, the node's curve ports, and the
+/// playhead's timeline frame.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Drive<'a> {
+    /// The project, for the wires into the node's curve ports and the curves on them.
+    pub state: &'a State,
+    /// The curve port each assigned parameter takes, by name.
+    pub ports: &'a BTreeMap<String, u32>,
+    /// The playhead's timeline frame.
+    pub playhead: u64,
 }
 
 /// A mixer's or effect's parameters as its dialog shows them right now.
@@ -87,6 +106,8 @@ pub(crate) struct NodeParameters<'a> {
     live: Option<&'a Live>,
     /// Whether playback is running.
     playing: bool,
+    /// The curve ports and wires that drive parameters, if known.
+    drive: Option<Drive<'a>>,
 }
 
 impl<'a> NodeParameters<'a> {
@@ -108,7 +129,42 @@ impl<'a> NodeParameters<'a> {
             stored,
             live: live.filter(|l| l.node == node),
             playing,
+            drive: None,
         }
+    }
+
+    /// This view, with parameters driven by the curves wired to the node's curve ports.
+    #[must_use]
+    pub(crate) fn driven_by(self, drive: Drive<'a>) -> NodeParameters<'a> {
+        NodeParameters {
+            drive: Some(drive),
+            ..self
+        }
+    }
+
+    /// The curve port parameter `name` takes, if it is assigned one.
+    pub(crate) fn port(&self, name: &str) -> Option<u32> {
+        self.drive?.ports.get(name).copied()
+    }
+
+    /// Parameter `name`'s value from the curve wired to its port, read at the playhead and
+    /// mapped into its range; `None` unless it is assigned a port with a curve wired to it.
+    pub(crate) fn driven(&self, name: &str) -> Option<f32> {
+        let drive = self.drive?;
+        let port = self.port(name)?;
+        let curve = drive
+            .state
+            .curve(drive.state.curve_into(self.node, port)?)?;
+        let frame = i64::try_from(drive.playhead).unwrap_or(i64::MAX);
+        Some(map_to_parameter(
+            curve.curve.value_at(frame),
+            self.info(name)?,
+        ))
+    }
+
+    /// Whether parameter `name` follows a curve wired to its port, so it takes no edits.
+    pub(crate) fn is_driven(&self, name: &str) -> bool {
+        self.driven(name).is_some()
     }
 
     /// The node.
@@ -131,9 +187,12 @@ impl<'a> NodeParameters<'a> {
         self.infos.iter().find(|i| i.name == name)
     }
 
-    /// Parameter `name`'s value as shown: the one being dragged, else the model's, else its
-    /// declared default, else 0.
+    /// Parameter `name`'s value as shown: its wired curve's at the playhead, else the one being
+    /// dragged, else the model's, else its declared default, else 0 (ADR-0126).
     pub(crate) fn value(&self, name: &str) -> f32 {
+        if let Some(driven) = self.driven(name) {
+            return driven;
+        }
         if let Some(live) = self.live.filter(|l| l.name == name) {
             return live.value;
         }
@@ -324,6 +383,38 @@ mod tests {
         let elsewhere = live(NodeId(8), "gain", 9.0);
         let view = NodeParameters::new(NODE, None, &infos, &stored, Some(&elsewhere), false);
         assert_eq!(view.value("gain"), -6.0);
+    }
+
+    #[test]
+    fn test_value_prefers_a_wired_curve() -> TestResult {
+        let mut session = project_model::Session::new_project();
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        let gain = audio_effects::parameter_name(0, audio_effects::Control::Gain);
+        let curve = modulation::Curve::new(vec![
+            modulation::Point::new(0, 0.0),
+            modulation::Point::new(1_000, 1.0),
+        ])?;
+        let curve = session.add_curve("Curve 1", curve)?;
+        let port = session.assign_curve_port(mixer, &gain)?;
+        let catalog = ParameterCatalog::new();
+        let view = catalog
+            .view(session.state(), mixer, None, false, 1_000)
+            .ok_or("no view")?;
+        assert_eq!(view.port(&gain), Some(port));
+        assert!(!view.is_driven(&gain), "assigned but not wired");
+        session.connect_curve(curve, mixer, port)?;
+        let view = catalog
+            .view(session.state(), mixer, None, false, 1_000)
+            .ok_or("no view")?;
+        assert!(view.is_driven(&gain));
+        let info = view.info(&gain).ok_or("no info")?;
+        assert_eq!(view.value(&gain), info.max);
+        let dragged = live(mixer, &gain, -50.0);
+        let view = catalog
+            .view(session.state(), mixer, Some(&dragged), false, 0)
+            .ok_or("no view")?;
+        assert_eq!(view.value(&gain), info.min);
+        Ok(())
     }
 
     #[test]

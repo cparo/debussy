@@ -33,6 +33,8 @@
 //! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
 //! - `shortcuts`: keyboard shortcuts.
 //! - `waveform`: track lanes from the stored files, and their canvas.
+//! - `curve_lane`: an automation curve lane's canvas, and [`Grab`].
+//! - `curve_edit`: point edits on a curve that refuse a shape that is not a valid curve.
 //! - `raster`: lanes painted into memory at the display scale and blurred.
 //! - `transport`: zoom steps and the position bar.
 //! - `menu`: [`Menu`] and dropdowns.
@@ -47,6 +49,8 @@
 mod amplifier_display;
 mod app;
 mod click;
+mod curve_edit;
+mod curve_lane;
 mod device;
 mod effect_display;
 mod effect_panel;
@@ -83,7 +87,8 @@ use std::sync::Mutex;
 
 use shell::Shell;
 
-pub use app::{App, Message, NewNode};
+pub use app::{App, Message, NewNode, Renaming};
+pub use curve_lane::Grab;
 pub use effect_display::{DisplayContext, Pixels};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;

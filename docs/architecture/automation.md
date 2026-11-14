@@ -102,3 +102,9 @@ The engine reads curves from the plan; no message carries a curve value (see
 
 The evaluation rules are recorded in
 [ADR-0125](../adrs/0125-curves-drive-parameters-on-a-32-frame-timeline.md).
+
+## Interface
+
+Curve lanes and their gestures are under `docs/architecture/user-interface.md` "Layout"; curve
+pins, ports and wires under "Patch board" there; curve port buttons and driven controls under
+`docs/architecture/node-dialogs.md` "Node dialogs".

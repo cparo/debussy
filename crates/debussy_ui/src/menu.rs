@@ -4,7 +4,7 @@
 
 use iced::widget::{Space, button, column, container, rule, svg, text};
 use iced::{Element, Length};
-use project_model::TrackId;
+use project_model::{CurveId, TrackId};
 
 use crate::app::Message;
 use crate::icon::Icon;
@@ -20,6 +20,8 @@ pub enum Menu {
     App,
     /// A track header's ≡ menu.
     Track(TrackId),
+    /// A curve lane header's ≡ menu.
+    Curve(CurveId),
     /// The "+" below the tracks.
     AddTrack,
     /// The "+" at the board's top right.

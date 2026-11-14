@@ -1,6 +1,7 @@
 //! A mixer's dialog body: a "Channels" field above narrow numbered strips, each with mute above
-//! solo, then vertical gain and pan sliders with their values as hover tips; and the keyboard
-//! focus that Tab and presses move through them (`docs/architecture/user-interface.md` "Layout").
+//! solo, then vertical gain and pan sliders with their values as hover tips, each under its curve
+//! port button; and the keyboard
+//! focus that Tab and presses move through them (`docs/architecture/node-dialogs.md` "Mixer dialogs").
 
 use audio_effects::{Control, Mode, parameter_name};
 use iced::widget::canvas::{Frame, Geometry, Path, Program, Stroke};
@@ -12,7 +13,7 @@ use iced::{Alignment, Color, Element, Fill, Length, Point, Rectangle, Renderer, 
 use signal_graph::ParameterInfo;
 
 use crate::app::{App, Message};
-use crate::effect_panel::{STRIP_SCROLLBAR_GAP, format_value};
+use crate::effect_panel::{STRIP_SCROLLBAR_GAP, format_value, port_button};
 use crate::focus_target::{focus_target, ringed};
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
@@ -48,8 +49,8 @@ const PART_SPACING: f32 = 8.0;
 const LABEL_SPACING: f32 = 2.0;
 
 /// A mixer dialog control that can hold the keyboard focus. Tab visits them in this order: the
-/// "Channels" field, then each channel's mute, solo, gain and pan, from the first channel to the
-/// last; the dialog's "Delete" button follows.
+/// "Channels" field, then each channel's mute, solo, gain port, gain, pan port and pan, from the
+/// first channel to the last; the dialog's "Delete" button follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MixerFocus {
     /// The "Channels" field.
@@ -62,11 +63,15 @@ pub enum MixerFocus {
     Mute(usize),
     /// A channel's solo button.
     Solo(usize),
+    /// A channel's gain curve port button.
+    GainPort(usize),
+    /// A channel's pan curve port button.
+    PanPort(usize),
 }
 
 impl MixerFocus {
     /// The controls on one strip.
-    const PER_CHANNEL: usize = 4;
+    const PER_CHANNEL: usize = 6;
 
     /// The control at `index` in Tab order.
     fn at(index: usize) -> Self {
@@ -77,7 +82,9 @@ impl MixerFocus {
         match i % Self::PER_CHANNEL {
             0 => MixerFocus::Mute(ch),
             1 => MixerFocus::Solo(ch),
-            2 => MixerFocus::Gain(ch),
+            2 => MixerFocus::GainPort(ch),
+            3 => MixerFocus::Gain(ch),
+            4 => MixerFocus::PanPort(ch),
             _ => MixerFocus::Pan(ch),
         }
     }
@@ -88,7 +95,21 @@ impl MixerFocus {
         match self {
             MixerFocus::Gain(ch) => Some((Control::Gain, ch)),
             MixerFocus::Pan(ch) => Some((Control::Pan, ch)),
-            MixerFocus::Channels | MixerFocus::Mute(_) | MixerFocus::Solo(_) => None,
+            MixerFocus::Channels
+            | MixerFocus::Mute(_)
+            | MixerFocus::Solo(_)
+            | MixerFocus::GainPort(_)
+            | MixerFocus::PanPort(_) => None,
+        }
+    }
+
+    /// The control and channel of a gain or pan curve port button; `None` for any other
+    /// control.
+    pub(crate) fn port(self) -> Option<(Control, usize)> {
+        match self {
+            MixerFocus::GainPort(ch) => Some((Control::Gain, ch)),
+            MixerFocus::PanPort(ch) => Some((Control::Pan, ch)),
+            _ => None,
         }
     }
 
@@ -181,7 +202,8 @@ fn fraction(min: f32, max: f32, value: f32) -> f32 {
 }
 
 /// A vertical slider `height` tall for parameter `info` of `parameters`, over a tic mark at its
-/// default, from its range and declared step. `reversed` draws the maximum at the bottom.
+/// default, from its range and declared step. `reversed` draws the maximum at the bottom. While
+/// a curve drives the parameter the slider is greyed out and follows it, taking no drags.
 fn fader<'a>(
     parameters: &NodeParameters<'a>,
     info: &'a ParameterInfo,
@@ -198,21 +220,25 @@ fn fader<'a>(
     };
     let value = sign * parameters.value(&info.name);
     let at = fraction(min, max, sign * info.default);
+    let mut slider = vertical_slider(min..=max, value, move |value: f32| {
+        Message::Dialog(DialogMessage::Slide {
+            node: id,
+            name: info.name.clone(),
+            value: sign * value,
+        })
+    })
+    .step(info.step.unwrap_or((max - min) / 1000.0))
+    .on_release(Message::Dialog(DialogMessage::Release))
+    .width(SLIDER_WIDTH)
+    .height(Length::Fixed(height));
+    if parameters.is_driven(&info.name) {
+        slider = slider.style(theme::slider_driven);
+    }
     stack![
         canvas(Tic { at })
             .width(Length::Fixed(SLIDER_WIDTH))
             .height(Length::Fixed(height)),
-        vertical_slider(min..=max, value, move |value: f32| {
-            Message::Dialog(DialogMessage::Slide {
-                node: id,
-                name: info.name.clone(),
-                value: sign * value,
-            })
-        })
-        .step(info.step.unwrap_or((max - min) / 1000.0))
-        .on_release(Message::Dialog(DialogMessage::Release))
-        .width(SLIDER_WIDTH)
-        .height(Length::Fixed(height)),
+        slider,
     ]
     .into()
 }
@@ -326,8 +352,17 @@ impl App {
                 self.mixer_focus() == Some(focus),
             )
         };
+        let port = |name: &str, focus: MixerFocus| {
+            port_button(
+                parameters.port(name),
+                name.to_owned(),
+                DialogFocus::Mixer(focus),
+                self.mixer_focus() == Some(focus),
+            )
+        };
         let gain_part: Element<'a, Message> = match parameters.info(&gain_name) {
             Some(info) => column![
+                port(&gain_name, MixerFocus::GainPort(ch)),
                 label(format!("{:+}{}", info.max, info.unit)),
                 target(
                     tipped(
@@ -346,6 +381,7 @@ impl App {
         // Pan is drawn reversed, left at the top (ADR-0089).
         let pan_part: Element<'a, Message> = match parameters.info(&pan_name) {
             Some(info) => column![
+                port(&pan_name, MixerFocus::PanPort(ch)),
                 label("L".to_owned()),
                 target(
                     tipped(
@@ -407,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_order_goes_down_each_strip_then_across() {
-        use MixerFocus::{Channels, Gain, Mute, Pan, Solo};
+        use MixerFocus::{Channels, Gain, GainPort, Mute, Pan, PanPort, Solo};
         let order: Vec<MixerFocus> = MixerFocus::order(2).collect();
         assert_eq!(
             order,
@@ -415,11 +451,15 @@ mod tests {
                 Channels,
                 Mute(0),
                 Solo(0),
+                GainPort(0),
                 Gain(0),
+                PanPort(0),
                 Pan(0),
                 Mute(1),
                 Solo(1),
+                GainPort(1),
                 Gain(1),
+                PanPort(1),
                 Pan(1),
             ]
         );
