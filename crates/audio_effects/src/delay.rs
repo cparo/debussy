@@ -7,7 +7,7 @@ use dsp::{FOLD_DOWN_GAIN, OnePole, OnePoleCoefficients, TapDelay};
 use modulation::sync::{FEELS, synced_frames, whole_note};
 
 use crate::tap::{Tap, to_tap};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::error::Error;
 use crate::impulse::{ImpulseCurve, SPAN_DB};
@@ -243,7 +243,7 @@ impl Running {
             saturation: ramp(0.0),
             mix: ramp(0.0),
         };
-        running.set(&value);
+        running.set(&|control| Reading::fixed(value(control)));
         // Start at the values, with no ramp or crossfade in.
         running.taps = running.taps.map(|t| Tap::new(t.wanted, sample_rate));
         for ramp in [
@@ -262,7 +262,8 @@ impl Running {
     }
 
     /// Takes the parameter values, once per block.
-    fn set(&mut self, value: &impl Fn(Control) -> f32) {
+    fn set(&mut self, read: &impl Fn(Control) -> Reading) {
+        let value = &|control| read(control).value;
         let base = base_frames(value, self.sample_rate, self.frames_per_whole_note);
         let offset = f64::from(value(Control::Offset)) * f64::from(self.sample_rate) / 1000.0;
         let max_tap = self.lines[1].max_tap();
@@ -270,11 +271,14 @@ impl Running {
         self.taps[1].wanted = to_tap(base + offset, max_tap);
         let on = |control| if value(control) >= 0.5 { 1.0 } else { 0.0 };
         self.ping_pong.set_target(on(Control::Mode));
-        self.feedback.set_target(value(Control::Feedback) / 100.0);
+        // Continuous values reach their targets by the next control point while automated.
+        self.feedback
+            .approach(read(Control::Feedback).map(|v| v / 100.0));
         self.low_pass_share.set_target(on(Control::LowPassEnabled));
-        self.low_pass_log.set_target(value(Control::LowPass).log2());
+        self.low_pass_log
+            .approach(read(Control::LowPass).map(f32::log2));
         self.saturation.set_target(on(Control::Saturation));
-        self.mix.set_target(value(Control::Mix) / 100.0);
+        self.mix.approach(read(Control::Mix).map(|v| v / 100.0));
     }
 
     /// One frame of `left`, `right`.
@@ -387,7 +391,7 @@ impl Node for Delay {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(&|control: Control| parameters[control as usize].get());
+        running.set(&|control: Control| parameters[control as usize].read());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample =
             |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
@@ -400,6 +404,20 @@ impl Node for Delay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point() -> Result<(), Error> {
+        let infos = infos()?;
+        let mut running = Running::new(48_000, None, |control| infos[control as usize].default);
+        running.set(&|control| automated(off_default(&infos[control as usize])));
+        assert_lands(&mut [
+            ("feedback", &mut running.feedback),
+            ("low-pass", &mut running.low_pass_log),
+            ("mix", &mut running.mix),
+        ]);
+        Ok(())
+    }
 
     fn infos() -> Result<Vec<ParameterInfo>, Error> {
         Ok(Delay::new()?

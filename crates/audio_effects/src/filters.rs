@@ -3,7 +3,7 @@
 
 use audio_buffers::Layout;
 use dsp::{OnePole, OnePoleCoefficients, Svf, SvfCoefficients, butterworth_q, prewarp};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::curve::Curve;
 use crate::error::Error;
@@ -186,16 +186,17 @@ impl Cascade {
         cascade
     }
 
-    /// Takes new parameter values, once per block: a cutoff (Hz) to ramp to and an `order`
-    /// parameter value. A changed order takes effect at once, from rest.
-    pub(crate) fn set(&mut self, response: Response, cutoff: f32, order: f32) {
+    /// Takes new parameter values, once per block: a cutoff (Hz) to ramp to, by the next control
+    /// point while automated, and an `order` parameter value. A changed order takes effect at
+    /// once, from rest.
+    pub(crate) fn set(&mut self, response: Response, cutoff: Reading, order: f32) {
         let order = order_from_value(order);
         if order != self.order {
             self.order = order;
             self.reset();
             self.design(response, self.cutoff.current().exp2());
         }
-        self.cutoff.set_target(cutoff.log2());
+        self.cutoff.approach(cutoff.map(f32::log2));
     }
 
     /// Steps the cutoff ramp one sample, redesigning while it moves.
@@ -265,7 +266,7 @@ impl Node for Butterworth {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;
         };
-        running.set(response, self.cutoff.get(), self.order.get());
+        running.set(response, self.cutoff.read(), self.order.get());
         let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
         let sample = |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied();
         for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
@@ -279,6 +280,14 @@ impl Node for Butterworth {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated};
+
+    #[test]
+    fn test_set_lands_an_automated_cutoff_on_the_control_point() {
+        let mut cascade = Cascade::new(Response::LowPass, 1_000.0, 2.0, 48_000);
+        cascade.set(Response::LowPass, automated(4_000.0), 2.0);
+        assert_lands(&mut [("cutoff", &mut cascade.cutoff)]);
+    }
 
     #[test]
     fn test_curve_is_3db_down_at_the_cutoff_and_slopes_by_order()

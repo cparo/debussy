@@ -84,3 +84,39 @@ pub use registry::{
 pub use response::FrequencyResponse;
 pub use reverb::{MAX_PRE_DELAY_MS, Reverb};
 pub use utility::{Bus, Pick, Place, Silence};
+
+/// Helpers for the effects' unit tests.
+#[cfg(test)]
+pub(crate) mod testing {
+    use signal_graph::{ParameterInfo, Ramp, Reading};
+
+    /// The frames to the next control point that [`automated`] readings give.
+    pub(crate) const WITHIN: usize = 32;
+
+    /// `value` as read from a parameter a curve drives, due at the next control point.
+    pub(crate) fn automated(value: f32) -> Reading {
+        Reading {
+            value,
+            within: Some(WITHIN),
+        }
+    }
+
+    /// A value of `info` 37 % of the way up its range: in range, and away from its default.
+    pub(crate) fn off_default(info: &ParameterInfo) -> f32 {
+        info.min + 0.37 * (info.max - info.min)
+    }
+
+    /// Asserts that each of `ramps` is still moving after [`WITHIN`] − 1 frames and on its
+    /// target at [`WITHIN`]: it lands on the control point, not 10 ms later.
+    pub(crate) fn assert_lands(ramps: &mut [(&str, &mut Ramp)]) {
+        for (name, ramp) in ramps {
+            for _ in 1..WITHIN {
+                ramp.next_value();
+            }
+            assert!(ramp.is_ramping(), "{name} landed early or never moved");
+            ramp.next_value();
+            assert!(!ramp.is_ramping(), "{name} missed the control point");
+            assert_eq!(ramp.current(), ramp.target(), "{name}");
+        }
+    }
+}

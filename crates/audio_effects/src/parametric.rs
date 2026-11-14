@@ -3,7 +3,7 @@
 
 use audio_buffers::Layout;
 use dsp::{Svf, SvfCoefficients};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
+use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
 
 use crate::curve::Curve;
 use crate::error::Error;
@@ -293,7 +293,7 @@ impl PassStage {
     /// the stage is turned on or off.
     fn process(&mut self, left: &mut [f32], right: &mut [f32], sample_rate: u32) {
         let on = is_on(self.enabled.get());
-        let (response, cutoff, order) = (self.response, self.cutoff.get(), self.order.get());
+        let (response, cutoff, order) = (self.response, self.cutoff.read(), self.order.get());
         let Some(state) = self.state.as_mut() else {
             return;
         };
@@ -302,7 +302,7 @@ impl PassStage {
                 return;
             }
             // Waking from rest: start at the current cutoff and order, from silence.
-            state.cascade = Cascade::new(response, cutoff, order, sample_rate);
+            state.cascade = Cascade::new(response, cutoff.value, order, sample_rate);
         } else {
             state.cascade.set(response, cutoff, order);
         }
@@ -398,6 +398,14 @@ impl Band {
 }
 
 impl BandState {
+    /// Takes the band's frequency (Hz), gain (dB) and Q readings, once per block; each reaches
+    /// its target by the next control point while automated.
+    fn approach(&mut self, frequency: Reading, gain: Reading, q: Reading) {
+        self.frequency.approach(frequency.map(f32::log2));
+        self.gain.approach(gain);
+        self.q.approach(q.map(f32::log2));
+    }
+
     /// The coefficients the band's target asks for at the ramped frequency, gain and Q; with no
     /// target, the morph's start with the identity mix.
     fn target_coefficients(&self, sample_rate: f32) -> SvfCoefficients {
@@ -552,13 +560,11 @@ impl Node for ParametricEq {
         let rate = self.sample_rate;
         for band in &mut self.bands {
             let wanted = band.wanted();
-            let (frequency, gain, q) = (band.frequency.get(), band.gain.get(), band.q.get());
+            let (frequency, gain, q) = (band.frequency.read(), band.gain.read(), band.q.read());
             let Some(state) = band.state.as_mut() else {
                 continue;
             };
-            state.frequency.set_target(frequency.log2());
-            state.gain.set_target(gain);
-            state.q.set_target(q.log2());
+            state.approach(frequency, gain, q);
             if wanted != state.target {
                 if state.is_idle() {
                     // Waking from rest: start from the new response's own `g` and `k`, so
@@ -601,6 +607,22 @@ impl Node for ParametricEq {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated};
+
+    #[test]
+    fn test_band_lands_automated_values_on_the_control_point()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut eq = ParametricEq::new()?;
+        eq.prepare(48_000, 64);
+        let state = eq.bands[0].state.as_mut().ok_or("not prepared")?;
+        state.approach(automated(2_000.0), automated(6.0), automated(2.0));
+        assert_lands(&mut [
+            ("frequency", &mut state.frequency),
+            ("gain", &mut state.gain),
+            ("q", &mut state.q),
+        ]);
+        Ok(())
+    }
 
     /// The equaliser's response at its defaults with `changes` by name.
     fn response(changes: &[(&str, f32)]) -> Result<FrequencyResponse, Box<dyn std::error::Error>> {

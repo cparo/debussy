@@ -96,9 +96,13 @@ The engine reads curves from the plan; no message carries a curve value (see
   no longer binds a parameter, the parameter is released and returns to its base value over the
   normal 10 ms ramp.
 - **Readers.** `Smoothed` follows automation for every parameter it reads. A node that ramps a
-  value derived from a parameter calls `Ramp::follow` with that parameter; the mixer does so for
-  channel gain. A derived ramp that calls `Ramp::set_target` ramps over 10 ms from each control
-  point.
+  value derived from a parameter reads it once per block with `Parameter::read`, which gives a
+  `Reading` (the value and, while automated, the frames to the next control point), derives
+  with `Reading::map`, and sets the ramp with `Ramp::approach`; `Ramp::follow` does the same from
+  the parameter. Every built-in effect's ramp of a continuous parameter does so, and the mixer's
+  channel gain uses `follow`. Ramps derived from toggles, choices and integers, which no curve
+  drives, use `Ramp::set_target`
+  ([ADR-0128](../adrs/0128-effects-read-each-parameter-once-per-block-as-a.md)).
 
 The evaluation rules are recorded in
 [ADR-0125](../adrs/0125-curves-drive-parameters-on-a-32-frame-timeline.md).

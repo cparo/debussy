@@ -3,7 +3,7 @@
 
 use dsp::TapDelay;
 use modulation::Lfo;
-use signal_graph::{ParameterInfo, Ramp, Scale};
+use signal_graph::{ParameterInfo, Ramp, Reading, Scale};
 
 use crate::gain_spectrogram::SpectrogramCurve;
 use crate::modulated_delay::{LfoDefaults, ModulatedDelay, Sweep, controls, ms_to_frames};
@@ -81,13 +81,14 @@ impl Sweep for Voices {
         }
     }
 
-    fn set(&mut self, value: &dyn Fn(usize) -> f32) {
-        let value = |control: Control| value(control as usize);
+    fn set(&mut self, read: &dyn Fn(usize) -> Reading) {
+        let read = |control: Control| read(control as usize);
+        let value = |control: Control| read(control).value;
         let rate = self.sample_rate;
         self.delay
-            .set_target(ms_to_frames(value(Control::Delay), rate));
+            .approach(read(Control::Delay).map(|ms| ms_to_frames(ms, rate)));
         self.depth
-            .set_target(ms_to_frames(value(Control::Depth), rate));
+            .approach(read(Control::Depth).map(|ms| ms_to_frames(ms, rate)));
         #[allow(clippy::cast_precision_loss)] // a handful of voices
         let most = MAX_VOICES as f32;
         let voices = value(Control::Voices).round().clamp(1.0, most);
@@ -163,16 +164,25 @@ pub(crate) fn curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{assert_lands, automated, off_default};
+
+    #[test]
+    fn test_set_lands_automated_values_on_the_control_point() {
+        let infos = Voices::infos();
+        let mut voices = Voices::new(48_000);
+        voices.set(&|i| automated(off_default(&infos[i])));
+        assert_lands(&mut [("delay", &mut voices.delay), ("depth", &mut voices.depth)]);
+    }
     use signal_graph::Node;
 
     /// Every own parameter at 10, except `voices` at `voices`.
-    fn with_voices(voices: f32) -> impl Fn(usize) -> f32 {
+    fn with_voices(voices: f32) -> impl Fn(usize) -> Reading {
         move |i| {
-            if i == Control::Voices as usize {
+            Reading::fixed(if i == Control::Voices as usize {
                 voices
             } else {
                 10.0
-            }
+            })
         }
     }
 
