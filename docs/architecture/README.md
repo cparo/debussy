@@ -135,6 +135,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Compressed audio codecs](platform.md#compressed-audio-codecs)
   - [Folders](platform.md#folders)
   - [Audio device I/O](platform.md#audio-device-io)
+  - [App bundle](platform.md#app-bundle)
+  - [Documents opened from the Finder](platform.md#documents-opened-from-the-finder)
 - [Project Model](project.md)
   - [Editing model](project.md#editing-model)
   - [Musical time](project.md#musical-time)

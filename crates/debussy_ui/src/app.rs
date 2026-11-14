@@ -247,6 +247,9 @@ pub enum Message {
     OpenProject,
     /// Open this project from the Open browser's list; the window's shell handles it.
     OpenListed(PathBuf),
+    /// Open this project, asked for from outside the window, such as by the Finder; the
+    /// window's shell handles it.
+    OpenDocument(PathBuf),
     /// Choose a project anywhere through a folder dialog, and switch to it; the window's shell
     /// handles it.
     BrowseProjects,
@@ -998,6 +1001,7 @@ impl App {
             | Message::CancelNewProject
             | Message::OpenProject
             | Message::OpenListed(_)
+            | Message::OpenDocument(_)
             | Message::BrowseProjects
             | Message::CancelOpen => {}
             Message::Scrolled(offset) => self.scrolled = offset,

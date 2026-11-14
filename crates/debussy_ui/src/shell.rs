@@ -1,7 +1,7 @@
 //! The running window's state: the open project's [`App`], if any, and switching projects
 //! through the [`Launcher`] (`docs/architecture/startup.md` "Application startup").
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::widget::{
@@ -13,6 +13,7 @@ use crate::app::{App, Message};
 use crate::launcher::{Launcher, ProjectEntry};
 use crate::mixer_strip::{self, MixerFocus};
 use crate::node_dialog::DialogMessage;
+use crate::open_requests::Inbox;
 use crate::reveal;
 use crate::shortcuts;
 use crate::theme::{self, Tone};
@@ -52,11 +53,21 @@ pub(crate) struct Shell {
     scale: f32,
     /// The chrome's tone, carried to each project.
     tone: Tone,
+    /// The open project's path, if known.
+    path: Option<PathBuf>,
+    /// Projects asked for from outside the window.
+    inbox: Inbox,
 }
 
 impl Shell {
-    /// A window over `app`, if one opened, switching projects through `launcher`.
-    pub(crate) fn new(mut launcher: Option<Box<dyn Launcher>>, app: Option<App>) -> Shell {
+    /// A window over `app`, if one opened, at `path`, switching projects through `launcher` and
+    /// opening those asked for through `inbox`.
+    pub(crate) fn new(
+        mut launcher: Option<Box<dyn Launcher>>,
+        app: Option<App>,
+        path: Option<PathBuf>,
+        inbox: Inbox,
+    ) -> Shell {
         // The start screen lists the projects folder.
         let browsing = match (&mut launcher, &app) {
             (Some(launcher), None) => Some(launcher.projects()),
@@ -72,6 +83,8 @@ impl Shell {
             scale: 1.0,
             // Dark at launch, whatever the system's appearance.
             tone: Tone::Dark,
+            path,
+            inbox,
         }
     }
 
@@ -124,6 +137,7 @@ impl Shell {
                 | Message::CreateProject
                 | Message::OpenProject
                 | Message::OpenListed(_)
+                | Message::OpenDocument(_)
                 | Message::BrowseProjects
         );
         let panel = matches!(
@@ -136,6 +150,13 @@ impl Shell {
             && *message == Message::ClearRange;
         if !switch && !panel && !escape {
             return false;
+        }
+        // Asking for the project already open changes nothing.
+        if let Message::OpenDocument(path) = message
+            && self.app.is_some()
+            && self.path.as_deref() == Some(path.as_path())
+        {
+            return true;
         }
         if let Some(app) = &mut self.app {
             // Closes the menu the message came from.
@@ -182,7 +203,7 @@ impl Shell {
                     self.status = None;
                 }
             }
-            Message::OpenListed(path) => self.switch(path, None),
+            Message::OpenListed(path) | Message::OpenDocument(path) => self.switch(path, None),
             Message::BrowseProjects => {
                 let path = self.launcher.as_mut().and_then(|l| l.pick_open());
                 if let Some(path) = path {
@@ -213,6 +234,7 @@ impl Shell {
                 app.set_tone(self.tone);
                 app.set_scale_factor(self.scale);
                 self.app = Some(app);
+                self.path = Some(path.to_owned());
                 self.asking = false;
                 self.browsing = None;
                 self.status = None;
@@ -383,7 +405,7 @@ impl Shell {
             _ => None,
         });
         let keys = iced::keyboard::listen().filter_map(shortcuts::shortcut);
-        let mut subscriptions = vec![rescaled, keys];
+        let mut subscriptions = vec![rescaled, keys, self.inbox.subscription()];
         if let Some(app) = &self.app {
             if app.wants_ticks() {
                 subscriptions.push(iced::window::frames().map(|_| Message::Tick));
@@ -617,7 +639,7 @@ mod tests {
     fn shell(app: Option<App>, calls: Calls) -> (Shell, Rc<RefCell<Calls>>) {
         let calls = Rc::new(RefCell::new(calls));
         let launcher = Box::new(FakeLauncher(Rc::clone(&calls)));
-        (Shell::new(Some(launcher), app), calls)
+        (Shell::new(Some(launcher), app, None, Inbox::empty()), calls)
     }
 
     fn picking(path: &str) -> Calls {
@@ -719,6 +741,60 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_update_open_document_switches_from_the_start_screen() {
+        let (mut shell, calls) = shell(None, Calls::default());
+        let path = PathBuf::from("/Users/a/Song.debussy");
+        let _ = shell.update(Message::OpenDocument(path.clone()));
+        assert_eq!(calls.borrow().prepared, vec![(path.clone(), None)]);
+        assert_eq!(shell.app.as_ref().map(App::sample_rate), Some(44_100));
+        assert_eq!(shell.path, Some(path));
+    }
+
+    #[test]
+    fn test_update_open_document_is_refused_while_playing() -> Result<(), Box<dyn Error>> {
+        let (mut shell, calls) = shell(Some(app(48_000)?), Calls::default());
+        let _ = shell.update(Message::Play);
+        let _ = shell.update(Message::OpenDocument(PathBuf::from(
+            "/Users/a/Song.debussy",
+        )));
+        assert!(calls.borrow().prepared.is_empty());
+        let app = shell.app.as_ref().ok_or("the app was dropped")?;
+        assert_eq!(app.sample_rate(), 48_000);
+        assert!(app.status().is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_open_document_ignores_the_project_already_open() {
+        let (mut shell, calls) = shell(None, Calls::default());
+        let path = PathBuf::from("/Users/a/Song.debussy");
+        let _ = shell.update(Message::OpenDocument(path.clone()));
+        let _ = shell.update(Message::OpenDocument(path.clone()));
+        assert_eq!(calls.borrow().prepared, vec![(path, None)]);
+        let _ = shell.update(Message::OpenDocument(PathBuf::from(
+            "/Users/a/Other.debussy",
+        )));
+        assert_eq!(
+            calls.borrow().prepared.len(),
+            2,
+            "another project still opens"
+        );
+    }
+
+    #[test]
+    fn test_update_failed_open_document_on_the_start_screen_shows_status() {
+        let calls = Calls {
+            fails: true,
+            ..Calls::default()
+        };
+        let (mut shell, _) = shell(None, calls);
+        let _ = shell.update(Message::OpenDocument(PathBuf::from("/Users/a/Bad.debussy")));
+        assert!(shell.app.is_none());
+        assert!(shell.path.is_none());
+        assert_eq!(shell.status.as_deref(), Some("no such project"));
+    }
+
     fn listing() -> Calls {
         let entry = |name: &str, minutes: u64| ProjectEntry {
             name: name.to_owned(),
@@ -818,7 +894,7 @@ mod tests {
 
     #[test]
     fn test_update_second_window_does_nothing() {
-        let mut shell = Shell::new(None, None);
+        let mut shell = Shell::new(None, None, None, Inbox::empty());
         let _ = shell.update(Message::CreateProject);
         assert!(shell.app.is_none());
     }

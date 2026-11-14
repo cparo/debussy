@@ -8,6 +8,7 @@
 mod adr;
 mod arch_index;
 mod budget;
+mod bundle;
 mod citations;
 mod crate_rules;
 mod hooks;
@@ -25,6 +26,8 @@ const USAGE: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  bundle                         Build target/release/Debussy.app (release build, Info.plist,
+                                 ad-hoc signature)
   check                          Check docs (line budgets, docs/architecture/ citations and
                                  links, the ADR index, the architecture table of contents) and
                                  the crate tier and dependency rules
@@ -55,6 +58,12 @@ fn run(args: Vec<String>) -> Result<ExitCode> {
         return Ok(ExitCode::FAILURE);
     };
     match command.as_str() {
+        "bundle" => {
+            no_arguments(rest)?;
+            let app = bundle::build(&root)?;
+            println!("built {}", app.display());
+            Ok(ExitCode::SUCCESS)
+        }
         "check" => {
             no_arguments(rest)?;
             Ok(exit_code(check(&root)?))

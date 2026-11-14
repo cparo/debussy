@@ -67,6 +67,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Args> {
                 }
             }
             "-h" | "--help" => bail!("{USAGE}"),
+            // The process serial number older macOS passes to apps the Finder launches.
+            psn if psn.starts_with("-psn_") => {}
             flag if flag.starts_with("--") => bail!("unknown option {flag}\n\n{USAGE}"),
             path if project.is_none() => project = Some(PathBuf::from(path)),
             extra => bail!("unexpected argument {extra}\n\n{USAGE}"),
@@ -98,6 +100,15 @@ mod tests {
 
     fn strings(args: &[&str]) -> Vec<String> {
         args.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn test_parse_ignores_a_finder_process_serial_number() -> Result<()> {
+        let args = parse(strings(&["-psn_0_12345"]))?;
+        assert_eq!(args.project, None);
+        let args = parse(strings(&["-psn_0_12345", "Song.debussy"]))?;
+        assert_eq!(args.project, Some(PathBuf::from("Song.debussy")));
+        Ok(())
     }
 
     #[test]

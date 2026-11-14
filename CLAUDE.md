@@ -85,6 +85,7 @@ Rules:
   `docs/architecture/`:
   `cargo xtask generate-architecture-index`
 - Create an ADR (the `new-adr` skill's mechanical step): `cargo xtask new-adr`
+- Build the macOS app bundle, `target/release/Debussy.app`: `cargo xtask bundle`
 - Check docs and crate rules (line budgets, `docs/architecture/` heading citations, ADR index,
   crate tiers and dependencies): `cargo xtask check`
 - Commit gate (that check, then `cargo fmt --check`, then clippy): `cargo xtask precommit` — run

@@ -28,3 +28,23 @@ A duplex stream is a `cpal` input stream and output stream on the same device. T
 pushes samples into a lock-free ring of 4 buffers; the output callback takes one buffer's worth
 (silence for any shortfall) and runs the audio callback with both. The input latency reported
 includes the frames waiting in the ring ([ADR-0052](../adrs/0052-a-duplex-stream-is-two-cpal-streams-joined-by-a.md)).
+
+## App bundle
+
+Debussy ships as `Debussy.app`, assembled by `cargo xtask bundle` from the release `debussy`
+binary and `crates/macos_platform/bundle/Info.plist`, and signed ad hoc. Its bundle identifier is
+`io.github.cparo.debussy`. The `Info.plist` exports the type `io.github.cparo.debussy.project`, the
+[project bundle](project.md#project-bundle) with extension `debussy`, conforming to
+`com.apple.package` and `public.composite-content`, and claims it as the type's owner and editor
+([ADR-0131](../adrs/0131-debussy-ships-as-a-debussy-app-bundle-that.md)).
+
+## Documents opened from the Finder
+
+Projects opened from the Finder arrive as an `odoc` Apple Event, read in `macos_platform` by a
+handler that `macos_platform::documents::on_open_documents` installs when the application posts
+`NSApplicationWillFinishLaunchingNotification`; it must be called before the window's event loop
+starts. Each file URL is passed on as a path, and no Apple type crosses the crate's interface.
+The Finder sends the event to a running instance of `Debussy.app`; a `debussy` process started
+from the binary outside the bundle (`cargo run`, `target/*/debussy`) is not one, so opening a
+project from the Finder alongside it launches a separate `Debussy.app` process
+([ADR-0132](../adrs/0132-finder-open-document-events-arrive-through-an.md)).
