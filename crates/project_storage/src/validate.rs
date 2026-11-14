@@ -4,14 +4,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use audio_buffers::Layout;
+use modulation::{Curve, Handle, Point};
 use project_model::{
-    AudioFile, Clip, ClipId, Connection, ConnectionId, Edit, Endpoint, MAX_BOARD_COORDINATE, Node,
-    NodeId, NodeKind, Position, Side, Source, State, Tempo, Track, TrackId,
+    AudioFile, Clip, ClipId, Connection, ConnectionId, CurveId, CurveLane, Edit, Endpoint,
+    MAX_BOARD_COORDINATE, Node, NodeId, NodeKind, Position, Side, Source, State, Tempo, Track,
+    TrackId,
 };
 
 use crate::format::{
-    FORMAT_VERSION, SavedClip, SavedConnection, SavedEndpoint, SavedFile, SavedLayout, SavedNode,
-    SavedNodeKind, SavedPosition, SavedProject, SavedSide, SavedSource, SavedTempo, SavedTrack,
+    FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
+    SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSide,
+    SavedSource, SavedTempo, SavedTrack,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -43,6 +46,10 @@ pub const MAX_CONNECTIONS: usize = 100_000;
 pub const MAX_PARAMETERS: usize = 4096;
 /// The most channels a mixer may have in a file.
 pub const MAX_MIXER_CHANNELS: usize = 4096;
+/// The most automation curves a file may hold.
+pub const MAX_CURVES: usize = 10_000;
+/// The most curve points a file may hold, over all curves.
+pub const MAX_CURVE_POINTS: usize = 1_000_000;
 /// The longest name, effect id or parameter name, in bytes.
 pub const MAX_NAME_BYTES: usize = 1024;
 /// The longest audio file name, in bytes.
@@ -63,6 +70,7 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
                 id: node.id.0,
                 kind: kind_to_saved(&node.kind),
                 position: node.position.map(|p| SavedPosition { x: p.x, y: p.y }),
+                curve_ports: node.curve_ports.clone(),
             })
             .collect(),
         connections: state
@@ -85,7 +93,59 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
             beats_per_bar: state.tempo.beats_per_bar,
             beat_unit: state.tempo.beat_unit,
         },
+        curves: state.curves.iter().map(curve_to_saved).collect(),
     }
+}
+
+fn handle_to_saved(handle: Handle) -> SavedHandle {
+    SavedHandle {
+        d_frame: handle.d_frame,
+        d_value: handle.d_value,
+    }
+}
+
+fn handle_from_saved(handle: SavedHandle) -> Handle {
+    Handle::new(handle.d_frame, handle.d_value)
+}
+
+fn curve_to_saved(lane: &CurveLane) -> SavedCurve {
+    SavedCurve {
+        id: lane.id.0,
+        name: lane.name.clone(),
+        points: lane
+            .curve
+            .points()
+            .iter()
+            .map(|p| SavedPoint {
+                frame: p.frame,
+                value: p.value,
+                in_handle: handle_to_saved(p.in_handle),
+                out_handle: handle_to_saved(p.out_handle),
+            })
+            .collect(),
+    }
+}
+
+/// The curve lane a saved curve describes, after checking its name and that its points make a
+/// valid curve (`modulation::Curve::validate`).
+fn curve_from_saved(saved: SavedCurve) -> Result<CurveLane, String> {
+    check_name(&saved.name, "a curve name")?;
+    let points = saved
+        .points
+        .into_iter()
+        .map(|p| {
+            Point::new(p.frame, p.value).with_handles(
+                handle_from_saved(p.in_handle),
+                handle_from_saved(p.out_handle),
+            )
+        })
+        .collect();
+    let curve = Curve::new(points).map_err(|e| format!("curve {}: {e}", saved.id))?;
+    Ok(CurveLane {
+        id: CurveId(saved.id),
+        name: saved.name,
+        curve,
+    })
 }
 
 fn layout_to_saved(layout: Layout) -> SavedLayout {
@@ -167,6 +227,8 @@ fn endpoint_to_saved(endpoint: Endpoint) -> SavedEndpoint {
         Endpoint::Track(id) => SavedEndpoint::Track { id: id.0 },
         Endpoint::Output => SavedEndpoint::Output,
         Endpoint::Node(id) => SavedEndpoint::Node { id: id.0 },
+        Endpoint::Curve(id) => SavedEndpoint::Curve { id: id.0 },
+        Endpoint::CurvePort(node, port) => SavedEndpoint::CurvePort { node: node.0, port },
     }
 }
 
@@ -175,6 +237,8 @@ fn endpoint_from_saved(endpoint: SavedEndpoint) -> Endpoint {
         SavedEndpoint::Track { id } => Endpoint::Track(TrackId(id)),
         SavedEndpoint::Output => Endpoint::Output,
         SavedEndpoint::Node { id } => Endpoint::Node(NodeId(id)),
+        SavedEndpoint::Curve { id } => Endpoint::Curve(CurveId(id)),
+        SavedEndpoint::CurvePort { node, port } => Endpoint::CurvePort(NodeId(node), port),
     }
 }
 
@@ -289,6 +353,13 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
     ensure(saved.connections.len() <= MAX_CONNECTIONS, || {
         format!("more than {MAX_CONNECTIONS} connections")
     })?;
+    ensure(saved.curves.len() <= MAX_CURVES, || {
+        format!("more than {MAX_CURVES} curves")
+    })?;
+    let points: usize = saved.curves.iter().map(|c| c.points.len()).sum();
+    ensure(points <= MAX_CURVE_POINTS, || {
+        format!("more than {MAX_CURVE_POINTS} curve points")
+    })?;
 
     // Tracks and clips share one id space (`project_model::Session`).
     let mut item_ids = BTreeSet::new();
@@ -344,11 +415,30 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
             }
             None => None,
         };
+        ensure(node.curve_ports.len() <= MAX_PARAMETERS, || {
+            format!(
+                "node {} has more than {MAX_PARAMETERS} curve ports",
+                node.id
+            )
+        })?;
+        for name in node.curve_ports.keys() {
+            check_name(name, "a parameter name")?;
+        }
         nodes.push(Node {
             id: NodeId(node.id),
             kind: kind_from_saved(node.kind)?,
             position,
+            curve_ports: node.curve_ports,
         });
+    }
+
+    let mut curve_ids = BTreeSet::new();
+    let mut curves = Vec::with_capacity(saved.curves.len());
+    for saved_curve in saved.curves {
+        ensure(curve_ids.insert(saved_curve.id), || {
+            format!("curve id {} is used twice", saved_curve.id)
+        })?;
+        curves.push(curve_from_saved(saved_curve)?);
     }
 
     if let Some(y) = saved.output_y {
@@ -371,6 +461,7 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
         connections: Vec::new(),
         output_y: saved.output_y,
         tempo,
+        curves,
     };
     let mut connection_ids = BTreeSet::new();
     let mut ports = BTreeSet::new();

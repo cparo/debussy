@@ -9,6 +9,8 @@ license.workspace = true
 
 [dependencies]
 audio_buffers = { path = "../audio_buffers" }
+audio_effects = { path = "../audio_effects" }
+modulation = { path = "../modulation" }
 signal_graph = { path = "../signal_graph" }
 thiserror = "2.0.21"
 

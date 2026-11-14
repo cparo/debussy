@@ -5,7 +5,7 @@ use audio_buffers::Layout;
 use crate::error::Error;
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::tempo::Tempo;
-use crate::types::{ClipId, Source, TrackId};
+use crate::types::{ClipId, CurveId, Source, TrackId};
 
 /// A stretch of a source placed on the timeline. All times are frames at the project rate.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,8 +119,20 @@ impl Track {
     }
 }
 
-/// The whole editable state of a project: its tracks, in display order, its routing, and its
-/// tempo and meter.
+/// An automation curve lane in the track pane (`docs/architecture/automation.md` "Curves in the
+/// project").
+#[derive(Debug, Clone, PartialEq)]
+pub struct CurveLane {
+    /// The curve's id.
+    pub id: CurveId,
+    /// A name for display.
+    pub name: String,
+    /// The curve.
+    pub curve: modulation::Curve,
+}
+
+/// The whole editable state of a project: its tracks, in display order, its automation curves,
+/// its routing, and its tempo and meter.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct State {
     /// The tracks, top of the arrangement first.
@@ -134,6 +146,8 @@ pub struct State {
     pub output_y: Option<f32>,
     /// The tempo and meter of the whole project.
     pub tempo: Tempo,
+    /// The automation curves, shown below the tracks in this order.
+    pub curves: Vec<CurveLane>,
 }
 
 impl State {
@@ -153,7 +167,33 @@ impl State {
             Endpoint::Track(id) => self.track(id).is_some(),
             Endpoint::Output => true,
             Endpoint::Node(id) => self.node(id).is_some(),
+            Endpoint::Curve(id) => self.curve(id).is_some(),
+            Endpoint::CurvePort(id, port) => self
+                .node(id)
+                .is_some_and(|node| node.curve_port_parameter(port).is_some()),
         }
+    }
+
+    /// An automation curve lane, by id.
+    pub fn curve(&self, id: CurveId) -> Option<&CurveLane> {
+        self.curves.iter().find(|lane| lane.id == id)
+    }
+
+    /// The curve feeding curve port `port` of `node`, if one is connected.
+    pub fn curve_into(&self, node: NodeId, port: u32) -> Option<CurveId> {
+        self.connections.iter().find_map(|c| match (c.from, c.to) {
+            (Endpoint::Curve(curve), Endpoint::CurvePort(n, p)) if (n, p) == (node, port) => {
+                Some(curve)
+            }
+            _ => None,
+        })
+    }
+
+    pub(crate) fn curve_index(&self, id: CurveId) -> Result<usize, Error> {
+        self.curves
+            .iter()
+            .position(|lane| lane.id == id)
+            .ok_or(Error::UnknownCurve(id))
     }
 
     /// The connections to or from `endpoint`.

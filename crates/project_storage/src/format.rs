@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +36,38 @@ pub(crate) struct SavedProject {
     pub output_y: Option<f32>,
     /// Since version 4: the project's tempo and meter.
     pub tempo: SavedTempo,
+    /// Since version 5: the automation curves, in lane order.
+    pub curves: Vec<SavedCurve>,
+}
+
+/// An automation curve lane (`docs/architecture/automation.md` "Curves in the project").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedCurve {
+    pub id: u64,
+    pub name: String,
+    /// Anchor points in frame order.
+    pub points: Vec<SavedPoint>,
+}
+
+/// An anchor point of a curve, with its handles as offsets from it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedPoint {
+    /// The timeline frame, at the project rate.
+    pub frame: i64,
+    /// The normalised value, 0 to 1.
+    pub value: f32,
+    pub in_handle: SavedHandle,
+    pub out_handle: SavedHandle,
+}
+
+/// A handle's offset from its anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedHandle {
+    pub d_frame: f64,
+    pub d_value: f32,
 }
 
 /// The tempo and meter (`docs/architecture/project.md` "Musical time").
@@ -102,6 +134,8 @@ pub(crate) struct SavedNode {
     /// layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<SavedPosition>,
+    /// Since version 5: the curve port number, from 1, of each assigned parameter, by name.
+    pub curve_ports: BTreeMap<String, u32>,
 }
 
 /// A point on the patch board, in logical pixels.
@@ -136,9 +170,22 @@ pub(crate) enum SavedNodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SavedEndpoint {
-    Track { id: u64 },
+    Track {
+        id: u64,
+    },
     Output,
-    Node { id: u64 },
+    Node {
+        id: u64,
+    },
+    /// Since version 5: an automation curve.
+    Curve {
+        id: u64,
+    },
+    /// Since version 5: curve port `port` of node `node`.
+    CurvePort {
+        node: u64,
+        port: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

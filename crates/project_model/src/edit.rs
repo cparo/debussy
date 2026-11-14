@@ -10,9 +10,9 @@ use audio_buffers::Layout;
 
 use crate::error::Error;
 use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
-use crate::state::{Clip, State, Track};
+use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Tempo;
-use crate::types::{ClipId, TrackId};
+use crate::types::{ClipId, CurveId, TrackId};
 
 /// One reversible change to the project state. A gesture made of several changes is a
 /// [`Edit::Batch`], undone as one.
@@ -123,6 +123,48 @@ pub enum Edit {
     MoveOutput(Option<f32>),
     /// Sets the project's tempo and meter.
     SetTempo(Tempo),
+    /// Inserts an automation curve lane at `index` in the curve order.
+    InsertCurve {
+        /// Where it goes; at most the number of curves.
+        index: usize,
+        /// The lane.
+        lane: CurveLane,
+    },
+    /// Removes an automation curve lane, which must have no connections.
+    RemoveCurve(CurveId),
+    /// Renames an automation curve lane.
+    RenameCurve {
+        /// The curve.
+        curve: CurveId,
+        /// Its new name.
+        name: String,
+    },
+    /// Replaces a curve's points. A [`modulation::Curve`] is always valid, so points that are
+    /// not a function of time are refused when the curve is made.
+    SetCurve {
+        /// The curve lane.
+        id: CurveId,
+        /// Its new curve.
+        curve: modulation::Curve,
+    },
+    /// Gives a parameter curve port `port`. Refused for a parameter that cannot be automated
+    /// (see [`signal_graph::ParameterInfo::is_automatable`]), already has a port, or for a port
+    /// number another parameter of the node takes.
+    AssignCurvePort {
+        /// The effect or mixer node.
+        node: NodeId,
+        /// The parameter's name.
+        parameter: String,
+        /// The port number, from 1.
+        port: u32,
+    },
+    /// Takes a parameter's curve port away; the port must have no connection.
+    UnassignCurvePort {
+        /// The node.
+        node: NodeId,
+        /// The parameter's name.
+        parameter: String,
+    },
     /// Replaces the whole state, as when restoring a named version.
     Restore(State),
     /// Several edits applied in order, as one.
@@ -240,6 +282,14 @@ impl Edit {
                     return Err(Error::StillConnected(endpoint));
                 }
                 let index = node_index(state, node)?;
+                let kept = audio_effects::mixer_parameter_infos(channels);
+                let assigned = &state.nodes[index].curve_ports;
+                if let Some(name) = assigned
+                    .keys()
+                    .find(|n| !kept.iter().any(|i| &i.name == *n))
+                {
+                    return Err(Error::StillAssigned(node, name.clone()));
+                }
                 let NodeKind::Mixer {
                     channels: current, ..
                 } = &mut state.nodes[index].kind
@@ -306,6 +356,66 @@ impl Edit {
             Edit::SetTempo(tempo) => {
                 tempo.check()?;
                 Ok(Edit::SetTempo(std::mem::replace(&mut state.tempo, tempo)))
+            }
+            Edit::InsertCurve { index, lane } => {
+                check_index(index, state.curves.len() + 1)?;
+                if state.curve(lane.id).is_some() {
+                    return Err(Error::CurveExists(lane.id));
+                }
+                let id = lane.id;
+                state.curves.insert(index, lane);
+                Ok(Edit::RemoveCurve(id))
+            }
+            Edit::RemoveCurve(id) => {
+                let index = state.curve_index(id)?;
+                check_unconnected(state, Endpoint::Curve(id))?;
+                let lane = state.curves.remove(index);
+                Ok(Edit::InsertCurve { index, lane })
+            }
+            Edit::RenameCurve { curve, name } => {
+                let index = state.curve_index(curve)?;
+                let old = std::mem::replace(&mut state.curves[index].name, name);
+                Ok(Edit::RenameCurve { curve, name: old })
+            }
+            Edit::SetCurve { id, curve } => {
+                let index = state.curve_index(id)?;
+                let old = std::mem::replace(&mut state.curves[index].curve, curve);
+                Ok(Edit::SetCurve { id, curve: old })
+            }
+            Edit::AssignCurvePort {
+                node,
+                parameter,
+                port,
+            } => {
+                let index = node_index(state, node)?;
+                let target = &state.nodes[index];
+                if target.curve_ports.contains_key(&parameter) {
+                    return Err(Error::AlreadyAssigned(node, parameter));
+                }
+                if port == 0 || target.curve_port_parameter(port).is_some() {
+                    return Err(Error::CurvePortTaken(node, port));
+                }
+                match routing::parameter_info(&target.kind, &parameter) {
+                    routing::Lookup::Known { automatable: true } => {}
+                    _ => return Err(Error::NotAutomatable(node, parameter)),
+                }
+                state.nodes[index]
+                    .curve_ports
+                    .insert(parameter.clone(), port);
+                Ok(Edit::UnassignCurvePort { node, parameter })
+            }
+            Edit::UnassignCurvePort { node, parameter } => {
+                let index = node_index(state, node)?;
+                let Some(&port) = state.nodes[index].curve_ports.get(&parameter) else {
+                    return Err(Error::NotAssigned(node, parameter));
+                };
+                check_unconnected(state, Endpoint::CurvePort(node, port))?;
+                state.nodes[index].curve_ports.remove(&parameter);
+                Ok(Edit::AssignCurvePort {
+                    node,
+                    parameter,
+                    port,
+                })
             }
             Edit::Restore(new) => {
                 check_state(&new)?;
@@ -392,9 +502,11 @@ fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
 
 /// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
 /// not known to the model and are checked by `signal_graph`; a mixer has an input per channel and
-/// one output.
+/// one output. A curve has one output and a curve port one input, each port 0.
 fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
+        Endpoint::Curve(_) => output && port == 0,
+        Endpoint::CurvePort(..) => !output && port == 0,
         Endpoint::Track(_) => output && port == 0,
         Endpoint::Output => !output && port == 0,
         Endpoint::Node(id) => match state.node(id).map(|node| &node.kind) {
@@ -421,6 +533,7 @@ fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout
             Some(NodeKind::Bus(layout) | NodeKind::FeedbackDelay { layout, .. }) => Some(*layout),
             Some(NodeKind::Effect { .. }) | None => None,
         },
+        Endpoint::Curve(_) | Endpoint::CurvePort(..) => Some(Layout::Mono),
     }
 }
 
@@ -435,12 +548,24 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         (connection.from, true, connection.output),
         (connection.to, false, connection.input),
     ];
+    if connection.from.is_control() != connection.to.is_control() {
+        return Err(Error::WrongPortType);
+    }
     for (endpoint, output, port) in ends {
         match endpoint {
             Endpoint::Track(id) if state.track(id).is_none() => {
                 return Err(Error::UnknownTrack(id));
             }
             Endpoint::Node(id) if state.node(id).is_none() => return Err(Error::UnknownNode(id)),
+            Endpoint::Curve(id) if state.curve(id).is_none() => {
+                return Err(Error::UnknownCurve(id));
+            }
+            Endpoint::CurvePort(id, _) if state.node(id).is_none() => {
+                return Err(Error::UnknownNode(id));
+            }
+            Endpoint::CurvePort(..) if !output && !state.has_endpoint(endpoint) => {
+                return Err(Error::NoSuchPort(endpoint));
+            }
             _ if !has_port(state, endpoint, output, port) => {
                 return Err(Error::NoSuchPort(endpoint));
             }
@@ -470,6 +595,11 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
     if state.connections.iter().any(same) {
         return Err(Error::AlreadyConnected);
     }
+    if matches!(connection.to, Endpoint::CurvePort(..))
+        && state.connections.iter().any(|c| c.to == connection.to)
+    {
+        return Err(Error::PortTaken(connection.to));
+    }
     Ok(())
 }
 
@@ -491,12 +621,19 @@ fn check_state(state: &State) -> Result<(), Error> {
         }
         routing::check_node(node)?;
     }
+    let mut curves = BTreeSet::new();
+    for lane in &state.curves {
+        if !curves.insert(lane.id) {
+            return Err(Error::CurveExists(lane.id));
+        }
+    }
     let mut built = State {
         tracks: state.tracks.clone(),
         nodes: state.nodes.clone(),
         connections: Vec::with_capacity(state.connections.len()),
         output_y: state.output_y,
         tempo: state.tempo,
+        curves: state.curves.clone(),
     };
     state.tempo.check()?;
     if let Some(y) = state.output_y {

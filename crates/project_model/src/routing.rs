@@ -3,7 +3,8 @@
 //!
 //! The model checks references (every endpoint exists, a track or the output is used only in the
 //! direction it can carry, no duplicate connections). Port and cycle rules are `signal_graph`'s,
-//! checked when the routing is applied to the running graph.
+//! checked when the routing is applied to the running graph. Curve ports and control wires are
+//! the model's own (`docs/architecture/automation.md` "Curves in the project").
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -11,7 +12,7 @@ use std::fmt;
 use audio_buffers::Layout;
 
 use crate::error::Error;
-use crate::types::TrackId;
+use crate::types::{CurveId, TrackId};
 
 /// Identifies a routing node. Ids are never reused within a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -50,8 +51,28 @@ pub enum Endpoint {
     Track(TrackId),
     /// The project output: one stereo input, always present.
     Output,
-    /// A routing node.
+    /// A routing node's audio ports.
     Node(NodeId),
+    /// An automation curve: a source with one control output.
+    Curve(CurveId),
+    /// Curve port `port` (numbered from 1) of a routing node: one control input, taking one
+    /// connection, from a curve.
+    CurvePort(NodeId, u32),
+}
+
+impl Endpoint {
+    /// The routing node the endpoint is on, for [`Endpoint::Node`] and [`Endpoint::CurvePort`].
+    pub fn node(self) -> Option<NodeId> {
+        match self {
+            Endpoint::Node(id) | Endpoint::CurvePort(id, _) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Whether the endpoint carries a control signal: a curve or a curve port.
+    pub fn is_control(self) -> bool {
+        matches!(self, Endpoint::Curve(_) | Endpoint::CurvePort(..))
+    }
 }
 
 /// What a routing node is.
@@ -116,6 +137,34 @@ pub struct Node {
     pub kind: NodeKind,
     /// Where the user put it on the patch board; `None` leaves it to the automatic layout.
     pub position: Option<Position>,
+    /// The curve port, numbered from 1, each assigned parameter takes, by parameter name.
+    pub curve_ports: BTreeMap<String, u32>,
+}
+
+impl Node {
+    /// A node of `kind`, laid out automatically, with no curve ports.
+    pub fn new(id: NodeId, kind: NodeKind) -> Self {
+        Node {
+            id,
+            kind,
+            position: None,
+            curve_ports: BTreeMap::new(),
+        }
+    }
+
+    /// The lowest curve port number no parameter takes.
+    pub fn free_curve_port(&self) -> u32 {
+        let taken: std::collections::BTreeSet<u32> = self.curve_ports.values().copied().collect();
+        (1..).find(|n| !taken.contains(n)).unwrap_or(u32::MAX)
+    }
+
+    /// The parameter assigned to curve port `port`.
+    pub fn curve_port_parameter(&self, port: u32) -> Option<&str> {
+        self.curve_ports
+            .iter()
+            .find(|&(_, &p)| p == port)
+            .map(|(name, _)| name.as_str())
+    }
 }
 
 /// A connection from an output port of one endpoint to an input port of another.
@@ -167,17 +216,37 @@ impl Connection {
         self
     }
 
-    /// Whether it starts or ends at `endpoint`.
+    /// Whether it starts or ends at `endpoint`. A connection to one of a node's curve ports
+    /// touches the node too.
     pub fn touches(&self, endpoint: Endpoint) -> bool {
-        self.from == endpoint || self.to == endpoint
+        let on_curve_port = matches!(
+            (endpoint, self.to),
+            (Endpoint::Node(node), Endpoint::CurvePort(port_node, _)) if node == port_node
+        );
+        self.from == endpoint || self.to == endpoint || on_curve_port
     }
 }
 
-/// Checks a node's own values.
+/// Checks a node's own values, and its curve ports: numbered from 1, no number twice, and for a
+/// mixer or an effect this build knows, each on a parameter that may be automated.
 pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
     if let Some(p) = node.position {
         check_coordinate(p.x)?;
         check_coordinate(p.y)?;
+    }
+    let mut numbers = std::collections::BTreeSet::new();
+    for (name, &port) in &node.curve_ports {
+        if port == 0 || !numbers.insert(port) {
+            return Err(Error::CurvePortTaken(node.id, port));
+        }
+        match parameter_info(&node.kind, name) {
+            Lookup::Known { automatable: true } | Lookup::UnknownKind => {}
+            Lookup::Known { automatable: false }
+            | Lookup::NoSuchParameter
+            | Lookup::NoParameters => {
+                return Err(Error::NotAutomatable(node.id, name.clone()));
+            }
+        }
     }
     match &node.kind {
         NodeKind::Effect { parameters, .. } => check_parameters(parameters),
@@ -225,5 +294,39 @@ pub(crate) fn check_pan(pan: f32) -> Result<(), Error> {
         Ok(())
     } else {
         Err(Error::InvalidValue)
+    }
+}
+
+/// What a node kind says about one of its parameters.
+pub(crate) enum Lookup {
+    /// The parameter exists; whether it may be automated
+    /// ([`signal_graph::ParameterInfo::is_automatable`]).
+    Known {
+        /// Whether a curve may drive it.
+        automatable: bool,
+    },
+    /// The node kind is known, but has no parameter of that name.
+    NoSuchParameter,
+    /// An effect this build does not know: its parameters cannot be checked.
+    UnknownKind,
+    /// A bus or feedback delay, which has no parameters.
+    NoParameters,
+}
+
+/// Looks up parameter `name` of a node of `kind`. Allocates: builds the effect to ask it.
+pub(crate) fn parameter_info(kind: &NodeKind, name: &str) -> Lookup {
+    let infos = match kind {
+        NodeKind::Effect { kind, .. } => match audio_effects::parameter_infos(kind) {
+            Some(infos) => infos,
+            None => return Lookup::UnknownKind,
+        },
+        NodeKind::Mixer { channels, .. } => audio_effects::mixer_parameter_infos(*channels),
+        NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. } => return Lookup::NoParameters,
+    };
+    match infos.into_iter().find(|info| info.name == name) {
+        Some(info) => Lookup::Known {
+            automatable: info.is_automatable(),
+        },
+        None => Lookup::NoSuchParameter,
     }
 }

@@ -72,6 +72,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Analysis cache files](analysis.md#analysis-cache-files)
 - [Automation](automation.md)
   - [Curves](automation.md#curves)
+  - [Curves in the project](automation.md#curves-in-the-project)
 - [Crates](crates.md)
   - [Crate map](crates.md#crate-map)
   - [Dependency rules](crates.md#dependency-rules)

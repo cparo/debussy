@@ -147,4 +147,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0121](0121-chorus-and-flanger-displays-plot-the-gain-over-10.md) | Chorus and flanger displays plot the gain over 10 s of pink noise | Accepted | [Modulation display](../architecture/effect-displays.md#modulation-display) |
 | [ADR-0122](0122-pink-noise-is-a-seeded-alternating-pole-zero.md) | Pink noise is a seeded alternating pole-zero filter cascade | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0123](0123-automation-curves-are-cubic-b-zier-segments-kept.md) | Automation curves are cubic Bézier segments kept functions of time, evaluated by bisection | Accepted | [Curves](../architecture/automation.md#curves) |
+| [ADR-0124](0124-project-format-5-saves-automation-curve-lanes.md) | Project format 5 saves automation curve lanes, curve ports and control wires | Accepted | [Curves in the project](../architecture/automation.md#curves-in-the-project) |
 

@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
+use modulation::{Curve, Handle, Point};
 use project_model::{AudioFile, Clip, Endpoint, NodeKind, Session, Source};
 use project_storage::{Bundle, Error as StorageError, FORMAT_VERSION, MAX_FILE_BYTES};
 
@@ -96,6 +97,22 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
     }
     session.connect(Endpoint::Node(mixer), 0, Endpoint::Node(effect), 0)?;
     session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
+    let mut points = Vec::new();
+    let mut frame = random.below(1_000) as i64 - 500;
+    for _ in 0..random.below(5) {
+        // Gaps of at least 3 000 frames leave room for handles reaching up to 1 000 either way.
+        let gap = 3_000 + random.below(10_000);
+        let value = random.below(1_001) as f32 / 1_000.0;
+        let reach = (1 + random.below(1_000)) as f64;
+        points.push(
+            Point::new(frame, value)
+                .with_handles(Handle::new(-reach * 0.5, -0.125), Handle::new(reach, 0.25)),
+        );
+        frame += gap as i64;
+    }
+    let curve = session.add_curve("Curve ✓", Curve::new(points)?)?;
+    let port = session.assign_curve_port(mixer, "channel 1 gain")?;
+    session.connect_curve(curve, mixer, port)?;
     session.save_version("Final mix")?;
     Ok(session)
 }
@@ -204,6 +221,21 @@ fn tempo(bpm: f64, beats_per_bar: u8, beat_unit: u8) -> String {
     )
 }
 
+/// A version 5 project with one mixer, whose curve ports are `ports`, and these curves and
+/// connections.
+fn curves(ports: &str, curves: &str, connections: &str) -> String {
+    format!(
+        r#"{{"format_version":5,"sample_rate":48000,"tracks":[],"nodes":[{{"id":1,"kind":{{"kind":"mixer","channels":1,"parameters":{{}}}},"curve_ports":{{{ports}}}}}],"connections":[{connections}],"tempo":{{"bpm":120.0,"beats_per_bar":4,"beat_unit":4}},"curves":[{curves}]}}"#
+    )
+}
+
+/// A saved curve point at `frame` and `value` whose out-handle reaches `out` frames.
+fn point(frame: i64, value: f32, out: f64) -> String {
+    format!(
+        r#"{{"frame":{frame},"value":{value},"in_handle":{{"d_frame":0.0,"d_value":0.0}},"out_handle":{{"d_frame":{out},"d_value":0.0}}}}"#
+    )
+}
+
 fn mono_track(file_name: &str) -> String {
     format!(
         r#"{{"id":1,"name":"T","layout":"mono","clips":[{{"id":2,"source":{{"kind":"mono","file":{{"name":"{file_name}","frames":100}}}},"offset":0,"length":10,"position":0,"gain_db":0.0,"fade_in":0,"fade_out":0}}]}}"#
@@ -219,6 +251,17 @@ fn test_open_refuses_untrusted_files() -> Result<(), Box<dyn Error>> {
     fs::write(path.join("project.json"), project(&mono_track("a.wav"), ""))?;
     assert!(Bundle::open(&path).is_ok());
     fs::write(path.join("project.json"), tempo(97.25, 7, 8))?;
+    assert!(Bundle::open(&path).is_ok());
+    let curve = format!(
+        r#"{{"id":2,"name":"C","points":[{},{}]}}"#,
+        point(0, 0.25, 10.0),
+        point(100, 1.0, 0.0)
+    );
+    let wire = r#"{"id":3,"from":{"kind":"curve","id":2},"output":0,"to":{"kind":"curve_port","node":1,"port":1},"input":0,"pan":0.0}"#;
+    fs::write(
+        path.join("project.json"),
+        curves(r#""channel 1 gain":1"#, &curve, wire),
+    )?;
     assert!(Bundle::open(&path).is_ok());
 
     for name in [
@@ -270,6 +313,36 @@ fn test_open_refuses_untrusted_files() -> Result<(), Box<dyn Error>> {
         tempo(120.0, 0, 4),
         tempo(120.0, 4, 3),
         tempo(120.005, 4, 4),
+        // A segment turning back in time.
+        curves(
+            "",
+            &format!(
+                r#"{{"id":2,"name":"C","points":[{},{}]}}"#,
+                point(0, 0.5, -1.0),
+                point(9, 0.5, 0.0)
+            ),
+            "",
+        ),
+        // A value outside 0 to 1.
+        curves(
+            "",
+            &format!(r#"{{"id":2,"name":"C","points":[{}]}}"#, point(0, 1.5, 0.0)),
+            "",
+        ),
+        // A curve port on a parameter that cannot be automated.
+        curves(r#""channel 1 mode":1"#, "", ""),
+        // A curve port numbered 0.
+        curves(r#""channel 1 gain":0"#, "", ""),
+        // A wire from a curve to an audio input.
+        curves(
+            "",
+            &curve,
+            r#"{"id":3,"from":{"kind":"curve","id":2},"output":0,"to":{"kind":"node","id":1},"input":0,"pan":0.0}"#,
+        ),
+        // A wire to a curve port no parameter takes.
+        curves("", &curve, wire),
+        // A version 5 node without its curve ports.
+        curves("", "", "").replace(r#","curve_ports":{}"#, ""),
     ];
     for text in invalid {
         let error = open_with(&path, &text)?;

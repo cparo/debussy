@@ -15,7 +15,7 @@ pub const MAX_DEPTH: u64 = 64;
 pub(crate) type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`.
-const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three, three_to_four];
+const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three, three_to_four, four_to_five];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
 /// connection is a whole-port connection, which is what their absence means.
@@ -40,6 +40,23 @@ fn three_to_four(mut value: Value) -> Result<Value, String> {
         "tempo".to_owned(),
         serde_json::json!({"bpm": 120.0, "beats_per_bar": 4, "beat_unit": 4}),
     );
+    Ok(value)
+}
+
+/// Version 5 added required automation `curves` to the project and `curve_ports` to each node
+/// (ADR-0124); a version 4 file gets none of either.
+fn four_to_five(mut value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("the file is not a JSON object")?;
+    object.insert("curves".to_owned(), Value::Array(Vec::new()));
+    if let Some(nodes) = object.get_mut("nodes").and_then(Value::as_array_mut) {
+        for node in nodes {
+            node.as_object_mut()
+                .ok_or("a node is not a JSON object")?
+                .insert("curve_ports".to_owned(), Value::Object(Default::default()));
+        }
+    }
     Ok(value)
 }
 
@@ -144,7 +161,7 @@ mod tests {
     fn test_parse_migrates_version_three_to_the_default_tempo() -> Result<(), Box<dyn StdError>> {
         let v3 = V1.replace("\"format_version\":1", "\"format_version\":3");
         let saved = parse(Path::new("p"), &v3)?;
-        assert_eq!(saved.format_version, 4);
+        assert_eq!(saved.format_version, FORMAT_VERSION);
         assert_eq!(
             (
                 saved.tempo.bpm,
@@ -163,6 +180,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_four_to_no_curves() -> Result<(), Box<dyn StdError>> {
+        let v4 = r#"{"format_version":4,"sample_rate":48000,"tracks":[],"connections":[],
+            "nodes":[{"id":1,"kind":{"kind":"bus","layout":"mono"}}],
+            "tempo":{"bpm":90.0,"beats_per_bar":3,"beat_unit":4}}"#;
+        let saved = parse(Path::new("p"), v4)?;
+        assert_eq!(saved.format_version, 5);
+        assert!(saved.curves.is_empty());
+        assert!(saved.nodes[0].curve_ports.is_empty());
+        // A version 5 file must have its curves and curve ports.
+        let v5 = v4.replace("\"format_version\":4", "\"format_version\":5");
+        assert!(matches!(
+            parse(Path::new("p"), &v5),
+            Err(Error::Json { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -170,12 +205,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":5");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":6");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 5,
-                supported: 4,
+                found: 6,
+                supported: 5,
                 ..
             })
         ));
@@ -208,7 +243,7 @@ mod tests {
         fn two_to_three(mut v: Value) -> Result<Value, String> {
             let object = v.as_object_mut().ok_or("not an object")?;
             object.insert("nodes".into(), Value::Array(Vec::new()));
-            three_to_four(v)
+            four_to_five(three_to_four(v)?)
         }
         let old = r#"{"format_version":1,"rate":44100,"tracks":[],"nodes":[],"connections":[]}"#;
         let saved = parse_with(Path::new("p"), old, 3, &[one_to_two, two_to_three])?;
