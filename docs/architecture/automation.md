@@ -66,3 +66,39 @@ The curve maths is built in-house ([ADR-0123](../adrs/0123-automation-curves-are
 
 The project's curve state and format 5 are recorded in
 [ADR-0124](../adrs/0124-project-format-5-saves-automation-curve-lanes.md).
+
+## Evaluation
+
+The engine reads curves from the plan; no message carries a curve value (see
+`docs/architecture/signal-graph.md` "Port types").
+
+- **Graph.** `Graph::add_curve` adds a curve source holding an immutable `Arc<modulation::Curve>`;
+  `Graph::set_curve` replaces it, keeping its id. `Graph::connect_curve` binds a curve to a
+  processor's parameter by name: only an automatable parameter, one curve per parameter, any
+  number of parameters per curve. The bridge connects a curve port's wire to the parameter the
+  port is assigned to; a port on an unknown effect's stand-in is not connected.
+- **Bindings.** Compiling a plan turns each curve-to-parameter connection into a binding: the
+  curve, the parameter, and the node's arrival time (see "Delay compensation" in
+  `docs/architecture/signal-graph.md`).
+- **Transport.** `Runner::set_transport(position, playing)` gives the timeline frame of the
+  block's first source frame and whether it advances; `audio_engine` passes the playhead in
+  playback and the range position in offline render.
+- **Control grid.** While playing, a plan with bindings runs in pieces split at timeline frames
+  that are multiples of `signal_graph::CONTROL_PERIOD` (32). Before each piece, each binding
+  reads its curve at the next multiple minus its node's arrival time, maps it with
+  `map_to_parameter`, and sets the parameter to reach that value at that multiple. Cycles keep
+  their own sub-blocks inside each piece. Output does not depend on the block size.
+- **Stopped.** While stopped, each binding reads its curve once per block at the position and
+  reaches it over the block.
+- **Override.** A bound parameter is automated: `Parameter::get` gives the curve's value, and
+  `Parameter::set` changes only `Parameter::base`, the value it returns to. A reader reaches an
+  automated value by the next control point (`Smoothed::update`, `Ramp::follow`). When a new plan
+  no longer binds a parameter, the parameter is released and returns to its base value over the
+  normal 10 ms ramp.
+- **Readers.** `Smoothed` follows automation for every parameter it reads. A node that ramps a
+  value derived from a parameter calls `Ramp::follow` with that parameter; the mixer does so for
+  channel gain. A derived ramp that calls `Ramp::set_target` ramps over 10 ms from each control
+  point.
+
+The evaluation rules are recorded in
+[ADR-0125](../adrs/0125-curves-drive-parameters-on-a-32-frame-timeline.md).

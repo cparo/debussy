@@ -24,13 +24,15 @@ impl fmt::Display for ConnectionId {
     }
 }
 
-/// The type of signal a port carries (`docs/architecture/signal-graph.md` "Port types"). Audio is
-/// the only type for now.
+/// The type of signal a port carries (`docs/architecture/signal-graph.md` "Port types").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PortType {
     /// A mono or stereo `f32` audio signal.
     Audio,
+    /// An automation curve's value, driving a parameter (`docs/architecture/automation.md`
+    /// "Evaluation"). Has no buffer; its layout is unused.
+    Control,
 }
 
 /// One input or output of a node: its name, its type and, for audio, its fixed channel layout.
@@ -51,6 +53,15 @@ impl Port {
             name: name.to_owned(),
             kind: PortType::Audio,
             layout,
+        }
+    }
+
+    /// A control port.
+    pub fn control(name: &str) -> Self {
+        Port {
+            name: name.to_owned(),
+            kind: PortType::Control,
+            layout: Layout::Mono,
         }
     }
 }

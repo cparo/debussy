@@ -65,6 +65,14 @@ impl Runner {
         self.plan.source_mut(id)
     }
 
+    /// Sets where the coming block lies on the timeline: `position`, the timeline frame the
+    /// sources' first frame comes from, and whether the timeline advances through the block.
+    /// Curves are read from it (`docs/architecture/automation.md` "Evaluation"); kept until set
+    /// again, from frame 0, stopped.
+    pub fn set_transport(&mut self, position: i64, playing: bool) {
+        self.plan.set_transport(position, playing);
+    }
+
     /// Runs the current plan over the block.
     pub fn process(&mut self) {
         self.plan.process();

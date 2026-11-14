@@ -147,6 +147,30 @@ pub fn render(
     Ok(output)
 }
 
+/// Runs `input` as [`render`] does, with the timeline playing from frame `start`.
+pub fn render_playing(
+    runner: &mut Runner,
+    source: Option<NodeId>,
+    sink: NodeId,
+    input: &[f32],
+    block: usize,
+    start: i64,
+) -> Result<Vec<f32>, &'static str> {
+    let mut output = vec![0.0; input.len()];
+    let mut position = start;
+    for (chunk, out) in input.chunks(block).zip(output.chunks_mut(block)) {
+        assert_realtime(|| {
+            runner
+                .begin_block(chunk.len())
+                .map_err(|_| "block refused")?;
+            runner.set_transport(position, true);
+            fill_and_run(runner, source, sink, chunk, out)
+        })?;
+        position += chunk.len() as i64;
+    }
+    Ok(output)
+}
+
 /// One block of [`render`].
 fn run_block(
     runner: &mut Runner,
@@ -158,6 +182,17 @@ fn run_block(
     runner
         .begin_block(input.len())
         .map_err(|_| "block refused")?;
+    fill_and_run(runner, source, sink, input, output)
+}
+
+/// Writes `input` to `source`, runs the block begun, and reads `sink` into `output`.
+fn fill_and_run(
+    runner: &mut Runner,
+    source: Option<NodeId>,
+    sink: NodeId,
+    input: &[f32],
+    output: &mut [f32],
+) -> Result<(), &'static str> {
     if let Some(source) = source {
         let block = runner.source_mut(source).ok_or("no source")?;
         block

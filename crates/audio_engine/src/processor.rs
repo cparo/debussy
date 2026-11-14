@@ -153,6 +153,7 @@ impl Processor {
     /// recording), the playhead held, and the click at the count-in's position behind the
     /// playhead, whether or not the click is on.
     fn count_in_part(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), Error> {
+        let position = self.playhead_frame();
         let mut live = Live {
             armed: &mut self.armed,
             input: &self.input,
@@ -164,6 +165,7 @@ impl Processor {
             self.output,
             &mut self.tracks,
             Some(&mut live),
+            position,
             false,
             self.shared.mono(),
             left,
@@ -177,6 +179,11 @@ impl Processor {
         Ok(())
     }
 
+    /// The playhead as a signed timeline frame.
+    fn playhead_frame(&self) -> i64 {
+        i64::try_from(self.playhead).unwrap_or(i64::MAX)
+    }
+
     /// Runs `left.len()` frames as the transport stands: playing (capturing if recording) or
     /// not, with the click while playing with it on, and advances the playhead if playing.
     fn play_part(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), Error> {
@@ -185,6 +192,7 @@ impl Processor {
         self.capturing |= take_starts;
         let playing = self.state == TransportState::Playing;
         let frames = left.len();
+        let position = self.playhead_frame();
         let mut live = Live {
             armed: &mut self.armed,
             input: &self.input,
@@ -196,6 +204,7 @@ impl Processor {
             self.output,
             &mut self.tracks,
             Some(&mut live),
+            position,
             playing,
             self.shared.mono(),
             left,

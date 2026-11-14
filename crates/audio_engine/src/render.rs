@@ -11,10 +11,10 @@ use crate::feed::TrackFeeds;
 type Output<'a> = dyn FnMut(&[f32], &[f32]) -> Result<(), Error> + 'a;
 
 /// Renders `frames` frames through `runner`'s plan from `tracks` (normally
-/// [`RenderFeed`](crate::RenderFeed)s positioned at the range's start), in blocks of up to
-/// `block_frames`, passing each stretch of left and right output to `out`. The plan's first
-/// `latency` frames are dropped, so the first frame passed is the range's first; mono listening
-/// does not apply.
+/// [`RenderFeed`](crate::RenderFeed)s positioned at `start`, the range's first timeline frame),
+/// in blocks of up to `block_frames`, passing each stretch of left and right output to `out`.
+/// The plan's first `latency` frames are dropped, so the first frame passed is the range's
+/// first; mono listening does not apply. Curves are read from `start` on, as in playback.
 ///
 /// # Errors
 ///
@@ -24,6 +24,7 @@ pub fn render(
     runner: &mut Runner,
     output: NodeId,
     tracks: &mut [TrackFeeds],
+    start: u64,
     frames: u64,
     block_frames: usize,
     out: &mut Output<'_>,
@@ -32,6 +33,8 @@ pub fn render(
     let mut right = vec![0.0; block_frames];
     let mut skip: Option<u64> = None;
     let mut emitted = 0;
+    // The timeline frame of the next block's sources.
+    let mut position = i64::try_from(start).unwrap_or(i64::MAX);
     while emitted < frames {
         // Before the first block the latency is unknown; render one full block to learn it.
         let wanted = match skip {
@@ -44,11 +47,13 @@ pub fn render(
             output,
             tracks,
             None,
+            position,
             true,
             false,
             &mut left[..n],
             &mut right[..n],
         )?;
+        position = position.saturating_add(n as i64);
         let skip = skip.get_or_insert(runner.latency() as u64);
         let dropped = (*skip).min(n as u64) as usize;
         *skip -= dropped as u64;

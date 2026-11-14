@@ -286,3 +286,98 @@ fn test_set_tempo_reaches_prepare_and_names_only_tempo_users() -> TestResult {
     assert_eq!(f64::from_bits(prepared.load(Ordering::Relaxed)), 72_000.0);
     Ok(())
 }
+
+/// A mono pass-through with a continuous `level` and a stepped `steps` parameter.
+struct Knobs(Vec<signal_graph::Parameter>);
+
+impl Knobs {
+    fn new() -> Result<Self, Error> {
+        use signal_graph::{Parameter, ParameterInfo, Scale};
+        Ok(Knobs(vec![
+            Parameter::new(ParameterInfo::new("level", 0.0, 1.0, 0.5))?,
+            Parameter::new(ParameterInfo::new("steps", 0.0, 4.0, 0.0).with_scale(Scale::Integer))?,
+        ]))
+    }
+}
+
+impl Node for Knobs {
+    fn inputs(&self) -> Vec<Port> {
+        vec![Port::audio("in", Layout::Mono)]
+    }
+    fn outputs(&self) -> Vec<Port> {
+        vec![Port::audio("out", Layout::Mono)]
+    }
+    fn parameters(&self) -> Vec<signal_graph::Parameter> {
+        self.0.clone()
+    }
+    fn process(&mut self, _inputs: &Inputs<'_>, _outputs: &mut Outputs<'_>) {}
+}
+
+#[test]
+fn test_connect_curve_checks_its_ends() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let curve = graph.add_curve(Arc::new(modulation::Curve::default()));
+    let knobs = graph.add_node(Box::new(Knobs::new()?));
+    let source = graph.add_source(Layout::Mono);
+    assert_eq!(
+        graph.connect_curve(source, knobs, "level"),
+        Err(Error::NotACurve(source))
+    );
+    assert_eq!(
+        graph.connect_curve(curve, source, "level"),
+        Err(Error::NotAProcessor(source))
+    );
+    assert!(matches!(
+        graph.connect_curve(curve, knobs, "nope"),
+        Err(Error::UnknownParameter { .. })
+    ));
+    assert!(matches!(
+        graph.connect_curve(curve, knobs, "steps"),
+        Err(Error::NotAutomatable { .. })
+    ));
+    let id = graph.connect_curve(curve, knobs, "level")?;
+    assert_eq!(
+        graph.connect_curve(curve, knobs, "level"),
+        Err(Error::AlreadyConnected)
+    );
+    // A curve's control output takes no audio connection.
+    assert_eq!(
+        graph.connect(curve, 0, knobs, 0),
+        Err(Error::PortTypeMismatch)
+    );
+    assert_eq!(graph.control_connection(id).map(|c| c.node), Some(knobs));
+    graph.set_curve(curve, Arc::new(modulation::Curve::default()))?;
+    assert!(graph.control_connection(id).is_some());
+    assert_eq!(
+        graph.set_curve(knobs, Arc::new(modulation::Curve::default())),
+        Err(Error::NotACurve(knobs))
+    );
+    graph.disconnect(id)?;
+    assert_eq!(graph.control_connections().count(), 0);
+    graph.commit()?;
+    Ok(())
+}
+
+#[test]
+fn test_removing_or_replacing_drops_control_connections() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let curve = graph.add_curve(Arc::new(modulation::Curve::default()));
+    let knobs = graph.add_node(Box::new(Knobs::new()?));
+    let gain = graph.add_node(Box::new(Gain::new(1.0)?));
+    let kept = graph.connect_curve(curve, knobs, "level")?;
+    let lost = graph.connect_curve(curve, gain, "gain")?;
+    // A replacement with the parameter keeps its curve; one without loses it.
+    assert!(
+        graph
+            .replace_node(knobs, Box::new(Knobs::new()?))?
+            .is_empty()
+    );
+    assert_eq!(
+        graph.replace_node(gain, Box::new(Knobs::new()?))?,
+        vec![lost]
+    );
+    assert!(graph.control_connection(kept).is_some());
+    graph.remove_node(curve)?;
+    assert_eq!(graph.control_connections().count(), 0);
+    Ok(())
+}

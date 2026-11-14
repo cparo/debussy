@@ -144,6 +144,7 @@ impl Bridge {
         let target = Target::of(state);
         if target.nodes == self.target_nodes()
             && target.connections == self.target_connections()
+            && target.controls == self.target_controls()
             && target.tempo == self.mirror.tempo
         {
             return self.commit();
@@ -214,6 +215,11 @@ impl Bridge {
         &self.graph
     }
 
+    /// The graph's curve-to-parameter connection standing for model control wire `id`.
+    pub fn control(&self, id: project_model::ConnectionId) -> Option<signal_graph::ConnectionId> {
+        self.mirror.controls.get(&id).map(|c| c.id)
+    }
+
     /// The graph connection standing for model connection `id`.
     pub fn connection(
         &self,
@@ -223,7 +229,7 @@ impl Bridge {
     }
 
     /// The graph node standing for a track, routing node, or (with neither) the output; `None`
-    /// for a curve or curve port.
+    /// for a curve or curve port (see [`Bridge::curve`]).
     pub fn node(&self, endpoint: project_model::Endpoint) -> Option<GraphNodeId> {
         self.mirror
             .nodes
@@ -231,11 +237,26 @@ impl Bridge {
             .map(|n| n.id)
     }
 
+    /// The graph node standing for automation curve `id`.
+    pub fn curve(&self, id: project_model::CurveId) -> Option<GraphNodeId> {
+        self.mirror.nodes.get(&Key::Curve(id)).map(|n| n.id)
+    }
+
     fn target_nodes(&self) -> BTreeMap<Key, crate::target::NodeTarget> {
         self.mirror
             .nodes
             .iter()
             .map(|(key, node)| (*key, node.target.clone()))
+            .collect()
+    }
+
+    fn target_controls(
+        &self,
+    ) -> BTreeMap<project_model::ConnectionId, crate::target::ControlTarget> {
+        self.mirror
+            .controls
+            .iter()
+            .map(|(id, c)| (*id, c.target.clone()))
             .collect()
     }
 

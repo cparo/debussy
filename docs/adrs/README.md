@@ -148,4 +148,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0122](0122-pink-noise-is-a-seeded-alternating-pole-zero.md) | Pink noise is a seeded alternating pole-zero filter cascade | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0123](0123-automation-curves-are-cubic-b-zier-segments-kept.md) | Automation curves are cubic Bézier segments kept functions of time, evaluated by bisection | Accepted | [Curves](../architecture/automation.md#curves) |
 | [ADR-0124](0124-project-format-5-saves-automation-curve-lanes.md) | Project format 5 saves automation curve lanes, curve ports and control wires | Accepted | [Curves in the project](../architecture/automation.md#curves-in-the-project) |
+| [ADR-0125](0125-curves-drive-parameters-on-a-32-frame-timeline.md) | Curves drive parameters on a 32-frame timeline grid, read behind by each node's arrival time, overriding the set value | Accepted | [Evaluation](../architecture/automation.md#evaluation) |
 

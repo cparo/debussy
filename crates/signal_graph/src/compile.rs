@@ -7,15 +7,19 @@
 //! its target's arrival, so every node sees its inputs aligned. Sinks are all aligned to the
 //! latest arrival at any sink, which is the plan's latency. A loop-closing connection is not
 //! compensated.
+//!
+//! Each curve-to-parameter connection becomes a binding that evaluates its curve at the timeline
+//! frame minus the node's arrival time (`docs/architecture/automation.md` "Evaluation").
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use dsp::pan_gains;
 
 use crate::delay::{DelayLine, feedback_delay_frames};
 use crate::error::Error;
-use crate::graph::{Connection, Entry, EntryKind};
-use crate::plan::{Feed, Kind, Plan, Slot, Step};
+use crate::graph::{Connection, ControlConnection, Entry, EntryKind, automatable};
+use crate::plan::{Binding, Feed, Kind, Plan, Slot, Step};
 use crate::topology::{self, Group};
 use crate::types::{Config, ConnectionId, NodeId};
 
@@ -59,6 +63,7 @@ fn numbered(
 pub(crate) fn compile(
     nodes: &mut BTreeMap<NodeId, Entry>,
     connections: &BTreeMap<ConnectionId, Connection>,
+    controls: &BTreeMap<ConnectionId, ControlConnection>,
     live: &[NodeId],
     config: &Config,
 ) -> Result<Plan, Error> {
@@ -94,9 +99,11 @@ pub(crate) fn compile(
 
     let mut slots = Vec::with_capacity(entries.len());
     for (&id, entry) in nodes.keys().zip(&entries) {
+        // Control ports have no buffer.
         let blocks = |ports: &[crate::types::Port]| {
             ports
                 .iter()
+                .filter(|port| port.kind == crate::types::PortType::Audio)
                 .map(|port| audio_buffers::Block::new(port.layout, config.max_frames))
                 .collect::<Result<Vec<_>, _>>()
         };
@@ -107,6 +114,7 @@ pub(crate) fn compile(
             )),
             EntryKind::Source => Kind::Source,
             EntryKind::Sink => Kind::Sink,
+            EntryKind::Curve(_) => Kind::Curve,
             EntryKind::Processor(_) => Kind::Node(None),
         };
         slots.push(Slot {
@@ -156,6 +164,24 @@ pub(crate) fn compile(
         })
         .collect();
 
+    let slot_of: BTreeMap<NodeId, usize> =
+        nodes.keys().enumerate().map(|(i, &id)| (id, i)).collect();
+    let bindings = controls
+        .values()
+        .filter_map(|control| {
+            let EntryKind::Curve(curve) = &nodes.get(&control.curve)?.kind else {
+                return None;
+            };
+            let node = *slot_of.get(&control.node)?;
+            let parameter = automatable(&entries[node].parameters, &control.parameter)?;
+            Some(Binding::new(
+                Arc::clone(curve),
+                parameter.clone(),
+                arrival[node],
+            ))
+        })
+        .collect();
+
     // Nothing above can fail once nodes start moving, so none is lost.
     for (slot, entry) in slots.iter_mut().zip(nodes.values_mut()) {
         if let (Kind::Node(target), EntryKind::Processor(pending)) =
@@ -166,5 +192,5 @@ pub(crate) fn compile(
             slot.carry_from = None;
         }
     }
-    Ok(Plan::new(slots, steps, latency))
+    Ok(Plan::new(slots, steps, bindings, latency))
 }

@@ -627,6 +627,7 @@ dependencies = [
  "audio_effects",
  "audio_engine",
  "dsp",
+ "modulation",
  "project_model",
  "signal_graph",
  "thiserror 2.0.21",
@@ -2639,6 +2640,7 @@ version = "0.0.0"
 dependencies = [
  "audio_buffers",
  "dsp",
+ "modulation",
  "realtime_guard",
  "thiserror 2.0.21",
 ]

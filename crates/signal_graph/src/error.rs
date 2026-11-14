@@ -62,6 +62,25 @@ pub enum Error {
     /// The real-time thread has not yet taken the plans already committed; try again shortly.
     #[error("the real-time thread has not taken earlier plans; try again")]
     Busy,
+    /// The node is not an automation curve.
+    #[error("{0} is not a curve")]
+    NotACurve(NodeId),
+    /// The node has no parameter of this name.
+    #[error("{node} has no parameter {name:?}")]
+    UnknownParameter {
+        /// The node.
+        node: NodeId,
+        /// The name asked for.
+        name: String,
+    },
+    /// The parameter is stopped-only or stepped, so no curve may drive it.
+    #[error("parameter {name:?} of {node} cannot be automated")]
+    NotAutomatable {
+        /// The node.
+        node: NodeId,
+        /// The parameter's name.
+        name: String,
+    },
     /// A block or queue could not be made.
     #[error(transparent)]
     Buffers(#[from] audio_buffers::Error),

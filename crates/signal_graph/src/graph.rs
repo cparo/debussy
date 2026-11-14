@@ -2,8 +2,10 @@
 //! (`docs/architecture/signal-graph.md` "Processing graph").
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use audio_buffers::{Consumer, Layout, Producer, queue};
+use modulation::Curve;
 
 use crate::compile;
 use crate::delay::MAX_FEEDBACK_DELAY;
@@ -27,6 +29,8 @@ pub(crate) enum EntryKind {
     Source,
     /// A signal the engine takes, such as the project output.
     Sink,
+    /// An automation curve, with one control output. Replaced whole on a change.
+    Curve(Arc<Curve>),
 }
 
 /// A node of the graph and what it declared when added.
@@ -56,12 +60,26 @@ pub struct Connection {
     pub pan: f32,
 }
 
+/// A connection from an automation curve to a processor's parameter: the parameter's curve port
+/// (`docs/architecture/automation.md` "Evaluation").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlConnection {
+    /// The curve.
+    pub curve: NodeId,
+    /// The processor.
+    pub node: NodeId,
+    /// The parameter's name.
+    pub parameter: String,
+}
+
 /// The processing graph, edited off the real-time thread. Edits take effect on the real-time
 /// thread when [`Graph::commit`] sends it a new plan.
 pub struct Graph {
     config: Config,
     nodes: BTreeMap<NodeId, Entry>,
     connections: BTreeMap<ConnectionId, Connection>,
+    /// Curves driving parameters, in the same id space as `connections`.
+    controls: BTreeMap<ConnectionId, ControlConnection>,
     next_id: u64,
     /// The slot order of the last plan sent.
     live: Vec<NodeId>,
@@ -89,7 +107,7 @@ impl Graph {
         let (plans, incoming) = queue::channel(config.plan_queue)?;
         let (retire, retired) = queue::channel(config.plan_queue + 1)?;
         let runner = Runner::new(
-            Plan::new(Vec::new(), Vec::new(), 0),
+            Plan::new(Vec::new(), Vec::new(), Vec::new(), 0),
             incoming,
             retire,
             config,
@@ -98,6 +116,7 @@ impl Graph {
             config,
             nodes: BTreeMap::new(),
             connections: BTreeMap::new(),
+            controls: BTreeMap::new(),
             next_id: 0,
             live: Vec::new(),
             latency: 0,
@@ -180,6 +199,18 @@ impl Graph {
         for connection in &dropped {
             self.connections.remove(connection);
         }
+        let new_parameters = &self.nodes[&id].parameters;
+        let lost_controls: Vec<ConnectionId> = self
+            .controls
+            .iter()
+            .filter(|(_, c)| c.node == id && automatable(new_parameters, &c.parameter).is_none())
+            .map(|(&connection, _)| connection)
+            .collect();
+        for connection in &lost_controls {
+            self.controls.remove(connection);
+        }
+        let mut dropped = dropped;
+        dropped.extend(lost_controls);
         Ok(dropped)
     }
 
@@ -191,7 +222,7 @@ impl Graph {
         for parameter in &parameters {
             let name = &parameter.info().name;
             if let Some(old) = previous.iter().find(|p| &p.info().name == name) {
-                parameter.set(old.get());
+                parameter.set(old.base());
             }
         }
         node.set_tempo(self.frames_per_whole_note);
@@ -265,6 +296,105 @@ impl Graph {
         })
     }
 
+    /// Adds an automation curve: a source with one control output, which drives the parameters
+    /// it is connected to with [`Graph::connect_curve`].
+    pub fn add_curve(&mut self, curve: Arc<Curve>) -> NodeId {
+        self.insert(Entry {
+            kind: EntryKind::Curve(curve),
+            inputs: Vec::new(),
+            outputs: vec![Port::control("curve")],
+            latency: 0,
+            parameters: Vec::new(),
+            uses_tempo: false,
+        })
+    }
+
+    /// Replaces curve `id`'s points with `curve`. The id and its connections stay.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`] or [`Error::NotACurve`].
+    pub fn set_curve(&mut self, id: NodeId, curve: Arc<Curve>) -> Result<(), Error> {
+        match &mut self.entry_mut(id)?.kind {
+            EntryKind::Curve(current) => {
+                *current = curve;
+                Ok(())
+            }
+            _ => Err(Error::NotACurve(id)),
+        }
+    }
+
+    /// Connects curve `curve` to parameter `parameter` of processor `node`, which the curve then
+    /// drives. A parameter takes one curve; a curve may drive many.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], [`Error::NotACurve`], [`Error::NotAProcessor`],
+    /// [`Error::UnknownParameter`], [`Error::NotAutomatable`], or [`Error::AlreadyConnected`]
+    /// if the parameter already has a curve.
+    pub fn connect_curve(
+        &mut self,
+        curve: NodeId,
+        node: NodeId,
+        parameter: &str,
+    ) -> Result<ConnectionId, Error> {
+        if !matches!(self.entry(curve)?.kind, EntryKind::Curve(_)) {
+            return Err(Error::NotACurve(curve));
+        }
+        let target = self.entry(node)?;
+        if !matches!(target.kind, EntryKind::Processor(_)) {
+            return Err(Error::NotAProcessor(node));
+        }
+        match target
+            .parameters
+            .iter()
+            .find(|p| p.info().name == parameter)
+        {
+            None => {
+                return Err(Error::UnknownParameter {
+                    node,
+                    name: parameter.to_owned(),
+                });
+            }
+            Some(p) if !p.info().is_automatable() => {
+                return Err(Error::NotAutomatable {
+                    node,
+                    name: parameter.to_owned(),
+                });
+            }
+            Some(_) => {}
+        }
+        if self
+            .controls
+            .values()
+            .any(|c| c.node == node && c.parameter == parameter)
+        {
+            return Err(Error::AlreadyConnected);
+        }
+        let id = ConnectionId(self.take_id());
+        self.controls.insert(
+            id,
+            ControlConnection {
+                curve,
+                node,
+                parameter: parameter.to_owned(),
+            },
+        );
+        Ok(id)
+    }
+
+    /// A curve-to-parameter connection, by id.
+    pub fn control_connection(&self, id: ConnectionId) -> Option<&ControlConnection> {
+        self.controls.get(&id)
+    }
+
+    /// Every curve-to-parameter connection, in id order.
+    pub fn control_connections(
+        &self,
+    ) -> impl Iterator<Item = (ConnectionId, &ControlConnection)> + '_ {
+        self.controls.iter().map(|(id, c)| (*id, c))
+    }
+
     /// Removes a node and its connections. A node already in a plan is dropped when that plan
     /// comes back from the real-time thread.
     ///
@@ -274,6 +404,7 @@ impl Graph {
     pub fn remove_node(&mut self, id: NodeId) -> Result<(), Error> {
         self.nodes.remove(&id).ok_or(Error::UnknownNode(id))?;
         self.connections.retain(|_, c| c.from != id && c.to != id);
+        self.controls.retain(|_, c| c.curve != id && c.node != id);
         Ok(())
     }
 
@@ -342,16 +473,17 @@ impl Graph {
         Ok(())
     }
 
-    /// Removes a connection.
+    /// Removes a connection, audio or control.
     ///
     /// # Errors
     ///
     /// [`Error::UnknownConnection`].
     pub fn disconnect(&mut self, id: ConnectionId) -> Result<(), Error> {
-        self.connections
-            .remove(&id)
-            .map(|_| ())
-            .ok_or(Error::UnknownConnection(id))
+        let removed = self.connections.remove(&id).is_some() || self.controls.remove(&id).is_some();
+        match removed {
+            true => Ok(()),
+            false => Err(Error::UnknownConnection(id)),
+        }
     }
 
     /// A connection, by id.
@@ -383,7 +515,13 @@ impl Graph {
     /// can be retried. [`Error::Buffers`] if a buffer cannot be made.
     pub fn commit(&mut self) -> Result<(), Error> {
         self.collect();
-        let plan = compile::compile(&mut self.nodes, &self.connections, &self.live, &self.config)?;
+        let plan = compile::compile(
+            &mut self.nodes,
+            &self.connections,
+            &self.controls,
+            &self.live,
+            &self.config,
+        )?;
         let (ids, latency) = (plan.ids(), plan.latency);
         match self.plans.try_push(Box::new(plan)) {
             Ok(()) => {
@@ -452,6 +590,13 @@ impl Graph {
 /// The length of a whole note at 120 BPM in 4/4 at `sample_rate`: two seconds.
 fn default_whole_note(sample_rate: u32) -> f64 {
     2.0 * f64::from(sample_rate)
+}
+
+/// The parameter named `name` among `parameters`, if a curve may drive it.
+pub(crate) fn automatable<'a>(parameters: &'a [Parameter], name: &str) -> Option<&'a Parameter> {
+    parameters
+        .iter()
+        .find(|p| p.info().name == name && p.info().is_automatable())
 }
 
 /// Checks a feedback-delay time is finite and within the longest allowed.

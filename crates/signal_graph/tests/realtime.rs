@@ -8,8 +8,11 @@ use std::sync::atomic::Ordering;
 
 use audio_buffers::Layout;
 use realtime_guard::{GuardAllocator, assert_realtime};
-use signal_graph::{Config, Graph, NodeId, Runner};
-use support::{Counter, Gain, Latency, impulse, render};
+use std::sync::Arc;
+
+use modulation::{Curve, Handle, Point};
+use signal_graph::{CONTROL_PERIOD, Config, Graph, NodeId, Runner};
+use support::{Counter, Gain, Latency, impulse, render, render_playing};
 
 #[global_allocator]
 static ALLOCATOR: GuardAllocator = GuardAllocator;
@@ -255,5 +258,119 @@ fn test_replaced_node_runs_a_new_instance() -> TestResult {
     assert!(!old_dropped.load(Ordering::SeqCst));
     graph.collect();
     assert!(old_dropped.load(Ordering::SeqCst));
+    Ok(())
+}
+
+/// A straight curve from value 0 at frame 0 to 1 at frame `end`.
+fn ramp_curve(end: i64) -> Result<Arc<Curve>, Box<dyn StdError>> {
+    let third = end as f64 / 3.0;
+    Ok(Arc::new(Curve::new(vec![
+        Point::new(0, 0.0).with_handles(Handle::default(), Handle::new(third, 1.0 / 3.0)),
+        Point::new(end, 1.0).with_handles(Handle::new(-third, -1.0 / 3.0), Handle::default()),
+    ])?))
+}
+
+/// A graph, its runner, and its source, gain and sink.
+type Driven = (Graph, Runner, NodeId, NodeId, NodeId);
+
+/// A source through `upstream` frames of latency into a gain driven by `curve`, into a sink.
+fn driven_gain(
+    curve: Arc<Curve>,
+    upstream: usize,
+    max_frames: usize,
+) -> Result<Driven, Box<dyn StdError>> {
+    let (mut graph, runner) = Graph::new(Config::new(RATE, max_frames))?;
+    let source = graph.add_source(Layout::Mono);
+    let gain = graph.add_node(Box::new(Gain::new(1.0)?));
+    let sink = graph.add_sink(Layout::Mono);
+    let curve = graph.add_curve(curve);
+    if upstream > 0 {
+        let delay = graph.add_node(Box::new(Latency::new(upstream)));
+        graph.connect(source, 0, delay, 0)?;
+        graph.connect(delay, 0, gain, 0)?;
+    } else {
+        graph.connect(source, 0, gain, 0)?;
+    }
+    graph.connect(gain, 0, sink, 0)?;
+    graph.connect_curve(curve, gain, "gain")?;
+    graph.commit()?;
+    Ok((graph, runner, source, gain, sink))
+}
+
+#[test]
+fn test_curve_output_does_not_depend_on_block_size() -> TestResult {
+    let input = vec![1.0; 6_000];
+    let mut outputs = Vec::new();
+    for block in [64, 100, 512] {
+        let (_graph, mut runner, source, _, sink) = driven_gain(ramp_curve(4_800)?, 0, 512)?;
+        outputs.push(render_playing(
+            &mut runner,
+            Some(source),
+            sink,
+            &input,
+            block,
+            0,
+        )?);
+    }
+    assert_eq!(outputs[0], outputs[1]);
+    assert_eq!(outputs[0], outputs[2]);
+    // The gain (0 to 4) reaches the curve's value at each control point and is linear between.
+    let gain = |frame: f32| 4.0 * (frame / 4_800.0).min(1.0);
+    for k in (CONTROL_PERIOD as usize - 1..6_000).step_by(CONTROL_PERIOD as usize) {
+        assert!(
+            (outputs[0][k] - gain(k as f32 + 1.0)).abs() < 1e-4,
+            "frame {k}"
+        );
+    }
+    for (k, &x) in outputs[0].iter().enumerate().take(200).skip(100) {
+        assert!((x - gain(k as f32 + 1.0)).abs() < 1e-4, "frame {k}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_curve_is_read_behind_by_the_nodes_arrival_time() -> TestResult {
+    let input = vec![1.0; 3_000];
+    let (_g, mut runner, source, _, sink) = driven_gain(ramp_curve(4_800)?, 0, 128)?;
+    let plain = render_playing(&mut runner, Some(source), sink, &input, 128, 0)?;
+    let (_g, mut runner, source, _, sink) = driven_gain(ramp_curve(4_800)?, 96, 128)?;
+    let late = render_playing(&mut runner, Some(source), sink, &input, 128, 0)?;
+    // The gain sees audio from 96 frames earlier, so reads the curve 96 frames earlier.
+    for k in 200..3_000 {
+        assert!((late[k] - plain[k - 96]).abs() < 1e-4, "frame {k}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_curve_overrides_the_set_value_and_releases_to_it() -> TestResult {
+    let flat = Arc::new(Curve::new(vec![Point::new(0, 0.25)])?);
+    let (mut graph, mut runner, source, gain, sink) = driven_gain(flat, 0, 128)?;
+    let parameter = graph.parameters(gain).ok_or("no parameter")?[0].clone();
+    parameter.set(2.0);
+    let driven = render_playing(&mut runner, Some(source), sink, &[1.0; 1_024], 128, 0)?;
+    // The curve's 0.25 maps to a gain of 1 on the 0 to 4 range; the set value is ignored.
+    assert!(driven[100..].iter().all(|&x| (x - 1.0).abs() < 1e-6));
+    assert!(parameter.is_automated());
+    assert_eq!(parameter.base(), 2.0);
+
+    let control = graph.control_connections().next().ok_or("no control")?.0;
+    graph.disconnect(control)?;
+    graph.commit()?;
+    let released = render_playing(&mut runner, Some(source), sink, &[1.0; 1_024], 128, 1_024)?;
+    assert!(!parameter.is_automated());
+    // Back to the set value over the normal 10 ms ramp.
+    assert!(released[..479].iter().all(|&x| x < 2.0));
+    assert!(released[480..].iter().all(|&x| x == 2.0));
+    Ok(())
+}
+
+#[test]
+fn test_curve_is_read_at_the_playhead_while_stopped() -> TestResult {
+    let (_g, mut runner, source, _, sink) = driven_gain(ramp_curve(4_800)?, 0, 128)?;
+    runner.set_transport(2_400, false);
+    let output = render(&mut runner, Some(source), sink, &[1.0; 256], 128)?;
+    // Half way along the curve: a gain of 2, reached within the first block.
+    assert!(output[127..].iter().all(|&x| (x - 2.0).abs() < 1e-4));
     Ok(())
 }

@@ -211,7 +211,8 @@ impl Node for Mixer {
             ) else {
                 continue;
             };
-            level.set_target(target);
+            // While a curve drives the gain, the level reaches each control point on time.
+            level.follow(target, &channel.gain);
             pan.update();
             if !level.is_ramping() && level.current() == 0.0 {
                 continue;
