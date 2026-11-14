@@ -67,4 +67,4 @@ paths through a channel and treats each as a request to switch projects.
   opens the project; the first never sees the event. The developer found this in manual testing
   and accepted it: it affects development runs, and the command-line imports and exports
   ([ADR-0057](0057-the-first-binary-imports-and-exports-from-the.md)) are separate runs by design.
-  Nothing stops two processes from opening the same project.
+  Nothing stops two processes from opening the same project (#161).
