@@ -222,9 +222,13 @@ impl Bridge {
         self.mirror.connections.get(&id).map(|c| c.main)
     }
 
-    /// The graph node standing for a track, routing node, or (with neither) the output.
+    /// The graph node standing for a track, routing node, or (with neither) the output; `None`
+    /// for a curve or curve port.
     pub fn node(&self, endpoint: project_model::Endpoint) -> Option<GraphNodeId> {
-        self.mirror.nodes.get(&endpoint.into()).map(|n| n.id)
+        self.mirror
+            .nodes
+            .get(&Key::of_audio(endpoint)?)
+            .map(|n| n.id)
     }
 
     fn target_nodes(&self) -> BTreeMap<Key, crate::target::NodeTarget> {

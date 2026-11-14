@@ -9,8 +9,8 @@ use crate::edit::Edit;
 use crate::error::Error;
 use crate::range::{self, Excerpt, Range};
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side};
-use crate::state::{Clip, State, Track};
-use crate::types::{ClipId, TrackId};
+use crate::state::{Clip, CurveLane, State, Track};
+use crate::types::{ClipId, CurveId, TrackId};
 
 /// A project open for editing. Every change goes through [`Session::apply`] (or a method built
 /// on it) and is one step of an unlimited undo history, which is never saved.
@@ -22,7 +22,7 @@ pub struct Session {
     /// Edits that redo the undone ones, latest last.
     redo: Vec<Edit>,
     versions: BTreeMap<String, State>,
-    /// The next unused id, shared by tracks and clips.
+    /// The next unused id, shared by tracks, clips, nodes, connections and curves.
     next_id: u64,
     /// Changes to the state or the named versions so far.
     revision: u64,
@@ -44,7 +44,12 @@ impl Session {
                 });
                 let nodes = s.nodes.iter().map(|node| node.id.0);
                 let connections = s.connections.iter().map(|c| c.id.0);
-                tracks.chain(nodes).chain(connections).collect::<Vec<_>>()
+                let curves = s.curves.iter().map(|lane| lane.id.0);
+                tracks
+                    .chain(nodes)
+                    .chain(connections)
+                    .chain(curves)
+                    .collect::<Vec<_>>()
             });
         let next_id = ids.max().map_or(0, |max| max.saturating_add(1));
         Session {
@@ -302,13 +307,121 @@ impl Session {
         let index = self.state.nodes.len();
         self.apply(Edit::InsertNode {
             index,
-            node: Node {
+            node: Node::new(id, kind),
+        })?;
+        Ok(id)
+    }
+
+    /// Adds an automation curve lane named `name` holding `curve` below the others, as one step.
+    ///
+    /// # Errors
+    ///
+    /// None in practice; see [`Session::apply`].
+    pub fn add_curve(&mut self, name: &str, curve: modulation::Curve) -> Result<CurveId, Error> {
+        let id = CurveId(self.take_id());
+        self.apply(Edit::InsertCurve {
+            index: self.state.curves.len(),
+            lane: CurveLane {
                 id,
-                kind,
-                position: None,
+                name: name.to_owned(),
+                curve,
             },
         })?;
         Ok(id)
+    }
+
+    /// Removes an automation curve lane and its connections, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownCurve`].
+    pub fn remove_curve(&mut self, id: CurveId) -> Result<(), Error> {
+        self.state.curve(id).ok_or(Error::UnknownCurve(id))?;
+        let mut edits = self.disconnect_all(Endpoint::Curve(id));
+        edits.push(Edit::RemoveCurve(id));
+        self.apply(Edit::Batch(edits))
+    }
+
+    /// Renames an automation curve lane, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownCurve`].
+    pub fn rename_curve(&mut self, id: CurveId, name: &str) -> Result<(), Error> {
+        self.apply(Edit::RenameCurve {
+            curve: id,
+            name: name.to_owned(),
+        })
+    }
+
+    /// Replaces a curve's points at the end of a gesture, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidCurve`] for points that are not a valid curve, or
+    /// [`Error::UnknownCurve`].
+    pub fn set_curve(&mut self, id: CurveId, points: Vec<modulation::Point>) -> Result<(), Error> {
+        let curve = modulation::Curve::new(points)?;
+        self.apply(Edit::SetCurve { id, curve })
+    }
+
+    /// Gives parameter `parameter` of `node` the lowest free curve port, as one step, and returns
+    /// its number.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], [`Error::AlreadyAssigned`], or [`Error::NotAutomatable`].
+    pub fn assign_curve_port(&mut self, node: NodeId, parameter: &str) -> Result<u32, Error> {
+        let port = self
+            .state
+            .node(node)
+            .ok_or(Error::UnknownNode(node))?
+            .free_curve_port();
+        self.apply(Edit::AssignCurvePort {
+            node,
+            parameter: parameter.to_owned(),
+            port,
+        })?;
+        Ok(port)
+    }
+
+    /// Takes parameter `parameter` of `node`'s curve port away, with its connection, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`] or [`Error::NotAssigned`].
+    pub fn unassign_curve_port(&mut self, node: NodeId, parameter: &str) -> Result<(), Error> {
+        let target = self.state.node(node).ok_or(Error::UnknownNode(node))?;
+        let port = *target
+            .curve_ports
+            .get(parameter)
+            .ok_or_else(|| Error::NotAssigned(node, parameter.to_owned()))?;
+        let mut edits = self.disconnect_all(Endpoint::CurvePort(node, port));
+        edits.push(Edit::UnassignCurvePort {
+            node,
+            parameter: parameter.to_owned(),
+        });
+        self.apply(Edit::Batch(edits))
+    }
+
+    /// Connects curve `curve` to curve port `port` of `node`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownCurve`], [`Error::UnknownNode`], [`Error::NoSuchPort`] for a port no
+    /// parameter takes, or [`Error::PortTaken`].
+    pub fn connect_curve(
+        &mut self,
+        curve: CurveId,
+        node: NodeId,
+        port: u32,
+    ) -> Result<ConnectionId, Error> {
+        self.connect(
+            Endpoint::Curve(curve),
+            0,
+            Endpoint::CurvePort(node, port),
+            0,
+        )
     }
 
     /// Moves a node on the patch board, as one step; `None` returns it to the automatic layout.

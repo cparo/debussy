@@ -25,6 +25,16 @@ impl fmt::Display for ClipId {
     }
 }
 
+/// Identifies an automation curve. Ids are never reused within a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CurveId(pub u64);
+
+impl fmt::Display for CurveId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "curve {}", self.0)
+    }
+}
+
 /// One stored mono audio file of the project (`docs/architecture/project.md` "Stored audio").
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AudioFile {

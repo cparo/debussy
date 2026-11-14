@@ -615,6 +615,8 @@ impl Program<Message> for BoardView {
                     });
                 }
                 Endpoint::Node(_) => pin(&mut frame, *at, PIN_RADIUS, t.lane, t.audio),
+                // The board lays out no curve pins yet (issue #63).
+                Endpoint::Curve(_) | Endpoint::CurvePort(..) => {}
             }
         }
         vec![frame.into_geometry()]

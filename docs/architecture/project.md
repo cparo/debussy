@@ -145,7 +145,9 @@ files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-s
 `position` (`x`, `y`) and the project an `output_y`, both patch-board coordinates within
 ±1,000,000; version 2 files migrate unchanged and use the automatic layout ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)). Since
 version 4 the project carries a required `tempo` (`bpm`, `beats_per_bar`, `beat_unit`; see
-[Musical time](#musical-time)); version 3 files migrate to 120 BPM in 4/4 ([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)). Times are
+[Musical time](#musical-time)); version 3 files migrate to 120 BPM in 4/4 ([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)). Version 5
+adds automation curves and curve ports (see `docs/architecture/automation.md` "Curves in the
+project"). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving
@@ -164,7 +166,8 @@ more than 10,000 tracks, 1,000,000 clips, 10,000 nodes, 100,000 connections or 1
 a sample rate outside the four project rates, names over 1024 bytes, and audio file names that are
 not plain names inside `audio/`. Every clip is checked against its track, ids must be unique, and
 every connection must join existing endpoints, never from the output or into a track, with a pan
-from −1 to 1. The tempo and meter must be within the limits in [Musical time](#musical-time). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+from −1 to 1. The tempo and meter must be within the limits in [Musical time](#musical-time). Curves have
+their own limits (see `docs/architecture/automation.md` "Curves in the project"). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Cleanup
 

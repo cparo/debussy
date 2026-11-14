@@ -32,3 +32,37 @@ It is real-time safe to read: evaluation allocates nothing, takes no locks and d
   frame) without a new patent check (see `docs/architecture/patents.md` "Patent policy").
 
 The curve maths is built in-house ([ADR-0123](../adrs/0123-automation-curves-are-cubic-b-zier-segments-kept.md)).
+
+## Curves in the project
+
+- **Lanes.** `State.curves` holds automation curve lanes (`project_model::CurveLane`: id, name,
+  curve), shown below the tracks in list order. A curve id comes from the session's shared id
+  counter.
+- **Curve ports.** A node's `curve_ports` maps a parameter name to a curve port number, from 1,
+  unique within the node. A new assignment takes the lowest free number. Only a mixer's or a
+  known effect's parameter for which `ParameterInfo::is_automatable` holds may be assigned. A
+  saved port on an effect this build does not know is kept unchecked. Fewer mixer channels are
+  refused while a removed channel's parameter has a port.
+- **Control wires.** A connection from `Endpoint::Curve` (output 0) to `Endpoint::CurvePort`
+  (input 0) drives the port's parameter. A curve connects only to a curve port, and a curve port
+  only from a curve. A curve port takes one connection; a curve may feed many. Control wires
+  carry no side.
+- **Edits.** Each returns its exact inverse:
+  - `InsertCurve`, `RemoveCurve` and `RenameCurve`. `RemoveCurve` is refused while the curve
+    has connections; `Session::remove_curve` removes them in the same step.
+  - `SetCurve` replaces the curve. Points that fail `Curve::validate` are refused when the curve
+    is made (`Session::set_curve`), so a drag gesture records one valid curve.
+  - `AssignCurvePort` names its port number; `UnassignCurvePort` is refused while the port is
+    connected. `Session::unassign_curve_port` removes the connection in the same step.
+  - Removing a node also removes its curve-port connections.
+- **Saved format.** Since format version 5 the project carries a required `curves` list (`id`,
+  `name`, `points`; each point `frame`, `value`, `in_handle` and `out_handle`, each handle
+  `d_frame` and `d_value`), each node a required `curve_ports` object, and an endpoint may be
+  `curve` (`id`) or `curve_port` (`node`, `port`). Version 4 files migrate to no curves and no
+  ports.
+- **Loading.** Load refuses more than 10,000 curves or 1,000,000 points over all curves, a curve
+  that fails `Curve::validate`, curve names over 1024 bytes, more curve ports on a node than its
+  parameter limit, and curve ports or control wires the model refuses.
+
+The project's curve state and format 5 are recorded in
+[ADR-0124](../adrs/0124-project-format-5-saves-automation-curve-lanes.md).

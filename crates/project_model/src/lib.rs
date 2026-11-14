@@ -19,14 +19,18 @@
 //! The state also holds the project's one [`Tempo`] and meter (`docs/architecture/project.md`
 //! "Musical time"), whose grid of bars and beats the click and the lanes follow.
 //!
+//! The state also holds automation [`CurveLane`]s (`docs/architecture/automation.md` "Curves in
+//! the project"): curves drive parameters through numbered curve ports on nodes
+//! ([`Endpoint::Curve`] to [`Endpoint::CurvePort`]).
+//!
 //! Range edits (`docs/architecture/project.md` "Range edits") cut, copy or delete a [`Range`] of
 //! frames across tracks, splitting clips at its edges, and paste the [`Excerpt`] a cut or copy
 //! returns.
 //!
 //! # Modules
 //!
-//! - `types`: [`TrackId`], [`ClipId`], [`AudioFile`], [`Source`].
-//! - `state`: [`State`], [`Track`], [`Clip`].
+//! - `types`: [`TrackId`], [`ClipId`], [`CurveId`], [`AudioFile`], [`Source`].
+//! - `state`: [`State`], [`Track`], [`Clip`], [`CurveLane`].
 //! - `routing`: [`Node`], [`NodeKind`], [`Connection`], [`Endpoint`] and their ids.
 //! - `edit`: [`Edit`].
 //! - `range`: [`Range`], [`Excerpt`], [`Lane`].
@@ -53,6 +57,6 @@ pub use routing::{
     Side,
 };
 pub use session::Session;
-pub use state::{Clip, State, Track};
+pub use state::{Clip, CurveLane, State, Track};
 pub use tempo::{Beat, Tempo};
-pub use types::{AudioFile, ClipId, Source, TrackId};
+pub use types::{AudioFile, ClipId, CurveId, Source, TrackId};

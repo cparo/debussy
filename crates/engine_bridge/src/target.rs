@@ -14,12 +14,15 @@ pub(crate) enum Key {
     Node(NodeId),
 }
 
-impl From<Endpoint> for Key {
-    fn from(endpoint: Endpoint) -> Self {
+impl Key {
+    /// The graph node an audio endpoint is; `None` for a curve or curve port, which carry
+    /// control signals the graph does not hold yet (issue #63).
+    pub(crate) fn of_audio(endpoint: Endpoint) -> Option<Key> {
         match endpoint {
-            Endpoint::Track(id) => Key::Track(id),
-            Endpoint::Output => Key::Output,
-            Endpoint::Node(id) => Key::Node(id),
+            Endpoint::Track(id) => Some(Key::Track(id)),
+            Endpoint::Output => Some(Key::Output),
+            Endpoint::Node(id) => Some(Key::Node(id)),
+            Endpoint::Curve(_) | Endpoint::CurvePort(..) => None,
         }
     }
 }
@@ -108,19 +111,19 @@ impl Target {
         let connections: BTreeMap<ConnectionId, ConnectionTarget> = state
             .connections
             .iter()
-            .map(|c| {
-                (
+            .filter_map(|c| {
+                Some((
                     c.id,
                     ConnectionTarget {
-                        from: c.from.into(),
+                        from: Key::of_audio(c.from)?,
                         output: c.output,
-                        to: c.to.into(),
+                        to: Key::of_audio(c.to)?,
                         input: c.input,
                         pan: c.pan,
                         from_side: c.from_side,
                         to_side: c.to_side,
                     },
-                )
+                ))
             })
             .collect();
         let mut nodes = BTreeMap::new();

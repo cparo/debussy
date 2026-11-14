@@ -1,7 +1,7 @@
 //! The crate's error type.
 
 use crate::routing::{ConnectionId, Endpoint, NodeId};
-use crate::types::{ClipId, TrackId};
+use crate::types::{ClipId, CurveId, TrackId};
 
 /// Why an edit was refused. A refused edit leaves the project unchanged.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -105,4 +105,35 @@ pub enum Error {
     /// A tempo or meter outside the limits (`project_model::tempo`).
     #[error("the tempo or meter is out of range")]
     InvalidTempo,
+    /// No automation curve has this id.
+    #[error("no {0}")]
+    UnknownCurve(CurveId),
+    /// An automation curve with this id already exists.
+    #[error("{0} already exists")]
+    CurveExists(CurveId),
+    /// Points that do not make a valid curve, such as a segment turning back in time.
+    #[error("not a valid curve: {0}")]
+    InvalidCurve(#[from] modulation::CurveError),
+    /// The parameter cannot take a curve port: it does not exist, is stopped-only or stepped, or
+    /// belongs to an effect this build does not know.
+    #[error("parameter {1:?} of {0} cannot be automated")]
+    NotAutomatable(NodeId, String),
+    /// The parameter already has a curve port.
+    #[error("parameter {1:?} of {0} already has a curve port")]
+    AlreadyAssigned(NodeId, String),
+    /// The parameter has no curve port.
+    #[error("parameter {1:?} of {0} has no curve port")]
+    NotAssigned(NodeId, String),
+    /// A curve port number of 0, or one another parameter of the node already takes.
+    #[error("curve port {1} of {0} is not free")]
+    CurvePortTaken(NodeId, u32),
+    /// Fewer mixer channels would remove a parameter that has a curve port.
+    #[error("parameter {1:?} of {0} has a curve port")]
+    StillAssigned(NodeId, String),
+    /// A connection joining a control end to an audio end: a curve connects only to a curve port.
+    #[error("a curve connects only to a curve port")]
+    WrongPortType,
+    /// A curve port that already has a connection.
+    #[error("{0:?} already has a connection")]
+    PortTaken(Endpoint),
 }
