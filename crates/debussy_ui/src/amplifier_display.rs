@@ -66,7 +66,7 @@ mod tests {
     /// The `amplifier` curve at its defaults with `changes` by name.
     fn shaper(changes: &[(&str, f32)]) -> Option<ShaperCurve> {
         let values = values_with("amplifier", changes)?;
-        match audio_effects::curve("amplifier", &values, 48_000)? {
+        match audio_effects::curve("amplifier", &values, 48_000, 96_000.0)? {
             Curve::Shaper(curve) => Some(curve),
             _ => None,
         }

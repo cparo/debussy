@@ -138,4 +138,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0112](0112-the-delay-reads-whole-frame-taps-from-a-4-second.md) | The delay reads whole-frame taps from a 4-second line, free or tempo-synced, with a crossfade on time change and an optional low-pass and saturation in its feedback | Superseded by ADR-0114 | [Delay](../architecture/delay-and-reverb.md#delay) |
 | [ADR-0113](0113-the-reverb-is-a-fixed-length-feedback-delay.md) | The reverb is a fixed-length feedback delay network or Dattorro plate behind a pre-delay, with no size control and a stopped-only algorithm switch | Accepted | [Reverb](../architecture/delay-and-reverb.md#reverb) |
 | [ADR-0114](0114-the-delay-s-feedback-low-pass-is-a-first-order-one.md) | The delay's feedback low-pass is a first-order one-pole | Accepted | [Delay](../architecture/delay-and-reverb.md#delay) |
+| [ADR-0115](0115-delay-and-reverb-displays-plot-a-simulated-impulse.md) | Delay and reverb displays plot a simulated impulse response | Accepted | [Impulse response display](../architecture/effect-displays.md#impulse-response-display) |
+| [ADR-0116](0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md) | A parameter may be shown only while a toggle is on or off | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 

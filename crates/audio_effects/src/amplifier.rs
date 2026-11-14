@@ -134,7 +134,7 @@ impl ShaperCurve {
 /// The curve of an `amplifier` effect whose parameters stand at `values`, in declaration order
 /// (see [`crate::CurveFn`]). Read through [`Control`] and built by the same mapping as
 /// processing, so a display of it cannot differ.
-pub(crate) fn curve(values: &[f32], _sample_rate: u32) -> Option<crate::Curve> {
+pub(crate) fn curve(values: &[f32], _sample_rate: u32, _whole_note: f64) -> Option<crate::Curve> {
     let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
     let value = |control: Control| values[control as usize];
     Some(crate::Curve::Shaper(ShaperCurve {
@@ -446,7 +446,7 @@ mod tests {
     /// The shaper curve at the defaults with `changes` by name.
     fn shaper(changes: &[(&str, f32)]) -> Result<ShaperCurve, Box<dyn std::error::Error>> {
         let values = crate::curve::values_with("amplifier", changes).ok_or("unknown kind")?;
-        match curve(&values, 48_000) {
+        match curve(&values, 48_000, 96_000.0) {
             Some(crate::Curve::Shaper(shaper)) => Ok(shaper),
             other => Err(format!("not a shaper curve: {other:?}").into()),
         }

@@ -86,7 +86,10 @@ empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A pa
 stopped-only: it changes only while playback is stopped or paused, and no automation drives it. A
 toggle may name its on and off states, and any parameter may name a label for its maximum (such as
 ∞) and a step for its controls' grid, for display only
-([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)). The
+([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)). A parameter may
+also name a toggle and a state of it: its control is shown only while the toggle is in that state,
+its value kept meanwhile
+([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)). The
 node dialog draws an
 effect's controls from this metadata alone, one strip per group. The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).

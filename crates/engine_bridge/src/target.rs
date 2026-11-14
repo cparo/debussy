@@ -102,11 +102,6 @@ pub(crate) struct Target {
     pub tempo: Tempo,
 }
 
-/// The length of a whole note at `tempo` and `rate` Hz, in frames: what the graph gives nodes.
-pub(crate) fn frames_per_whole_note(tempo: &Tempo, rate: u32) -> f64 {
-    tempo.frames_per_beat(rate) * f64::from(tempo.beat_unit)
-}
-
 impl Target {
     /// The target for `state`.
     pub(crate) fn of(state: &State) -> Target {

@@ -4,6 +4,7 @@
 
 use crate::amplifier::ShaperCurve;
 use crate::dynamics::TransferCurve;
+use crate::impulse::ImpulseCurve;
 use crate::registry::EFFECTS;
 use crate::response::FrequencyResponse;
 
@@ -19,18 +20,30 @@ pub enum Curve {
     Transfer(TransferCurve),
     /// A static output sample over input sample: `amplifier`.
     Shaper(ShaperCurve),
+    /// The output level over time after a unit impulse into both channels: `delay` and
+    /// `reverb`.
+    Impulse(ImpulseCurve),
 }
 
 /// Builds one effect kind's curve from its parameter values (in the order the effect declares
-/// them) at a sample rate in Hz; `None` for values of the wrong length.
-pub type CurveFn = fn(&[f32], u32) -> Option<Curve>;
+/// them) at a sample rate in Hz, for a whole note of the project tempo of the given length in
+/// frames; `None` for values of the wrong length.
+pub type CurveFn = fn(&[f32], u32, f64) -> Option<Curve>;
 
 /// The curve of an effect of kind `kind` whose parameters stand at `values` (in the order
-/// [`crate::parameter_infos`] gives them), in a project at `sample_rate` Hz. `None` for a kind
-/// with no curve or one this build does not know, or for `values` of the wrong length.
-pub fn curve(kind: &str, values: &[f32], sample_rate: u32) -> Option<Curve> {
+/// [`crate::parameter_infos`] gives them), in a project at `sample_rate` Hz whose tempo makes a
+/// whole note `frames_per_whole_note` frames long. `None` for a kind with no curve or one this
+/// build does not know, or for `values` of the wrong length.
+///
+/// Cheap: it copies the values, and any heavy work waits until the curve is read.
+pub fn curve(
+    kind: &str,
+    values: &[f32],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> Option<Curve> {
     let build = EFFECTS.iter().find(|e| e.id == kind)?.curve?;
-    build(values, sample_rate)
+    build(values, sample_rate, frames_per_whole_note)
 }
 
 /// The default values of `kind`'s parameters with `changes` set by name, for tests.
@@ -60,6 +73,7 @@ mod tests {
             "high-pass" | "low-pass" | "parametric-eq" => Some("response"),
             "dynamics" => Some("transfer"),
             "amplifier" => Some("shaper"),
+            "delay" | "reverb" => Some("impulse"),
             _ => None,
         }
     }
@@ -70,6 +84,7 @@ mod tests {
             Curve::Response(_) => "response",
             Curve::Transfer(_) => "transfer",
             Curve::Shaper(_) => "shaper",
+            Curve::Impulse(_) => "impulse",
         }
     }
 
@@ -78,7 +93,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         for kind in EFFECTS {
             let values = values_with(kind.id, &[]).ok_or("no parameters")?;
-            let got = curve(kind.id, &values, 48_000);
+            let got = curve(kind.id, &values, 48_000, 96_000.0);
             assert_eq!(got.as_ref().map(variant), expected(kind.id), "{}", kind.id);
         }
         Ok(())
@@ -91,19 +106,19 @@ mod tests {
             let mut values = values_with(kind.id, &[]).ok_or("no parameters")?;
             values.push(0.0);
             assert!(
-                curve(kind.id, &values, 48_000).is_none(),
+                curve(kind.id, &values, 48_000, 96_000.0).is_none(),
                 "{} long",
                 kind.id
             );
             values.truncate(values.len() - 2);
             assert!(
-                curve(kind.id, &values, 48_000).is_none(),
+                curve(kind.id, &values, 48_000, 96_000.0).is_none(),
                 "{} short",
                 kind.id
             );
         }
-        assert!(curve("eq", &[1_000.0, 2.0], 48_000).is_none());
-        assert!(curve("mixer", &[], 48_000).is_none());
+        assert!(curve("eq", &[1_000.0, 2.0], 48_000, 96_000.0).is_none());
+        assert!(curve("mixer", &[], 48_000, 96_000.0).is_none());
         Ok(())
     }
 }

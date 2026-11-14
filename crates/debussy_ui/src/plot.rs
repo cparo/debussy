@@ -265,6 +265,14 @@ impl Canvas {
         self.raster.paint(&mask, LABEL);
     }
 
+    /// `text` in [`StrokeFont`] in the label colour, its first glyph starting at `x` on
+    /// `baseline`, in logical pixels.
+    pub(crate) fn text(&mut self, text: &str, x: f32, baseline: f32) {
+        let mut mask = self.mask();
+        StrokeFont.draw(&mut mask, text, x, baseline, LABEL_SIZE);
+        self.raster.paint(&mask, LABEL);
+    }
+
     /// The curve through `points`, drawn by [`polyline`] in `color`.
     pub(crate) fn curve(
         &mut self,

@@ -35,10 +35,14 @@ a new node at its defaults shows the preset that has no values. The presets are
 
 ## Effect curves
 
-`audio_effects::curve(kind, values, sample_rate)` gives the curve an effect kind's parameter values
-ask for, for its display: a `Curve`, one of a magnitude response over frequency (`Response`), a
-steady-state level transfer (`Transfer`) or a static sample shaper (`Shaper`). The set of variants
-is closed.
+`audio_effects::curve(kind, values, sample_rate, frames_per_whole_note)` gives the curve an effect
+kind's parameter values ask for, for its display, in a project whose tempo makes a whole note
+`frames_per_whole_note` frames long (`Tempo::frames_per_whole_note`): a `Curve`, one of a
+magnitude response over frequency (`Response`), a steady-state level transfer (`Transfer`), a
+static sample shaper (`Shaper`) or an impulse response (`Impulse`,
+`docs/architecture/effect-displays.md` "Impulse response display"). The set of variants is
+closed. Building a curve is cheap; any simulation waits until it is read
+([ADR-0115](../adrs/0115-delay-and-reverb-displays-plot-a-simulated-impulse.md)).
 
 - Each `EffectKind` row in `EFFECTS` names its kind's curve function, or none for a kind with no
   display. The function lives in the effect's own module and reads `values` in declaration order

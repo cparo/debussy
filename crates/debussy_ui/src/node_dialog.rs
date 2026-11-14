@@ -8,7 +8,7 @@ use project_model::{Edit, NodeId, NodeKind, State};
 
 use crate::effect_panel;
 use crate::mixer_strip::{MixerFocus, toggled};
-use crate::node_parameters::{Live, NodeParameters, ParameterCatalog, tab_order};
+use crate::node_parameters::{Live, NodeParameters, ParameterCatalog};
 
 /// The open dialog's control with the keyboard focus: Tab and Shift-Tab move it, the arrow keys
 /// adjust it, and Space or Enter press it (ADR-0089).
@@ -358,7 +358,7 @@ impl NodeDialog {
                 .map(DialogFocus::Mixer)
                 .collect()
         } else if let Some(parameters) = self.effect(cx) {
-            let order = tab_order(parameters.infos());
+            let order = parameters.shown_order();
             order.into_iter().map(DialogFocus::Parameter).collect()
         } else {
             Vec::new()

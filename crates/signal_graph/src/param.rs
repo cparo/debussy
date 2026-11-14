@@ -69,6 +69,10 @@ pub struct ParameterInfo {
     /// The grid a control snaps to and an arrow press moves by; `None` for the scale's own step.
     /// Display only: not saved.
     pub step: Option<f32>,
+    /// The toggle parameter, by name, and the state it must be in (`true` for on) for this
+    /// parameter's control to be shown; `None` to show it always. A hidden parameter keeps its
+    /// value and still takes effect if the node reads it. Display only: not saved.
+    pub shown_while: Option<(String, bool)>,
 }
 
 impl ParameterInfo {
@@ -88,6 +92,7 @@ impl ParameterInfo {
             state_labels: None,
             max_label: None,
             step: None,
+            shown_while: None,
         }
     }
 
@@ -151,6 +156,16 @@ impl ParameterInfo {
     pub fn with_step(self, step: f32) -> Self {
         ParameterInfo {
             step: Some(step),
+            ..self
+        }
+    }
+
+    /// This, its control shown only while toggle `toggle` is on (`on`) or off (see
+    /// [`shown_while`](Self::shown_while)).
+    #[must_use]
+    pub fn shown_while(self, toggle: impl Into<String>, on: bool) -> Self {
+        ParameterInfo {
+            shown_while: Some((toggle.into(), on)),
             ..self
         }
     }

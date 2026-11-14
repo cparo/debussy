@@ -13,7 +13,7 @@ use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use crate::app::Message;
 use crate::raster::draw_tiled;
 use crate::theme::{self, Tone};
-use crate::{amplifier_display, response_display, transfer_display};
+use crate::{amplifier_display, impulse_display, response_display, transfer_display};
 
 /// The display area's height, in logical pixels; its width fills the dialog.
 pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
@@ -75,6 +75,7 @@ pub(crate) fn draw(curve: &Curve, context: &DisplayContext) -> Option<Pixels> {
         Curve::Response(response) => response_display::render(response, context),
         Curve::Transfer(transfer) => transfer_display::render(transfer, context),
         Curve::Shaper(shaper) => amplifier_display::render(shaper, context),
+        Curve::Impulse(impulse) => impulse_display::render(impulse, context),
     }
 }
 
@@ -96,16 +97,19 @@ pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32
 }
 
 /// The display area for an effect of `kind` whose parameters stand at `values` (in the effect's
-/// order), in a project at `sample_rate`, at `scale` physical pixels per logical pixel: the
-/// picture of the curve they ask for, or charcoal grey. It fills the width it is given.
+/// order), in a project at `sample_rate` whose whole note is `frames_per_whole_note` frames, at
+/// `scale` physical pixels per logical pixel: the picture of the curve they ask for, or charcoal
+/// grey. It fills the width it is given.
 pub(crate) fn display_area<'a>(
     kind: &str,
     values: &[f32],
     tone: Tone,
     sample_rate: u32,
+    frames_per_whole_note: f64,
     scale: f32,
 ) -> Element<'a, Message> {
-    let body: Element<'a, Message> = match audio_effects::curve(kind, values, sample_rate) {
+    let curve = audio_effects::curve(kind, values, sample_rate, frames_per_whole_note);
+    let body: Element<'a, Message> = match curve {
         Some(curve) => canvas(DisplayView { curve, tone, scale })
             .width(Fill)
             .height(Fill)
@@ -224,7 +228,7 @@ mod tests {
 
     /// The curve of `kind` at its defaults with `changes` by name, at `sample_rate`.
     fn curve_of(kind: &str, changes: &[(&str, f32)], sample_rate: u32) -> Option<Curve> {
-        audio_effects::curve(kind, &values_with(kind, changes)?, sample_rate)
+        audio_effects::curve(kind, &values_with(kind, changes)?, sample_rate, 96_000.0)
     }
 
     /// The view of a high-pass at `cutoff` Hz.
@@ -273,9 +277,9 @@ mod tests {
 
     #[test]
     fn test_display_area_builds_with_and_without_a_curve() {
-        let _blank = display_area("unknown", &[0.0], Tone::Dark, 48_000, 2.0);
-        let _wrong_length = display_area("high-pass", &[80.0], Tone::Dark, 48_000, 2.0);
-        let _drawn = display_area("high-pass", &[80.0, 2.0], Tone::Dark, 48_000, 2.0);
+        let _blank = display_area("unknown", &[0.0], Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _wrong_length = display_area("high-pass", &[80.0], Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _drawn = display_area("high-pass", &[80.0, 2.0], Tone::Dark, 48_000, 96_000.0, 2.0);
     }
 
     #[test]
