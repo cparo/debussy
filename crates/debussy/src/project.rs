@@ -196,6 +196,7 @@ pub fn export_state(bundle: &Bundle, state: &State, path: &Path, mono: bool) -> 
             runner: &mut graph.runner,
             output: graph.output,
             tracks: &mut tracks,
+            start: 0,
             frames: project_end(state),
             block_frames: MAX_BLOCK,
         },

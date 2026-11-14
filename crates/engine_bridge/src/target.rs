@@ -1,10 +1,15 @@
-//! What the processing graph must hold for a project state: one entry per track, the output and
-//! each routing node, and one per connection, keyed by the model's ids.
+//! What the processing graph must hold for a project state: one entry per track, the output,
+//! each routing node and each automation curve, one per audio connection, and one per control
+//! wire, keyed by the model's ids.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use audio_buffers::Layout;
-use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State, Tempo, TrackId};
+use modulation::Curve;
+use project_model::{
+    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, Tempo, TrackId,
+};
 
 /// A model element that becomes a graph node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -12,6 +17,7 @@ pub(crate) enum Key {
     Track(TrackId),
     Output,
     Node(NodeId),
+    Curve(CurveId),
 }
 
 impl Key {
@@ -44,12 +50,17 @@ pub(crate) enum Shape {
     Mixer(usize),
     Bus(Layout),
     Delay(Layout),
+    /// An automation curve, its points in [`NodeTarget::curve`].
+    Curve,
 }
 
 impl Shape {
     /// Whether the graph holds it as a processor, which `replace_node` can swap.
     pub(crate) fn is_processor(&self) -> bool {
-        !matches!(self, Shape::Source(_) | Shape::Sink | Shape::Delay(_))
+        !matches!(
+            self,
+            Shape::Source(_) | Shape::Sink | Shape::Delay(_) | Shape::Curve
+        )
     }
 }
 
@@ -61,6 +72,17 @@ pub(crate) struct NodeTarget {
     pub parameters: BTreeMap<String, f32>,
     /// A feedback delay's time.
     pub seconds: Option<f64>,
+    /// A curve's points.
+    pub curve: Option<Arc<Curve>>,
+}
+
+/// One control wire as the state wants it: a curve driving a parameter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ControlTarget {
+    pub curve: CurveId,
+    pub node: NodeId,
+    /// The parameter the wired curve port is assigned to.
+    pub parameter: String,
 }
 
 /// One connection as the state wants it.
@@ -101,6 +123,8 @@ impl ConnectionTarget {
 pub(crate) struct Target {
     pub nodes: BTreeMap<Key, NodeTarget>,
     pub connections: BTreeMap<ConnectionId, ConnectionTarget>,
+    /// The control wires.
+    pub controls: BTreeMap<ConnectionId, ControlTarget>,
     /// The project tempo, which nodes that use it are prepared at.
     pub tempo: Tempo,
 }
@@ -133,6 +157,7 @@ impl Target {
                 shape: Shape::Sink,
                 parameters: BTreeMap::new(),
                 seconds: None,
+                curve: None,
             },
         );
         for track in &state.tracks {
@@ -142,6 +167,7 @@ impl Target {
                     shape: Shape::Source(track.layout),
                     parameters: BTreeMap::new(),
                     seconds: None,
+                    curve: None,
                 },
             );
         }
@@ -182,12 +208,51 @@ impl Target {
                     shape,
                     parameters,
                     seconds,
+                    curve: None,
                 },
             );
         }
+        for lane in &state.curves {
+            nodes.insert(
+                Key::Curve(lane.id),
+                NodeTarget {
+                    shape: Shape::Curve,
+                    parameters: BTreeMap::new(),
+                    seconds: None,
+                    curve: Some(Arc::new(lane.curve.clone())),
+                },
+            );
+        }
+        let controls = state
+            .connections
+            .iter()
+            .filter_map(|c| {
+                let (Endpoint::Curve(curve), Endpoint::CurvePort(node, port)) = (c.from, c.to)
+                else {
+                    return None;
+                };
+                // A stand-in for an unknown effect has no parameters to drive.
+                if matches!(
+                    nodes.get(&Key::Node(node)).map(|n| &n.shape),
+                    Some(Shape::Unknown { .. }) | None
+                ) {
+                    return None;
+                }
+                let parameter = state.node(node)?.curve_port_parameter(port)?.to_owned();
+                Some((
+                    c.id,
+                    ControlTarget {
+                        curve,
+                        node,
+                        parameter,
+                    },
+                ))
+            })
+            .collect();
         Target {
             nodes,
             connections,
+            controls,
             tempo: state.tempo,
         }
     }

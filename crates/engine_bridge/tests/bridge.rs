@@ -8,6 +8,7 @@ use std::sync::Arc;
 use audio_buffers::Layout;
 use audio_engine::{ClipAudio, RenderFeed, TrackFeed, TrackFeeds, render};
 use engine_bridge::{Bridge, Error as BridgeError, render_graph, track_renderers};
+use modulation::{Curve, Handle, Point};
 use project_model::{AudioFile, Clip, Edit, Endpoint, NodeKind, Session, Side, Source, State};
 use signal_graph::Config;
 
@@ -26,9 +27,22 @@ fn assert_in_step(bridge: &Bridge, state: &State) -> Result<(), Box<dyn Error>> 
         .iter()
         .map(|c| usize::from(c.from_side.is_some()) + usize::from(c.to_side.is_some()))
         .sum();
-    let expected_nodes = state.tracks.len() + state.nodes.len() + 1 + sided;
+    let expected_nodes = state.tracks.len() + state.nodes.len() + state.curves.len() + 1 + sided;
     assert_eq!(graph.node_ids().count(), expected_nodes, "node count");
+    let mut controls = 0;
     for c in &state.connections {
+        if let (Endpoint::Curve(curve), Endpoint::CurvePort(node, port)) = (c.from, c.to) {
+            let id = bridge.control(c.id).ok_or("control wire not mirrored")?;
+            let g = graph
+                .control_connection(id)
+                .ok_or("control missing from graph")?;
+            assert_eq!(Some(g.curve), bridge.curve(curve));
+            assert_eq!(Some(g.node), bridge.node(Endpoint::Node(node)));
+            let parameter = state.node(node).and_then(|n| n.curve_port_parameter(port));
+            assert_eq!(Some(g.parameter.as_str()), parameter);
+            controls += 1;
+            continue;
+        }
         let id = bridge.connection(c.id).ok_or("connection not mirrored")?;
         let g = graph
             .connection(id)
@@ -45,9 +59,10 @@ fn assert_in_step(bridge: &Bridge, state: &State) -> Result<(), Box<dyn Error>> 
     }
     assert_eq!(
         graph.connections().count(),
-        state.connections.len() + sided,
+        state.connections.len() - controls + sided,
         "graph connection count"
     );
+    assert_eq!(graph.control_connections().count(), controls);
     Ok(())
 }
 
@@ -471,6 +486,7 @@ fn test_project_renders_through_its_routing() -> Result<(), Box<dyn Error>> {
         &mut graph.runner,
         graph.output,
         &mut tracks,
+        0,
         1000,
         128,
         &mut |l, r| {
@@ -542,6 +558,7 @@ fn test_stereo_track_through_the_project_mixer_keeps_its_image() -> Result<(), B
         &mut graph.runner,
         graph.output,
         &mut tracks,
+        0,
         512,
         128,
         &mut |l, r| {
@@ -605,6 +622,125 @@ fn test_sided_connections_sync_through_edits_and_undo() -> Result<(), Box<dyn Er
         }),
         Err(BridgeError::Model(project_model::Error::SideOfMonoPort(_)))
     ));
+    assert_in_step(&bridge, session.state())?;
+    Ok(())
+}
+
+/// A straight curve from value 0 at frame 0 to 1 at frame `end`.
+fn ramp_curve(end: i64) -> Result<Curve, modulation::CurveError> {
+    let third = end as f64 / 3.0;
+    Curve::new(vec![
+        Point::new(0, 0.0).with_handles(Handle::default(), Handle::new(third, 1.0 / 3.0)),
+        Point::new(end, 1.0).with_handles(Handle::new(-third, -1.0 / 3.0), Handle::default()),
+    ])
+}
+
+/// A new project with one mono track playing 0.5 for `frames` into the project mixer, whose
+/// channel 1 gain is driven by a curve from silence to full.
+fn curve_on_mixer_gain(frames: u64) -> Result<Session, Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let track = session.add_track("mono", Layout::Mono)?;
+    let file = AudioFile {
+        name: "m.wav".to_owned(),
+        frames,
+    };
+    session.add_clip(track, Clip::new(Source::Mono(file), 0, frames, 0))?;
+    let mixer = session.state().project_mixer().ok_or("no project mixer")?;
+    let curve = session.add_curve("Curve 1", ramp_curve(frames as i64)?)?;
+    let port = session.assign_curve_port(mixer, "channel 1 gain")?;
+    session.connect_curve(curve, mixer, port)?;
+    Ok(session)
+}
+
+/// Renders `session` from frame 0 for `frames` in blocks of `block`, returning the left channel.
+fn render_left(session: &Session, frames: u64, block: usize) -> Result<Vec<f32>, Box<dyn Error>> {
+    let mut stored = BTreeMap::new();
+    stored.insert("m.wav".to_owned(), vec![0.5; frames as usize]);
+    let stored = Arc::new(stored);
+    let mut graph = render_graph(session.state(), Config::new(48_000, 512))?;
+    let (renderers, files) = track_renderers(session.state(), &graph.sources, 48_000)?;
+    let mut tracks: Vec<TrackFeeds> = renderers
+        .into_iter()
+        .map(|t| TrackFeeds {
+            source: t.source,
+            feeds: t
+                .channels
+                .into_iter()
+                .map(|r| {
+                    Box::new(RenderFeed::new(
+                        r,
+                        Memory(Arc::clone(&stored), files.names().to_vec()),
+                        0,
+                    )) as Box<dyn TrackFeed>
+                })
+                .collect(),
+        })
+        .collect();
+    let mut left = Vec::new();
+    render(
+        &mut graph.runner,
+        graph.output,
+        &mut tracks,
+        0,
+        frames,
+        block,
+        &mut |l, _| {
+            left.extend_from_slice(l);
+            Ok(())
+        },
+    )?;
+    Ok(left)
+}
+
+#[test]
+fn test_curve_on_mixer_gain_renders_the_same_at_any_block_size() -> Result<(), Box<dyn Error>> {
+    let frames = 9_600;
+    let session = curve_on_mixer_gain(frames)?;
+    let renders = [64, 100, 512]
+        .into_iter()
+        .map(|block| render_left(&session, frames, block))
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(renders[0], renders[1]);
+    assert_eq!(renders[0], renders[2]);
+    // The gain moves from its set value (0 dB) to the curve's within one control period, then
+    // follows the curve up from silence.
+    let left = &renders[0];
+    assert!(left[64] < 0.01, "{}", left[64]);
+    assert!(left[2_000] < left[6_000] && left[6_000] < left[9_500]);
+    Ok(())
+}
+
+#[test]
+fn test_bridge_follows_curve_edits() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let mixer = session.state().project_mixer().ok_or("no project mixer")?;
+    let curve = bridge.edit(&mut session, |s| s.add_curve("Curve 1", Curve::default()))?;
+    let port = bridge.edit(&mut session, |s| {
+        s.assign_curve_port(mixer, "channel 1 gain")
+    })?;
+    bridge.edit(&mut session, |s| s.connect_curve(curve, mixer, port))?;
+    assert_in_step(&bridge, session.state())?;
+    let controls = |bridge: &Bridge| bridge.graph().control_connections().count();
+    assert_eq!(controls(&bridge), 1);
+    let node = bridge.curve(curve).ok_or("curve not mirrored")?;
+
+    // A new shape keeps the curve's graph node and its wire.
+    bridge.edit(&mut session, |s| {
+        s.set_curve(curve, vec![Point::new(0, 0.75)])
+    })?;
+    assert_eq!(bridge.curve(curve), Some(node));
+    assert_eq!(controls(&bridge), 1);
+
+    bridge.edit(&mut session, |s| {
+        s.unassign_curve_port(mixer, "channel 1 gain")
+    })?;
+    assert_eq!(controls(&bridge), 0);
+    assert!(bridge.undo(&mut session)?);
+    assert_eq!(controls(&bridge), 1);
+    bridge.edit(&mut session, |s| s.remove_curve(curve))?;
+    assert_eq!(controls(&bridge), 0);
+    assert_eq!(bridge.curve(curve), None);
     assert_in_step(&bridge, session.state())?;
     Ok(())
 }

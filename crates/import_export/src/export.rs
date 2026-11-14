@@ -60,6 +60,8 @@ pub struct OfflineRender<'a> {
     pub output: NodeId,
     /// The track feeds, positioned at the range's start.
     pub tracks: &'a mut [TrackFeeds],
+    /// The range's first timeline frame, where curves are read from.
+    pub start: u64,
     /// The range's length, in frames.
     pub frames: u64,
     /// Frames per block.
@@ -198,6 +200,7 @@ pub fn export(
         render.runner,
         render.output,
         render.tracks,
+        render.start,
         render.frames,
         render.block_frames,
         &mut |l, r| {

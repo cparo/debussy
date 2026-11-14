@@ -8,6 +8,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+modulation = { path = "../modulation" }
 audio_buffers = { path = "../audio_buffers" }
 audio_effects = { path = "../audio_effects" }
 audio_engine = { path = "../audio_engine" }

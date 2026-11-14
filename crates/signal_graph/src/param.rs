@@ -2,7 +2,7 @@
 //! (`docs/architecture/signal-graph.md` "Processing graph").
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use crate::error::Error;
 
@@ -228,12 +228,22 @@ pub fn map_to_parameter(value: f32, info: &ParameterInfo) -> f32 {
 #[derive(Debug)]
 struct Shared {
     info: ParameterInfo,
-    /// The value's bits, as `f32::to_bits`.
+    /// The value as set, as `f32::to_bits`.
     bits: AtomicU32,
+    /// Whether an automation curve drives the value (`docs/architecture/automation.md`
+    /// "Evaluation").
+    automated: AtomicBool,
+    /// While automated: the curve's value, as `f32::to_bits`.
+    curve_bits: AtomicU32,
+    /// While automated: the frames over which a reader reaches the curve's value.
+    ramp_frames: AtomicU32,
 }
 
 /// A node parameter: an `f32` that any thread can set and a node reads without locking. Cloning
 /// gives another handle to the same value.
+///
+/// While an automation curve drives it, [`Parameter::get`] gives the curve's value and
+/// [`Parameter::set`] changes only the value it returns to when the curve is released.
 ///
 /// Cloning and dropping a handle touch a reference count, and dropping the last one frees the
 /// parameter, so handles are made and dropped off the real-time thread. Reading and setting never
@@ -272,6 +282,9 @@ impl Parameter {
             shared: Arc::new(Shared {
                 info,
                 bits: AtomicU32::new(default.to_bits()),
+                automated: AtomicBool::new(false),
+                curve_bits: AtomicU32::new(default.to_bits()),
+                ramp_frames: AtomicU32::new(1),
             }),
         })
     }
@@ -281,16 +294,65 @@ impl Parameter {
         &self.shared.info
     }
 
-    /// The current value.
+    /// The value a node uses: the curve's while automated, otherwise the value as set.
     pub fn get(&self) -> f32 {
+        let bits = match self.is_automated() {
+            true => &self.shared.curve_bits,
+            false => &self.shared.bits,
+        };
+        f32::from_bits(bits.load(Ordering::Relaxed))
+    }
+
+    /// The value as set, which an automation curve overrides while it drives the parameter.
+    pub fn base(&self) -> f32 {
         f32::from_bits(self.shared.bits.load(Ordering::Relaxed))
     }
 
     /// Sets the value, clamped to the range and, for a stepped scale, rounded. NaN is ignored.
+    /// While automated, the change takes effect when the curve is released.
     pub fn set(&self, value: f32) {
         if let Some(value) = self.shared.info.constrain(value) {
             self.shared.bits.store(value.to_bits(), Ordering::Relaxed);
         }
+    }
+
+    /// Whether an automation curve drives the parameter.
+    pub fn is_automated(&self) -> bool {
+        self.shared.automated.load(Ordering::Relaxed)
+    }
+
+    /// While automated, the frames over which a reader should reach the current value: the
+    /// frames to the next control point. `None` while not automated, when a reader ramps over
+    /// [`RAMP_SECONDS`].
+    pub fn control_ramp(&self) -> Option<usize> {
+        self.is_automated()
+            .then(|| self.shared.ramp_frames.load(Ordering::Relaxed) as usize)
+    }
+
+    /// Whether `other` is a handle to the same parameter.
+    pub fn same(&self, other: &Parameter) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
+    /// Drives the parameter from a curve: its value becomes `value` (constrained to the range),
+    /// to be reached over `ramp_frames` frames. Real-time safe.
+    pub(crate) fn automate(&self, value: f32, ramp_frames: usize) {
+        let value = self
+            .shared
+            .info
+            .constrain(value)
+            .unwrap_or(self.shared.info.min);
+        let frames = u32::try_from(ramp_frames.max(1)).unwrap_or(u32::MAX);
+        self.shared
+            .curve_bits
+            .store(value.to_bits(), Ordering::Relaxed);
+        self.shared.ramp_frames.store(frames, Ordering::Relaxed);
+        self.shared.automated.store(true, Ordering::Relaxed);
+    }
+
+    /// Releases the parameter from its curve: it returns to the value as set. Real-time safe.
+    pub(crate) fn release(&self) {
+        self.shared.automated.store(false, Ordering::Relaxed);
     }
 }
 
@@ -329,12 +391,28 @@ impl Ramp {
 
     /// Sets the target. If it has changed, starts a new ramp from the current value.
     pub fn set_target(&mut self, target: f32) {
+        self.set_target_over(target, self.ramp);
+    }
+
+    /// Sets the target. If it has changed, starts a new ramp from the current value that reaches
+    /// it after `samples` samples (at least 1).
+    pub fn set_target_over(&mut self, target: f32, samples: usize) {
         if target != self.target {
+            let samples = samples.max(1);
             self.target = target;
-            self.remaining = self.ramp;
+            self.remaining = samples;
             #[allow(clippy::cast_precision_loss)] // a ramp is at most a few thousand samples
-            let samples = self.ramp as f32;
+            let samples = samples as f32;
             self.step = (target - self.current) / samples;
+        }
+    }
+
+    /// Sets a target derived from `parameter`: while a curve drives the parameter, reached by the
+    /// next control point (see [`Parameter::control_ramp`]); otherwise over [`RAMP_SECONDS`].
+    pub fn follow(&mut self, target: f32, parameter: &Parameter) {
+        match parameter.control_ramp() {
+            Some(samples) => self.set_target_over(target, samples),
+            None => self.set_target(target),
         }
     }
 
@@ -383,9 +461,10 @@ impl Smoothed {
         Smoothed { parameter, ramp }
     }
 
-    /// Reads the parameter and, if it has changed, starts a new ramp from the current value.
+    /// Reads the parameter and, if it has changed, starts a new ramp from the current value: to
+    /// the next control point while a curve drives it, otherwise over [`RAMP_SECONDS`].
     pub fn update(&mut self) {
-        self.ramp.set_target(self.parameter.get());
+        self.ramp.follow(self.parameter.get(), &self.parameter);
     }
 
     /// The value for the next sample.
@@ -415,6 +494,42 @@ mod tests {
 
     fn gain() -> Result<Parameter, Error> {
         Parameter::new(ParameterInfo::new("gain", 0.0, 2.0, 1.0))
+    }
+
+    #[test]
+    fn test_automate_overrides_get_until_released() -> Result<(), Error> {
+        let parameter = gain()?;
+        parameter.set(1.5);
+        assert_eq!(parameter.control_ramp(), None);
+        parameter.automate(9.0, 20);
+        assert_eq!(parameter.get(), 2.0);
+        assert_eq!(parameter.control_ramp(), Some(20));
+        parameter.set(0.5);
+        assert_eq!((parameter.get(), parameter.base()), (2.0, 0.5));
+        parameter.release();
+        assert_eq!(parameter.get(), 0.5);
+        assert!(!parameter.is_automated());
+        assert!(parameter.same(&parameter.clone()) && !parameter.same(&gain()?));
+        Ok(())
+    }
+
+    #[test]
+    fn test_smoothed_reaches_an_automated_value_by_the_control_point() -> Result<(), Error> {
+        let parameter = gain()?;
+        let mut smoothed = Smoothed::new(parameter.clone(), 48_000);
+        parameter.automate(2.0, 4);
+        smoothed.update();
+        let values: Vec<f32> = (0..5).map(|_| smoothed.next_value()).collect();
+        assert_eq!(values, [1.25, 1.5, 1.75, 2.0, 2.0]);
+        // Released, it ramps back over the normal 10 ms (480 frames at 48 kHz).
+        parameter.release();
+        smoothed.update();
+        for _ in 0..479 {
+            smoothed.next_value();
+        }
+        assert!(smoothed.is_ramping());
+        assert_eq!(smoothed.next_value(), 1.0);
+        Ok(())
     }
 
     #[test]

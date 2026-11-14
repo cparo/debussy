@@ -19,8 +19,9 @@ pub(crate) struct Live<'a> {
 
 /// Runs one block of `left.len()` frames: fills each track's source from its feeds (or with
 /// silence unless `playing`), puts armed tracks' input in their sources and takes (see
-/// [`Live`]), runs the plan, and writes the output sink to `left` and `right`, folded to mono
-/// on both if `mono`. Real-time safe if the feeds and sinks are.
+/// [`Live`]), runs the plan with the sources at timeline frame `position` (where curves are
+/// read), and writes the output sink to `left` and `right`, folded to mono on both if `mono`.
+/// Real-time safe if the feeds and sinks are.
 ///
 /// # Errors
 ///
@@ -32,6 +33,7 @@ pub(crate) fn run(
     output: NodeId,
     tracks: &mut [TrackFeeds],
     live: Option<&mut Live<'_>>,
+    position: i64,
     playing: bool,
     mono: bool,
     left: &mut [f32],
@@ -51,6 +53,7 @@ pub(crate) fn run(
         right.fill(0.0);
         return Err(error.into());
     }
+    runner.set_transport(position, playing);
     let (armed, recording): (&[ArmedTrack], bool) = match &live {
         Some(live) => (live.armed, live.recording),
         None => (&[], false),

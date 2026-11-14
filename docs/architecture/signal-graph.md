@@ -107,7 +107,8 @@ it in place, keeping its graph id, connections and values, with one prepared at 
 
 ## Port types
 
-Every port and connection has a type. Audio is the only type; connections between ports of
+Every port and connection has a type: audio, or control (an automation curve's value, with no
+buffer; see `docs/architecture/automation.md` "Evaluation"). Connections between ports of
 different types are refused. Track contents are typed in the same way: audio clips are the only
 kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
 

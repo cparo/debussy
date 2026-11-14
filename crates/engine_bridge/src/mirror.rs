@@ -8,7 +8,7 @@ use audio_buffers::Layout;
 use project_model::{ConnectionId, Side, Tempo};
 use signal_graph::{ConnectionId as GraphConnectionId, Graph, Node, NodeId as GraphNodeId};
 
-use crate::target::{ConnectionTarget, Key, NodeTarget, Shape, Target};
+use crate::target::{ConnectionTarget, ControlTarget, Key, NodeTarget, Shape, Target};
 
 /// Why the mirror could not make the graph hold a target.
 #[derive(Debug)]
@@ -48,11 +48,19 @@ pub(crate) struct MirroredConnection {
     pub target: ConnectionTarget,
 }
 
+/// The graph connection standing for one control wire.
+#[derive(Debug, Clone)]
+pub(crate) struct MirroredControl {
+    pub id: GraphConnectionId,
+    pub target: ControlTarget,
+}
+
 /// The graph's elements, by the model's keys and ids.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Mirror {
     pub nodes: BTreeMap<Key, MirroredNode>,
     pub connections: BTreeMap<ConnectionId, MirroredConnection>,
+    pub controls: BTreeMap<ConnectionId, MirroredControl>,
     /// The tempo the graph was last given.
     pub tempo: Tempo,
 }
@@ -70,7 +78,7 @@ fn processor(shape: &Shape) -> Option<Box<dyn Node>> {
             .ok()
             .or_else(|| Some(Box::new(audio_effects::Silence::new(1, 1)))),
         Shape::Bus(layout) => Some(Box::new(audio_effects::Bus::new(*layout))),
-        Shape::Source(_) | Shape::Sink | Shape::Delay(_) => None,
+        Shape::Source(_) | Shape::Sink | Shape::Delay(_) | Shape::Curve => None,
     }
 }
 
@@ -80,6 +88,7 @@ fn add(graph: &mut Graph, target: &NodeTarget) -> Result<GraphNodeId, MirrorErro
         Shape::Source(layout) => graph.add_source(*layout),
         Shape::Sink => graph.add_sink(Layout::Stereo),
         Shape::Delay(layout) => graph.add_feedback_delay(*layout, target.seconds.unwrap_or(0.0))?,
+        Shape::Curve => graph.add_curve(target.curve.clone().unwrap_or_default()),
         shape => {
             let node =
                 processor(shape).unwrap_or_else(|| Box::new(audio_effects::Silence::new(1, 1)));
@@ -194,6 +203,25 @@ fn connect(
     }
 }
 
+/// Connects control wire `target` in `graph`, whose nodes for its keys are in `nodes`.
+fn connect_control(
+    graph: &mut Graph,
+    nodes: &BTreeMap<Key, MirroredNode>,
+    target: &ControlTarget,
+) -> Result<MirroredControl, MirrorError> {
+    let (Some(curve), Some(node)) = (
+        nodes.get(&Key::Curve(target.curve)),
+        nodes.get(&Key::Node(target.node)),
+    ) else {
+        return Err(MirrorError::MissingEndpoint);
+    };
+    let id = graph.connect_curve(curve.id, node.id, &target.parameter)?;
+    Ok(MirroredControl {
+        id,
+        target: target.clone(),
+    })
+}
+
 /// Removes a mirrored connection's graph connections and helper nodes, ignoring parts already
 /// gone with a removed node.
 fn remove_connection(graph: &mut Graph, connection: &MirroredConnection) {
@@ -232,6 +260,10 @@ impl Mirror {
         for (id, connection) in &target.connections {
             let mirrored = connect(graph, &mirror.nodes, connection)?;
             mirror.connections.insert(*id, mirrored);
+        }
+        for (id, control) in &target.controls {
+            let mirrored = connect_control(graph, &mirror.nodes, control)?;
+            mirror.controls.insert(*id, mirrored);
         }
         Ok(mirror)
     }
@@ -336,6 +368,9 @@ impl Mirror {
                     {
                         graph.set_feedback_delay(old.id, seconds)?;
                     }
+                    if let (Some(curve), true) = (&new.curve, old.target.curve != new.curve) {
+                        graph.set_curve(old.id, std::sync::Arc::clone(curve))?;
+                    }
                     old.target = new.clone();
                 }
             }
@@ -354,6 +389,31 @@ impl Mirror {
                     let mirrored = connect(graph, &self.nodes, new)?;
                     self.connections.insert(*id, mirrored);
                 }
+            }
+        }
+
+        // Control wires: drop those that went, changed, or were removed with a node, then add
+        // the missing ones.
+        let stale: Vec<ConnectionId> = self
+            .controls
+            .iter()
+            .filter(|(id, old)| {
+                target.controls.get(id) != Some(&old.target)
+                    || graph.control_connection(old.id).is_none()
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in stale {
+            if let Some(old) = self.controls.remove(&id)
+                && graph.control_connection(old.id).is_some()
+            {
+                graph.disconnect(old.id)?;
+            }
+        }
+        for (id, new) in &target.controls {
+            if !self.controls.contains_key(id) {
+                let mirrored = connect_control(graph, &self.nodes, new)?;
+                self.controls.insert(*id, mirrored);
             }
         }
         Ok(())

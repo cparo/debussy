@@ -269,6 +269,7 @@ fn export_project(
             runner: &mut runner,
             output,
             tracks: &mut tracks,
+            start: 0,
             frames: frames as u64,
             block_frames: 256,
         },
