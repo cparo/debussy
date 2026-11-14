@@ -1,7 +1,7 @@
 # ADR-0122 — Pink noise is a seeded alternating pole-zero filter cascade
 
 - **Status:** Accepted
-- **Decided by:** agent, unratified
+- **Decided by:** agent, ratified by Chris Paro
 - **Date:** 2026-11-13
 - **Issue:** #149
 - **Architecture:** [Patent policy](../architecture/patents.md#patent-policy)
