@@ -254,7 +254,7 @@ impl App {
                 background: Some(theme::tokens(theme::tone_of(t)).line.into()),
                 ..container::Style::default()
             });
-        match self.menu {
+        let base: Element<'_, Message> = match self.menu {
             None => base.into(),
             Some(menu) => {
                 let (x, y) = self.menu_position(menu, size);
@@ -265,6 +265,20 @@ impl App {
                 ]
                 .into()
             }
+        };
+        match &self.export_dialog {
+            None => base,
+            Some(dialog) => stack![
+                base,
+                // A press outside the MP3 bit rate dialog cancels it.
+                mouse_area(
+                    container(opaque(dialog.view()))
+                        .center(Fill)
+                        .style(theme::scrim)
+                )
+                .on_press(Message::CancelExport),
+            ]
+            .into(),
         }
     }
 

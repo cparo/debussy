@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use audio_engine::Engine;
 use debussy_ui::{App, Launcher, ProjectEntry, Start};
 use engine_bridge::Bridge;
+use import_export::Lame;
 use macos_platform::MacDevices;
 use project_model::Session;
 use project_storage::{AppSettings, Bundle};
@@ -24,19 +25,26 @@ const PROJECT_FILE: &str = "project.json";
 const MAX_LISTED: usize = 1000;
 
 /// Opens and creates projects, with the app settings at `settings_path`, keeping new projects
-/// in `projects_dir`.
+/// in `projects_dir`, and giving each the `lame` found at startup.
 pub struct AppLauncher {
     settings_path: PathBuf,
     projects_dir: Option<PathBuf>,
+    lame: Option<Lame>,
 }
 
 impl AppLauncher {
     /// A launcher whose projects use the app settings at `settings_path`, creating them in and
-    /// listing them from `projects_dir`, if there is one.
-    pub fn new(settings_path: PathBuf, projects_dir: Option<PathBuf>) -> AppLauncher {
+    /// listing them from `projects_dir`, if there is one, and exporting MP3 through `lame`, if
+    /// one was found.
+    pub fn new(
+        settings_path: PathBuf,
+        projects_dir: Option<PathBuf>,
+        lame: Option<Lame>,
+    ) -> AppLauncher {
         AppLauncher {
             settings_path,
             projects_dir,
+            lame,
         }
     }
 
@@ -58,6 +66,7 @@ impl AppLauncher {
         let output = bridge.output().context("the project has no output")?;
         let (engine, processor) = Engine::new(runner, output, rate)?;
         let settings_path = self.settings_path.clone();
+        let lame = self.lame.clone();
         Ok(Box::new(move || {
             let settings = AppSettings::load(&settings_path);
             let (audio, started) = audio::AudioOutput::start(
@@ -71,6 +80,7 @@ impl AppLauncher {
                 audio,
                 settings,
                 settings_path,
+                lame,
             ));
             let mut app = App::new(session, rate, bridge, engine, services);
             app.set_project_name(name);
@@ -216,7 +226,7 @@ mod tests {
     fn test_prepare_refuses_to_create_over_an_existing_path() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("debussy-launcher-{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
-        let mut launcher = AppLauncher::new(dir.join("settings.json"), None);
+        let mut launcher = AppLauncher::new(dir.join("settings.json"), None, None);
         let result = launcher.prepare(&dir, Some(48_000));
         std::fs::remove_dir_all(&dir)?;
         let Err(message) = result else {
@@ -228,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_prepare_reports_a_missing_project() {
-        let mut launcher = AppLauncher::new(PathBuf::from("settings.json"), None);
+        let mut launcher = AppLauncher::new(PathBuf::from("settings.json"), None, None);
         let missing = std::env::temp_dir().join("debussy-launcher-missing.debussy");
         assert!(launcher.prepare(&missing, None).is_err());
         assert!(!missing.exists(), "opening never creates");

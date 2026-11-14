@@ -4,7 +4,8 @@
 
 MP3 decoding, and AAC and FLAC encoding and decoding, must go through Apple's AudioToolbox
 framework, from inside the macOS platform crate. No crate implementing these codecs may be added.
-MP3 export is not offered ([ADR-0024](../adrs/0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md)).
+MP3 is encoded by a host-installed `lame`, not AudioToolbox ([MP3 export](import-export.md#mp3-export))
+([ADR-0024](../adrs/0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md), [ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
 
 The codecs call AudioToolbox's `ExtAudioFile` through the `objc2-audio-toolbox` bindings, decoding
 in the application process and never on the real-time thread. A decoded file is untrusted: one
@@ -14,8 +15,9 @@ error. Every AudioToolbox status is checked ([ADR-0051](../adrs/0051-audiotoolbo
 
 ## Folders
 
-The paths of the app's folders and files on macOS (the projects folder and the settings file) are
-worked out in `macos_platform::folders`; no other crate names a macOS folder. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
+The paths of the app's folders and files on macOS (the projects folder, the settings file, and the
+folders searched for `lame`) are worked out in `macos_platform::folders`; no other crate names a
+macOS folder. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
 
 ## Audio device I/O
 

@@ -11,7 +11,9 @@ use audio_buffers::Layout;
 use audio_engine::{RenderFeed, TrackFeed, TrackFeeds};
 use disk_streaming::WavClipAudio;
 use engine_bridge::{render_graph, track_renderers};
-use import_export::{ExportChannels, ExportFormat, OfflineRender, WavDepth, export, import};
+use import_export::{
+    ExportChannels, ExportFormat, Lame, Mp3Bitrate, OfflineRender, WavDepth, export, import,
+};
 use macos_platform::MacCodecs;
 use platform_interfaces::FlacDepth;
 use project_model::{Clip, Session, Source, State};
@@ -153,12 +155,20 @@ fn project_end(state: &State) -> u64 {
 }
 
 /// Renders the whole of `state` to `path`, in the format its extension names: `.wav` (24-bit),
-/// `.flac` (24-bit) or `.m4a` (AAC, 256 kbit/s).
+/// `.flac` (24-bit), `.m4a` (AAC, 256 kbit/s) or `.mp3` (at `mp3`, default 320 kbit/s, through
+/// `lame`).
 ///
 /// # Errors
 ///
-/// For an unknown extension, or if rendering or writing fails.
-pub fn export_state(bundle: &Bundle, state: &State, path: &Path, mono: bool) -> Result<()> {
+/// For an unknown extension, MP3 without `lame`, or if rendering or writing fails.
+pub fn export_state(
+    bundle: &Bundle,
+    state: &State,
+    path: &Path,
+    mono: bool,
+    mp3: Option<Mp3Bitrate>,
+    lame: Option<&Lame>,
+) -> Result<()> {
     let extension = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -167,7 +177,10 @@ pub fn export_state(bundle: &Bundle, state: &State, path: &Path, mono: bool) -> 
         "wav" => ExportFormat::Wav(WavDepth::Int24),
         "flac" => ExportFormat::Flac(FlacDepth::Int24),
         "m4a" | "aac" => ExportFormat::Aac { bitrate_kbps: 256 },
-        other => bail!("cannot export to .{other}; use .wav, .flac or .m4a"),
+        "mp3" => ExportFormat::Mp3 {
+            bitrate: mp3.unwrap_or(Mp3Bitrate::Kbps320),
+        },
+        other => bail!("cannot export to .{other}; use .wav, .flac, .m4a or .mp3"),
     };
     let rate = bundle.sample_rate();
     let mut graph = render_graph(state, Config::new(rate, MAX_BLOCK))?;
@@ -209,6 +222,7 @@ pub fn export_state(bundle: &Bundle, state: &State, path: &Path, mono: bool) -> 
         rate,
         path,
         &MacCodecs::new(),
+        lame,
     )
     .with_context(|| format!("exporting {}", path.display()))?;
     Ok(())

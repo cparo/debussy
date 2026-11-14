@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
@@ -20,7 +20,7 @@ use disk_streaming::{
     WavClipAudio,
 };
 use engine_bridge::{ClickSound, track_renderers};
-use import_export::{import, safe_stem, unique_names};
+use import_export::{Lame, Mp3Bitrate, import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{AppSettings, Bundle, ClickSound as SavedClickSound};
@@ -77,6 +77,8 @@ pub struct AppServices {
     spectrogram: Option<SpectrogramScratch>,
     /// The recording pass's writer, until its takes are kept or discarded.
     recorder: Option<Recorder>,
+    /// The host's LAME, found at startup; MP3 export is offered only with it (ADR-0129).
+    lame: Option<Lame>,
 }
 
 /// A spectrogram calculator with a frame's samples and levels.
@@ -94,6 +96,7 @@ impl AppServices {
         audio: AudioOutput,
         settings: AppSettings,
         settings_path: PathBuf,
+        lame: Option<Lame>,
     ) -> Self {
         AppServices {
             bundle,
@@ -106,6 +109,7 @@ impl AppServices {
             audio_files: BTreeMap::new(),
             spectrogram: None,
             recorder: None,
+            lame,
         }
     }
 }
@@ -334,8 +338,8 @@ impl Services for AppServices {
         Ok(imported)
     }
 
-    fn export(&mut self, state: &State, mono: bool) -> Result<Option<String>, String> {
-        let Some(path) = rfd::FileDialog::new()
+    fn pick_export_path(&mut self, mono: bool) -> Option<PathBuf> {
+        let mut dialog = rfd::FileDialog::new()
             .set_title(if mono {
                 "Export mono mix"
             } else {
@@ -344,15 +348,26 @@ impl Services for AppServices {
             .set_file_name("Mix.wav")
             .add_filter("WAV (24-bit)", &["wav"])
             .add_filter("FLAC (24-bit)", &["flac"])
-            .add_filter("AAC", &["m4a"])
-            .save_file()
-        else {
-            return Ok(None);
-        };
-        export_state(&self.bundle, state, &path, mono).map_err(|e| format!("{e:#}"))?;
-        Ok(Some(path.file_name().map_or_else(String::new, |n| {
-            n.to_string_lossy().into_owned()
-        })))
+            .add_filter("AAC", &["m4a"]);
+        if self.lame.is_some() {
+            dialog = dialog.add_filter("MP3", &["mp3"]);
+        }
+        dialog.save_file()
+    }
+
+    fn export(
+        &mut self,
+        state: &State,
+        path: &Path,
+        mono: bool,
+        mp3_kbps: Option<u32>,
+    ) -> Result<String, String> {
+        let mp3 = mp3_kbps.and_then(Mp3Bitrate::from_kbps);
+        export_state(&self.bundle, state, path, mono, mp3, self.lame.as_ref())
+            .map_err(|e| format!("{e:#}"))?;
+        Ok(path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {

@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -31,7 +32,10 @@ struct Calls {
     waveform: Vec<(String, u64, u64)>,
     spectrogram: Vec<(String, u64, u64)>,
     samples: Vec<(String, u64, usize)>,
-    exports: Vec<bool>,
+    /// Each export's mono flag and MP3 bit rate.
+    exports: Vec<(bool, Option<u32>)>,
+    /// Where the export dialog says to export; `mix.wav` if not set.
+    export_to: Option<PathBuf>,
     device: Option<String>,
     /// Devices present beyond the two built in, as if plugged in.
     plugged: Vec<DeviceChoice>,
@@ -179,9 +183,25 @@ impl Services for Fake {
         ])
     }
 
-    fn export(&mut self, _state: &State, mono: bool) -> Result<Option<String>, String> {
-        self.calls.borrow_mut().exports.push(mono);
-        Ok(Some("mix.wav".into()))
+    fn pick_export_path(&mut self, _mono: bool) -> Option<PathBuf> {
+        Some(
+            self.calls
+                .borrow()
+                .export_to
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("mix.wav")),
+        )
+    }
+
+    fn export(
+        &mut self,
+        _state: &State,
+        path: &Path,
+        mono: bool,
+        mp3_kbps: Option<u32>,
+    ) -> Result<String, String> {
+        self.calls.borrow_mut().exports.push((mono, mp3_kbps));
+        Ok(path.display().to_string())
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
@@ -660,7 +680,7 @@ fn test_import_adds_one_step_per_file_onto_the_mixer() -> Result<(), Box<dyn Err
 fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     let (mut app, mut processor, calls, _) = app()?;
     app.update(Message::Export(true));
-    assert_eq!(calls.borrow().exports, vec![true]);
+    assert_eq!(calls.borrow().exports, vec![(true, None)]);
     assert_eq!(app.status(), Some("Exported mix.wav"));
     let interface = DeviceChoice {
         id: "b".into(),
@@ -674,6 +694,33 @@ fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     block(&mut processor)?;
     app.update(Message::Device(interface));
     assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}
+
+#[test]
+fn test_export_mp3_asks_for_the_bit_rate_first() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    calls.borrow_mut().export_to = Some(PathBuf::from("Mix.MP3"));
+    app.update(Message::Export(false));
+    assert!(calls.borrow().exports.is_empty(), "waits for the bit rate");
+    // Escape closes the dialog without exporting.
+    app.update(Message::ClearRange);
+    app.update(Message::ExportMp3(256));
+    assert!(calls.borrow().exports.is_empty());
+    // Enter takes the focused bit rate, 320.
+    app.update(Message::Export(false));
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    app.update(Message::Export(true));
+    app.update(Message::ExportMp3(128));
+    assert_eq!(
+        calls.borrow().exports,
+        vec![(false, Some(320)), (true, Some(128))]
+    );
+    assert_eq!(app.status(), Some("Exported Mix.MP3"));
+    app.update(Message::Export(false));
+    app.update(Message::CancelExport);
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert_eq!(calls.borrow().exports.len(), 2);
     Ok(())
 }
 

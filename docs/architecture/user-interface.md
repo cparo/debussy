@@ -254,7 +254,10 @@ reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-a
 
 Import and export use the system's file dialogs through `rfd`, used only in `debussy`. Each
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
-Import is refused while playing.
+Import is refused while playing. The export dialog offers MP3 only when `lame` was found; an
+`.mp3` path then opens a modal asking for the bit rate, with 128, 256 and 320 kbit/s and Cancel.
+320 is focused; Tab and Shift-Tab move the focus, Enter or Space presses it, and Escape or a press
+outside the modal cancels ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
 
 One audio device is chosen for both input and output, from a list re-read each time the device
 dropdown opens. The choice is remembered in the application settings; at launch a remembered device

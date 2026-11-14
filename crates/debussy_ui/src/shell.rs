@@ -491,8 +491,17 @@ mod tests {
         fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
             Ok(Vec::new())
         }
-        fn export(&mut self, _: &State, _: bool) -> Result<Option<String>, String> {
-            Ok(None)
+        fn pick_export_path(&mut self, _: bool) -> Option<PathBuf> {
+            None
+        }
+        fn export(
+            &mut self,
+            _: &State,
+            _: &Path,
+            _: bool,
+            _: Option<u32>,
+        ) -> Result<String, String> {
+            Err("no export here".into())
         }
         fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
             (Vec::new(), None)

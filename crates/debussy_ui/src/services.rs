@@ -2,6 +2,7 @@
 //! (`docs/architecture/crates.md` "Dependency rules", ADR-0056).
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
@@ -153,13 +154,24 @@ pub trait Services {
     /// in the message's place only if none failed.
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
 
-    /// Asks the user where to export, then renders `state` there, as the mono mix if `mono`.
-    /// The file's name, or `None` if the user cancelled.
+    /// Asks the user where to export the mix, or the mono mix if `mono`; `None` if the user
+    /// cancelled. MP3 is offered only when the host has LAME (ADR-0129).
+    fn pick_export_path(&mut self, mono: bool) -> Option<PathBuf>;
+
+    /// Renders `state` to `path`, in the format its extension names, as the mono mix if `mono`;
+    /// an MP3 at `mp3_kbps` kilobits per second (one of [`MP3_BITRATES`](crate::MP3_BITRATES)). Returns the file's
+    /// name.
     ///
     /// # Errors
     ///
     /// A message for the status line.
-    fn export(&mut self, state: &State, mono: bool) -> Result<Option<String>, String>;
+    fn export(
+        &mut self,
+        state: &State,
+        path: &Path,
+        mono: bool,
+        mp3_kbps: Option<u32>,
+    ) -> Result<String, String>;
 
     /// The audio devices present, and the one in use.
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>);

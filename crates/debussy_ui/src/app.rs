@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
 use audio_engine::Engine;
@@ -19,6 +19,7 @@ use project_model::{
 use crate::click::Click;
 use crate::curve_edit::{self, Side};
 use crate::curve_lane::Grab;
+use crate::export_dialog::{ExportDialog, Key};
 use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
@@ -326,8 +327,13 @@ pub enum Message {
     NodeText(NodeId, String),
     /// Record the typed field as one step.
     CommitNodeText,
-    /// Export the mix, through a file dialog; the mono mix if `true`.
+    /// Export the mix, through a file dialog; the mono mix if `true`. An `.mp3` path asks for
+    /// its bit rate first.
     Export(bool),
+    /// Export the MP3 waiting in the bit rate dialog at this many kilobits per second.
+    ExportMp3(u32),
+    /// Close the MP3 bit rate dialog without exporting.
+    CancelExport,
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
@@ -421,6 +427,8 @@ pub struct App {
     pub(crate) click: Click,
     /// Every mixer's and built-in effect's parameters, read once at launch.
     catalog: ParameterCatalog,
+    /// An MP3 export waiting for its bit rate.
+    pub(crate) export_dialog: Option<ExportDialog>,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -489,6 +497,7 @@ impl App {
             meters: BTreeMap::new(),
             click: Click::new(preferences),
             catalog: ParameterCatalog::new(),
+            export_dialog: None,
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -770,8 +779,28 @@ impl App {
         }
     }
 
+    /// Renders the project to `path`, as the mono mix if `mono`, an MP3 at `mp3_kbps`, and
+    /// reports the result on the status line.
+    fn export(&mut self, path: &Path, mono: bool, mp3_kbps: Option<u32>) {
+        self.status = Some(
+            match self
+                .services
+                .export(self.session.state(), path, mono, mp3_kbps)
+            {
+                Ok(name) => format!("Exported {name}"),
+                Err(message) => message,
+            },
+        );
+    }
+
     /// Handles `message`, without saving.
     fn handle(&mut self, message: Message) {
+        // The MP3 bit rate dialog takes the keyboard while it is open.
+        let message = match self.export_dialog.as_mut().map(|d| d.key(&message)) {
+            Some(Key::Taken) => return,
+            Some(Key::Press(pressed)) => pressed,
+            Some(Key::Ignored) | None => message,
+        };
         // A frame tick, a scroll or typing leaves the status line and the open menu alone;
         // anything else replaces the status and closes the menu, except the click dialog's own
         // controls, which leave it open.
@@ -1128,11 +1157,25 @@ impl App {
                     self.commit_node_text(node, &text);
                 }
             }
-            Message::Export(mono) => match self.services.export(self.session.state(), mono) {
-                Ok(Some(name)) => self.status = Some(format!("Exported {name}")),
-                Ok(None) => {}
-                Err(message) => self.status = Some(message),
-            },
+            Message::Export(mono) => {
+                let Some(path) = self.services.pick_export_path(mono) else {
+                    return;
+                };
+                let mp3 = path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("mp3"));
+                if mp3 {
+                    self.export_dialog = Some(ExportDialog::new(path, mono));
+                } else {
+                    self.export(&path, mono, None);
+                }
+            }
+            Message::ExportMp3(kbps) => {
+                if let Some(dialog) = self.export_dialog.take() {
+                    self.export(&dialog.path, dialog.mono, Some(kbps));
+                }
+            }
+            Message::CancelExport => self.export_dialog = None,
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {

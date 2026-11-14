@@ -1,7 +1,18 @@
-//! Where the app keeps its files on macOS (`docs/architecture/platform.md` "Folders").
+//! Where the app keeps its files on macOS (`docs/architecture/platform.md` "Folders"), and where
+//! it looks for a host-installed `lame` (`docs/architecture/import-export.md` "MP3 export").
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
+
+/// The package managers' program folders searched for `lame` before `PATH`: Homebrew on Apple
+/// silicon, Homebrew on Intel, and MacPorts.
+const PACKAGE_BIN_DIRS: [&str; 3] = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
+
+/// Where to look for `lame`, in order: [`PACKAGE_BIN_DIRS`], then each folder on `PATH`. An app
+/// launched from the Finder has a minimal `PATH`, so the package folders come first.
+pub fn lame_candidates() -> Vec<PathBuf> {
+    lame_candidates_in(std::env::var_os("PATH").as_deref())
+}
 
 /// The folder new projects go in and Open lists: `~/Music/Debussy`; `None` if `HOME` is not
 /// set.
@@ -31,6 +42,20 @@ fn settings_path_in(home: &OsStr) -> Option<PathBuf> {
     })
 }
 
+/// [`lame_candidates`] for the search path `path`: absolute folders only, without repeats.
+fn lame_candidates_in(path: Option<&OsStr>) -> Vec<PathBuf> {
+    let on_path = path.into_iter().flat_map(std::env::split_paths);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for dir in PACKAGE_BIN_DIRS.iter().map(PathBuf::from).chain(on_path) {
+        let candidate = dir.join("lame");
+        // A relative entry such as `.` would depend on the working directory.
+        if dir.is_absolute() && !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,6 +76,23 @@ mod tests {
                 "/Users/a/Library/Application Support/Debussy/settings.json"
             ))
         );
+    }
+
+    #[test]
+    fn test_lame_candidates_in_puts_package_folders_before_path() {
+        let got = lame_candidates_in(Some(OsStr::new("/usr/bin:/opt/homebrew/bin:.:/bin")));
+        let want: Vec<PathBuf> = [
+            "/opt/homebrew/bin/lame",
+            "/usr/local/bin/lame",
+            "/opt/local/bin/lame",
+            "/usr/bin/lame",
+            "/bin/lame",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(got, want);
+        assert_eq!(lame_candidates_in(None).len(), 3);
     }
 
     #[test]

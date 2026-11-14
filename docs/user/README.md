@@ -174,7 +174,12 @@ format. Or, from the command line:
 target/release/debussy MySong.debussy --export mix.wav     # 24-bit WAV
 target/release/debussy MySong.debussy --export mix.flac    # 24-bit FLAC
 target/release/debussy MySong.debussy --export mix.m4a --mono   # AAC, mono mix
+target/release/debussy MySong.debussy --export mix.mp3 --bitrate 256   # MP3 (default 320)
 ```
+
+MP3 export needs LAME, which Debussy does not include. Install it with `brew install lame` and
+restart Debussy; **MP3** then appears in the export dialog's formats, and choosing it asks for the
+bit rate (128, 256 or 320 kbit/s).
 
 Export renders the whole project and exits without opening the window.
 

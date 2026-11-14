@@ -7,6 +7,9 @@ With a project on its command line, `debussy` opens it, creating it if missing, 
 through the chosen output device, which must run at the project rate. With `--export` it renders
 the project to a file and exits instead. Command-line import and export stand in until the
 interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-exports-from-the.md)).
+Before either, it looks once for a host-installed [`lame`](import-export.md#mp3-export), which every
+project opened in that run uses for MP3 export; `--bitrate` sets an `.mp3` export's bit rate
+([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
 
 With no arguments, the window opens on a start screen: a sample rate picker (44.1, 48, 88.2 or
 96 kHz, 48 kHz by default) and New project, with the Open browser's list beneath. With a project
