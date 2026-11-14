@@ -1,6 +1,6 @@
 [package]
 name = "modulation"
-description = "Modulation sources for the real-time core: LFOs and tempo-sync arithmetic."
+description = "Modulation sources for the real-time core: LFOs, tempo-sync arithmetic and automation curves."
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 dsp = { path = "../dsp" }
+thiserror = "2.0.21"
 
 [dev-dependencies]
 realtime_guard = { path = "../realtime_guard" }

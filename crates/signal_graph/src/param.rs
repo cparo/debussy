@@ -192,6 +192,36 @@ impl ParameterInfo {
             value
         })
     }
+
+    /// Whether an automation curve may drive the parameter: it is not
+    /// [`stopped_only`](Self::stopped_only) and its scale is not stepped
+    /// (`docs/architecture/automation.md` "Curves").
+    pub fn is_automatable(&self) -> bool {
+        !self.stopped_only && !self.scale.is_stepped()
+    }
+}
+
+/// The parameter value a normalised curve value `value` stands for: 0 is the minimum and 1 the
+/// maximum, spaced evenly in the value for [`Scale::Linear`] and in its logarithm for
+/// [`Scale::Logarithmic`]. `value` is clamped to 0 to 1 first, NaN taken as 0. A logarithmic
+/// range whose minimum is not above 0 maps linearly; a stepped scale maps linearly and rounds
+/// (`docs/architecture/automation.md` "Curves").
+pub fn map_to_parameter(value: f32, info: &ParameterInfo) -> f32 {
+    let value = if value.is_nan() {
+        0.0
+    } else {
+        value.clamp(0.0, 1.0)
+    };
+    let mapped = match info.scale {
+        Scale::Logarithmic if info.min > 0.0 => {
+            // In `f64`, so the ends map back to the minimum and maximum exactly.
+            let (low, high) = (f64::from(info.min).ln(), f64::from(info.max).ln());
+            (low + f64::from(value) * (high - low)).exp() as f32
+        }
+        _ => info.min + value * (info.max - info.min),
+    };
+    // `constrain` keeps the rounding of `exp` inside the range; the value is never NaN here.
+    info.constrain(mapped).unwrap_or(info.min)
 }
 
 /// The state every handle to one parameter shares.
@@ -385,6 +415,50 @@ mod tests {
 
     fn gain() -> Result<Parameter, Error> {
         Parameter::new(ParameterInfo::new("gain", 0.0, 2.0, 1.0))
+    }
+
+    #[test]
+    fn test_is_automatable_refuses_stopped_only_and_stepped() {
+        let info = ParameterInfo::new("x", 0.0, 4.0, 1.0);
+        assert!(info.is_automatable());
+        assert!(info.clone().with_scale(Scale::Logarithmic).is_automatable());
+        assert!(!info.clone().stopped_only().is_automatable());
+        assert!(!info.clone().sets_latency().is_automatable());
+        assert!(!info.clone().with_scale(Scale::Integer).is_automatable());
+        assert!(!info.clone().with_scale(Scale::Toggle).is_automatable());
+        let choice = Scale::Choice(vec!["a".into(), "b".into()]);
+        assert!(!info.with_scale(choice).is_automatable());
+    }
+
+    #[test]
+    fn test_map_to_parameter_linear() {
+        let info = ParameterInfo::new("pan", -1.0, 1.0, 0.0);
+        assert_eq!(map_to_parameter(0.0, &info), -1.0);
+        assert_eq!(map_to_parameter(0.5, &info), 0.0);
+        assert_eq!(map_to_parameter(1.0, &info), 1.0);
+        assert_eq!(map_to_parameter(-3.0, &info), -1.0);
+        assert_eq!(map_to_parameter(7.0, &info), 1.0);
+        assert_eq!(map_to_parameter(f32::NAN, &info), -1.0);
+    }
+
+    #[test]
+    fn test_map_to_parameter_logarithmic() {
+        let info =
+            ParameterInfo::new("freq", 20.0, 20_000.0, 1_000.0).with_scale(Scale::Logarithmic);
+        assert_eq!(map_to_parameter(0.0, &info), 20.0);
+        assert_eq!(map_to_parameter(1.0, &info), 20_000.0);
+        // The geometric mean of 20 and 20 000 is 632.46.
+        assert!((map_to_parameter(0.5, &info) - 632.455_5).abs() < 0.01);
+        // A third of the way is a factor of 10 up.
+        assert!((map_to_parameter(1.0 / 3.0, &info) - 200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_map_to_parameter_degenerate_ranges() {
+        let bad_log = ParameterInfo::new("x", 0.0, 10.0, 1.0).with_scale(Scale::Logarithmic);
+        assert_eq!(map_to_parameter(0.5, &bad_log), 5.0);
+        let stepped = ParameterInfo::new("n", 0.0, 3.0, 0.0).with_scale(Scale::Integer);
+        assert_eq!(map_to_parameter(0.4, &stepped), 1.0);
     }
 
     #[test]

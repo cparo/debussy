@@ -47,6 +47,6 @@ pub use delay::{MAX_FEEDBACK_DELAY, MIN_FEEDBACK_DELAY, feedback_delay_frames};
 pub use error::Error;
 pub use graph::{Connection, Graph};
 pub use node::{Inputs, Node, Outputs};
-pub use param::{Parameter, ParameterInfo, RAMP_SECONDS, Ramp, Scale, Smoothed};
+pub use param::{Parameter, ParameterInfo, RAMP_SECONDS, Ramp, Scale, Smoothed, map_to_parameter};
 pub use runner::Runner;
 pub use types::{Config, ConnectionId, NodeId, Port, PortType};

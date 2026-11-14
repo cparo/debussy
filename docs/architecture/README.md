@@ -70,6 +70,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Waveform summaries](analysis.md#waveform-summaries)
   - [Spectrograms](analysis.md#spectrograms)
   - [Analysis cache files](analysis.md#analysis-cache-files)
+- [Automation](automation.md)
+  - [Curves](automation.md#curves)
 - [Crates](crates.md)
   - [Crate map](crates.md#crate-map)
   - [Dependency rules](crates.md#dependency-rules)

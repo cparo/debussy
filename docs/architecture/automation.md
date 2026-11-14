@@ -1,0 +1,34 @@
+# Automation
+
+## Curves
+
+An automation curve (`modulation::Curve`) is a normalised value from 0 to 1 over timeline frames.
+It is real-time safe to read: evaluation allocates nothing, takes no locks and does no I/O (see
+`docs/architecture/engine.md` "Real-time thread").
+
+- **Points.** A curve is a list of anchor points (`modulation::Point`), each a timeline frame
+  (`i64`), a value from 0 to 1, and an in-handle and out-handle (`modulation::Handle`), each an
+  offset `(d_frame: f64, d_value: f32)` from the anchor. Anchor frames strictly increase. The
+  first point's in-handle and the last point's out-handle are unused but must be finite.
+- **Segments.** Points `i` and `i + 1` are joined by a cubic Bézier with control points
+  anchor `i`, anchor `i` + its out-handle, anchor `i + 1` + its in-handle, and anchor `i + 1`.
+- **Function of time.** Every segment's x must never decrease. With the segment's x control
+  values `x0` to `x3` and `a = x1 − x0`, `b = x2 − x1`, `c = x3 − x2`, it is valid exactly when
+  `a ≥ 0`, `c ≥ 0`, and `b ≥ 0` or `b² ≤ ac`. `Curve::validate` checks this, finite handles,
+  values from 0 to 1 and increasing frames, and names the first point or segment that fails.
+  A `Curve` can only be made valid; an edit that would make it invalid is refused.
+- **Evaluation** (`Curve::value_at`, or `modulation::Cursor` for sequential reads in constant
+  time):
+  - Before the first point the value is the first point's; from the last point on it is the last
+    point's. A curve with no points is 0.5.
+  - Inside a segment, 52 steps of `f64` bisection on `x(t)` find the curve parameter `t` for the
+    frame, and the value is `y(t)`, clamped to 0 to 1.
+- **Parameter value.** `signal_graph::map_to_parameter` maps a curve value onto a parameter's
+  range: 0 to the minimum and 1 to the maximum, evenly in the value for a linear scale and in its
+  logarithm for a logarithmic one.
+- **Eligibility.** A curve may drive a parameter only when `ParameterInfo::is_automatable` holds:
+  the parameter is not stopped-only and its scale is not stepped (integer, choice or toggle).
+- **Patent constraint.** No command splits an anchor's value into a step (two values at one
+  frame) without a new patent check (see `docs/architecture/patents.md` "Patent policy").
+
+The curve maths is built in-house ([ADR-0123](../adrs/0123-automation-curves-are-cubic-b-zier-segments-kept.md)).
