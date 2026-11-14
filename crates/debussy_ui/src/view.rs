@@ -1079,8 +1079,7 @@ impl App {
                     Entry::item("Open…", when_idle(Message::OpenProject)),
                     Entry::Separator,
                     Entry::item("Import…", when_stopped(Message::Import)),
-                    Entry::item("Export…", Some(Message::Export(false))),
-                    Entry::item("Export mono…", Some(Message::Export(true))),
+                    Entry::item("Export…", Some(Message::Export)),
                     Entry::Separator,
                     Entry::item("Quit", Some(Message::Quit)),
                 ]

@@ -184,6 +184,11 @@ invalid file gives the defaults ([ADR-0059](../adrs/0059-the-window-imports-expo
 Since version 2 it also holds the click's `click_sound` (`block`, `click` or `stick`) and
 `click_level_db` (−24 to +6); a version 1 file keeps its device and takes the Click sound at
 0 dB, and a level out of range reads as 0 dB ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
+Since version 3 (the version written) it also holds the last export's settings, `export`:
+`format` (`wav`, `flac`, `aac` or `mp3`), `wav_depth` and `flac_depth` (`int16`, `int24` or
+`float32`), `aac_kbps`, `mp3_kbps` and `mono`. A version 1 or 2 file takes the default export,
+24-bit stereo WAV; a FLAC depth of `float32`, or a bit rate of 0 or above 1000, reads as its
+default ([ADR-0130](../adrs/0130-export-asks-for-the-format-and-its-settings-before.md)).
 
 ## Stored audio
 

@@ -254,10 +254,16 @@ reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-a
 
 Import and export use the system's file dialogs through `rfd`, used only in `debussy`. Each
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
-Import is refused while playing. The export dialog offers MP3 only when `lame` was found; an
-`.mp3` path then opens a modal asking for the bit rate, with 128, 256 and 320 kbit/s and Cancel.
-320 is focused; Tab and Shift-Tab move the focus, Enter or Space presses it, and Escape or a press
-outside the modal cancels ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
+Import is refused while playing.
+
+Export… opens a modal before any file dialog: a row for the format (WAV, FLAC, AAC, and MP3 only
+when `lame` was found), one for that format's setting (WAV 16-bit, 24-bit or 32-bit float; FLAC
+16- or 24-bit; AAC 128, 192 or 256 kbit/s; MP3 128, 256 or 320 kbit/s) and one for the channels
+(stereo or mono), then Cancel and Export…. Each format keeps its own setting while the format
+changes. Enter presses Export…, and Escape or a press outside the modal cancels. Export… opens a
+save dialog offering only that format, named `Mix.<ext>`, and exports with the modal's settings.
+The modal opens on the last confirmed settings, and at launch on those of the last export
+([application settings](project.md#application-settings)) ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md), [ADR-0130](../adrs/0130-export-asks-for-the-format-and-its-settings-before.md)).
 
 One audio device is chosen for both input and output, from a list re-read each time the device
 dropdown opens. The choice is remembered in the application settings; at launch a remembered device

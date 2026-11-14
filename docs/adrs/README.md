@@ -153,4 +153,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0127](0127-a-press-on-a-curve-lane-more-than-8-pixels-from.md) | A press on a curve lane more than 8 pixels from the curve seeks rather than adding a point | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0128](0128-effects-read-each-parameter-once-per-block-as-a.md) | Effects read each parameter once per block as a Reading, and their derived ramps approach it by the next control point | Accepted | [Evaluation](../architecture/automation.md#evaluation) |
 | [ADR-0129](0129-mp3-export-runs-a-host-installed-lame-as-a.md) | MP3 export runs a host-installed LAME as a separate process | Accepted | [MP3 export](../architecture/import-export.md#mp3-export) |
+| [ADR-0130](0130-export-asks-for-the-format-and-its-settings-before.md) | Export asks for the format and its settings before the save dialog, and remembers them | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 

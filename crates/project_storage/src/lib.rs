@@ -29,7 +29,8 @@ pub use error::Error;
 pub use format::FORMAT_VERSION;
 pub use migrate::MAX_DEPTH;
 pub use settings::{
-    AppSettings, ClickSound, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB, SETTINGS_VERSION,
+    AppSettings, ClickSound, ExportDepth, ExportFormatName, ExportPreferences, MAX_CLICK_LEVEL_DB,
+    MIN_CLICK_LEVEL_DB, SETTINGS_VERSION,
 };
 pub use validate::{
     MAX_CLIPS, MAX_CONNECTIONS, MAX_FILE_NAME_BYTES, MAX_MIXER_CHANNELS, MAX_NAME_BYTES, MAX_NODES,

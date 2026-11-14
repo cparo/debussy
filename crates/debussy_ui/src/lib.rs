@@ -91,7 +91,7 @@ use shell::Shell;
 pub use app::{App, Message, NewNode, Renaming};
 pub use curve_lane::Grab;
 pub use effect_display::{DisplayContext, Pixels};
-pub use export_dialog::MP3_BITRATES;
+pub use export_dialog::{AAC_BITRATES, ExportDepth, ExportKind, ExportSettings, MP3_BITRATES};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;

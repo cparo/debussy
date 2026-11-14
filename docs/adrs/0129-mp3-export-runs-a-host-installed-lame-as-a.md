@@ -31,8 +31,8 @@ superseded.
   read but capped at 4 KiB.
 - **Portability:** the folders searched are macOS package managers' and live in
   `macos_platform::folders`; the process encoder uses only `std` and lives in `import_export`.
-- **Format:** constant 128, 256 or 320 kbit/s (320 by default, chosen in a dialog after the save
-  dialog or with `--bitrate`); 16-bit raw input, TPDF-dithered by export; lame resamples projects
+- **Format:** constant 128, 256 or 320 kbit/s (320 by default, chosen in the Export dialog of
+  [ADR-0130](0130-export-asks-for-the-format-and-its-settings-before.md) or with `--bitrate`); 16-bit raw input, TPDF-dithered by export; lame resamples projects
   above 48 kHz, MP3's highest rate, to 44.1 or 48 kHz.
 
 ## Alternatives considered
@@ -47,9 +47,10 @@ superseded.
   LAME with one command.
 - **Pass lame the output path** — rejected: a path beginning with `-` could be read as an option,
   and lame would open files on Debussy's behalf; piping keeps file handling in Debussy.
-- **24-bit raw input** — not adopted yet: no `lame` was installed where this was built to confirm
-  that 3.100's raw reader accepts `--bitwidth 24`; 16-bit dithered input is the format it reads
-  reliably, and MP3's own noise floor is far above 16-bit dither.
+- **24-bit raw input** — not adopted: LAME 4.0 (Homebrew's) accepts `--bitwidth 24`, but 3.100,
+  still common through MacPorts and older installs, was not confirmed to, and using it would mean
+  checking the version as well. MP3's own noise floor is far above 16-bit dither, so 24-bit input
+  would gain nothing audible.
 
 ## Consequences
 

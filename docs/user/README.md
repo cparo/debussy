@@ -56,7 +56,7 @@ mixer existed send tracks straight to the output.)
   started), the playhead time, and **Mono** to listen to the mono mix.
 - **View:** **−** and **+** zoom the track lanes out and in; ◀ and ▶▶ scroll.
 - **Undo / Redo / Save.** Undo and redo are unavailable while playing.
-- **Import… / Export… / Export mono…** open file dialogs.
+- **Import…** opens a file dialog; **Export…** first asks for the format and its settings.
 - **Audio device:** the headphones-and-microphone button at the bottom left lists the devices;
   pick the one used for playback and
   recording. Change it while stopped or paused; the choice is remembered. If the device is
@@ -167,8 +167,10 @@ Effect settings are saved with the project.
 
 ## Exporting
 
-Click **Export…** or **Export mono…** and choose where; the file name's extension picks the
-format. Or, from the command line:
+Choose **Export…** from the ≡ menu. Pick the format (WAV, FLAC, AAC or MP3), its bit depth or
+bit rate, and stereo or mono, then click **Export…** and choose where to save. Debussy remembers
+your choices for next time. Or, from the command line, where the file name's extension picks the
+format:
 
 ```sh
 target/release/debussy MySong.debussy --export mix.wav     # 24-bit WAV
@@ -178,10 +180,9 @@ target/release/debussy MySong.debussy --export mix.mp3 --bitrate 256   # MP3 (de
 ```
 
 MP3 export needs LAME, which Debussy does not include. Install it with `brew install lame` and
-restart Debussy; **MP3** then appears in the export dialog's formats, and choosing it asks for the
-bit rate (128, 256 or 320 kbit/s).
+restart Debussy; **MP3** then appears among the export formats.
 
-Export renders the whole project and exits without opening the window.
+A command-line export renders the whole project and exits without opening the window.
 
 ## Not yet available
 

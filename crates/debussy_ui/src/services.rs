@@ -10,6 +10,8 @@ use audio_engine::{Processor, Streams, TakeSink, TrackFeeds};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
+use crate::export_dialog::ExportSettings;
+
 /// A file the user imported, stored and ready to become a track.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedTrack {
@@ -154,13 +156,18 @@ pub trait Services {
     /// in the message's place only if none failed.
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
 
-    /// Asks the user where to export the mix, or the mono mix if `mono`; `None` if the user
-    /// cancelled. MP3 is offered only when the host has LAME (ADR-0129).
-    fn pick_export_path(&mut self, mono: bool) -> Option<PathBuf>;
+    /// The last export's settings, remembered between launches; the Export dialog opens on
+    /// them (ADR-0130).
+    fn export_settings(&mut self) -> ExportSettings;
 
-    /// Renders `state` to `path`, in the format its extension names, as the mono mix if `mono`;
-    /// an MP3 at `mp3_kbps` kilobits per second (one of [`MP3_BITRATES`](crate::MP3_BITRATES)). Returns the file's
-    /// name.
+    /// Whether MP3 export is offered: the host has LAME (ADR-0129).
+    fn mp3_available(&mut self) -> bool;
+
+    /// Asks the user where to export with `settings`, through a save dialog for that format
+    /// only; `None` if the user cancelled.
+    fn pick_export_path(&mut self, settings: &ExportSettings) -> Option<PathBuf>;
+
+    /// Renders `state` to `path` with `settings`, and remembers them. Returns the file's name.
     ///
     /// # Errors
     ///
@@ -169,8 +176,7 @@ pub trait Services {
         &mut self,
         state: &State,
         path: &Path,
-        mono: bool,
-        mp3_kbps: Option<u32>,
+        settings: &ExportSettings,
     ) -> Result<String, String>;
 
     /// The audio devices present, and the one in use.

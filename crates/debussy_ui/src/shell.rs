@@ -491,15 +491,20 @@ mod tests {
         fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
             Ok(Vec::new())
         }
-        fn pick_export_path(&mut self, _: bool) -> Option<PathBuf> {
+        fn export_settings(&mut self) -> crate::ExportSettings {
+            crate::ExportSettings::default()
+        }
+        fn mp3_available(&mut self) -> bool {
+            false
+        }
+        fn pick_export_path(&mut self, _: &crate::ExportSettings) -> Option<PathBuf> {
             None
         }
         fn export(
             &mut self,
             _: &State,
             _: &Path,
-            _: bool,
-            _: Option<u32>,
+            _: &crate::ExportSettings,
         ) -> Result<String, String> {
             Err("no export here".into())
         }

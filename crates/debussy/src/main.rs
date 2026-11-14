@@ -6,6 +6,7 @@
 
 mod args;
 mod audio;
+mod export_settings;
 mod launcher;
 mod project;
 mod services;
@@ -26,12 +27,13 @@ fn main() -> Result<()> {
                 project::import_files(&mut bundle, &mut session, &args.imports)?;
             }
             if let Some(path) = &args.export {
+                let format = project::format_for_path(path, args.bitrate)?;
                 project::export_state(
                     &bundle,
                     session.state(),
                     path,
+                    format,
                     args.mono,
-                    args.bitrate,
                     lame.as_ref(),
                 )?;
                 println!("exported {}", path.display());

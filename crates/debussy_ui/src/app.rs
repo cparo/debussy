@@ -19,7 +19,7 @@ use project_model::{
 use crate::click::Click;
 use crate::curve_edit::{self, Side};
 use crate::curve_lane::Grab;
-use crate::export_dialog::{ExportDialog, Key};
+use crate::export_dialog::{ExportDialog, ExportSettings, Key};
 use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
@@ -327,12 +327,13 @@ pub enum Message {
     NodeText(NodeId, String),
     /// Record the typed field as one step.
     CommitNodeText,
-    /// Export the mix, through a file dialog; the mono mix if `true`. An `.mp3` path asks for
-    /// its bit rate first.
-    Export(bool),
-    /// Export the MP3 waiting in the bit rate dialog at this many kilobits per second.
-    ExportMp3(u32),
-    /// Close the MP3 bit rate dialog without exporting.
+    /// Open the Export dialog, to choose the format and its settings.
+    Export,
+    /// Change the Export dialog's settings to these.
+    ExportSettings(ExportSettings),
+    /// Close the Export dialog, ask where through a save dialog, and export there.
+    ConfirmExport,
+    /// Close the Export dialog without exporting.
     CancelExport,
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
@@ -427,8 +428,10 @@ pub struct App {
     pub(crate) click: Click,
     /// Every mixer's and built-in effect's parameters, read once at launch.
     catalog: ParameterCatalog,
-    /// An MP3 export waiting for its bit rate.
+    /// The open Export dialog.
     pub(crate) export_dialog: Option<ExportDialog>,
+    /// The settings the Export dialog opens on: the last chosen.
+    export_settings: ExportSettings,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -451,6 +454,7 @@ impl App {
         mut services: Box<dyn Services>,
     ) -> App {
         let preferences = services.click_preferences();
+        let export_settings = services.export_settings();
         engine.set_click_level(preferences.level_db);
         let mut app = App {
             session,
@@ -498,6 +502,7 @@ impl App {
             click: Click::new(preferences),
             catalog: ParameterCatalog::new(),
             export_dialog: None,
+            export_settings,
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -779,14 +784,11 @@ impl App {
         }
     }
 
-    /// Renders the project to `path`, as the mono mix if `mono`, an MP3 at `mp3_kbps`, and
-    /// reports the result on the status line.
-    fn export(&mut self, path: &Path, mono: bool, mp3_kbps: Option<u32>) {
+    /// Renders the project to `path` with `settings`, and reports the result on the status
+    /// line.
+    fn export(&mut self, path: &Path, settings: &ExportSettings) {
         self.status = Some(
-            match self
-                .services
-                .export(self.session.state(), path, mono, mp3_kbps)
-            {
+            match self.services.export(self.session.state(), path, settings) {
                 Ok(name) => format!("Exported {name}"),
                 Err(message) => message,
             },
@@ -1157,22 +1159,21 @@ impl App {
                     self.commit_node_text(node, &text);
                 }
             }
-            Message::Export(mono) => {
-                let Some(path) = self.services.pick_export_path(mono) else {
-                    return;
-                };
-                let mp3 = path
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("mp3"));
-                if mp3 {
-                    self.export_dialog = Some(ExportDialog::new(path, mono));
-                } else {
-                    self.export(&path, mono, None);
+            Message::Export => {
+                let mp3 = self.services.mp3_available();
+                self.export_dialog = Some(ExportDialog::new(self.export_settings, mp3));
+            }
+            Message::ExportSettings(settings) => {
+                if let Some(dialog) = &mut self.export_dialog {
+                    dialog.set(settings);
                 }
             }
-            Message::ExportMp3(kbps) => {
+            Message::ConfirmExport => {
                 if let Some(dialog) = self.export_dialog.take() {
-                    self.export(&dialog.path, dialog.mono, Some(kbps));
+                    self.export_settings = dialog.settings;
+                    if let Some(path) = self.services.pick_export_path(&dialog.settings) {
+                        self.export(&path, &dialog.settings);
+                    }
                 }
             }
             Message::CancelExport => self.export_dialog = None,
