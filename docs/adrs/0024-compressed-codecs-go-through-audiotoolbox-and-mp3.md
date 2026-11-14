@@ -1,6 +1,6 @@
 # ADR-0024 — Compressed codecs go through AudioToolbox and MP3 export is deferred
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0129
 - **Decided by:** Chris Paro
 - **Date:** 2026-11-06
 - **Issue:** #8

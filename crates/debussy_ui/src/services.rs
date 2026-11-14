@@ -2,12 +2,15 @@
 //! (`docs/architecture/crates.md` "Dependency rules", ADR-0056).
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_engine::{Processor, Streams, TakeSink, TrackFeeds};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
+
+use crate::export_dialog::ExportSettings;
 
 /// A file the user imported, stored and ready to become a track.
 #[derive(Debug, Clone, PartialEq)]
@@ -153,13 +156,28 @@ pub trait Services {
     /// in the message's place only if none failed.
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
 
-    /// Asks the user where to export, then renders `state` there, as the mono mix if `mono`.
-    /// The file's name, or `None` if the user cancelled.
+    /// The last export's settings, remembered between launches; the Export dialog opens on
+    /// them (ADR-0130).
+    fn export_settings(&mut self) -> ExportSettings;
+
+    /// Whether MP3 export is offered: the host has LAME (ADR-0129).
+    fn mp3_available(&mut self) -> bool;
+
+    /// Asks the user where to export with `settings`, through a save dialog for that format
+    /// only; `None` if the user cancelled.
+    fn pick_export_path(&mut self, settings: &ExportSettings) -> Option<PathBuf>;
+
+    /// Renders `state` to `path` with `settings`, and remembers them. Returns the file's name.
     ///
     /// # Errors
     ///
     /// A message for the status line.
-    fn export(&mut self, state: &State, mono: bool) -> Result<Option<String>, String>;
+    fn export(
+        &mut self,
+        state: &State,
+        path: &Path,
+        settings: &ExportSettings,
+    ) -> Result<String, String>;
 
     /// The audio devices present, and the one in use.
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>);

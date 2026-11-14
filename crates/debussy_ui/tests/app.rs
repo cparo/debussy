@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -13,9 +14,9 @@ use audio_buffers::Layout;
 use audio_effects::Mode;
 use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
-    App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ImportedTrack, Menu, Message,
-    MixerFocus, NewNode, Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles,
-    TakeStatus,
+    App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
+    ImportedTrack, Menu, Message, MixerFocus, NewNode, Renaming, SPECTRUM_BANDS, Selection,
+    Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -31,7 +32,12 @@ struct Calls {
     waveform: Vec<(String, u64, u64)>,
     spectrogram: Vec<(String, u64, u64)>,
     samples: Vec<(String, u64, usize)>,
-    exports: Vec<bool>,
+    /// Each export's path and settings.
+    exports: Vec<(PathBuf, ExportSettings)>,
+    /// Whether the save dialog is cancelled.
+    export_cancelled: bool,
+    /// Whether MP3 is offered.
+    mp3: bool,
     device: Option<String>,
     /// Devices present beyond the two built in, as if plugged in.
     plugged: Vec<DeviceChoice>,
@@ -179,9 +185,34 @@ impl Services for Fake {
         ])
     }
 
-    fn export(&mut self, _state: &State, mono: bool) -> Result<Option<String>, String> {
-        self.calls.borrow_mut().exports.push(mono);
-        Ok(Some("mix.wav".into()))
+    fn export_settings(&mut self) -> ExportSettings {
+        ExportSettings {
+            mono: true,
+            ..ExportSettings::default()
+        }
+    }
+
+    fn mp3_available(&mut self) -> bool {
+        self.calls.borrow().mp3
+    }
+
+    fn pick_export_path(&mut self, settings: &ExportSettings) -> Option<PathBuf> {
+        let calls = self.calls.borrow();
+        (!calls.export_cancelled)
+            .then(|| PathBuf::from(format!("Mix.{}", settings.format.extension())))
+    }
+
+    fn export(
+        &mut self,
+        _state: &State,
+        path: &Path,
+        settings: &ExportSettings,
+    ) -> Result<String, String> {
+        self.calls
+            .borrow_mut()
+            .exports
+            .push((path.to_owned(), *settings));
+        Ok(path.display().to_string())
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
@@ -659,9 +690,6 @@ fn test_import_adds_one_step_per_file_onto_the_mixer() -> Result<(), Box<dyn Err
 #[test]
 fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     let (mut app, mut processor, calls, _) = app()?;
-    app.update(Message::Export(true));
-    assert_eq!(calls.borrow().exports, vec![true]);
-    assert_eq!(app.status(), Some("Exported mix.wav"));
     let interface = DeviceChoice {
         id: "b".into(),
         name: "Interface".into(),
@@ -674,6 +702,63 @@ fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     block(&mut processor)?;
     app.update(Message::Device(interface));
     assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}
+
+#[test]
+fn test_export_dialog_chooses_settings_before_the_save_dialog() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    // Opens on the remembered settings (mono here); nothing is exported until Export….
+    app.update(Message::Export);
+    let remembered = ExportSettings {
+        mono: true,
+        ..ExportSettings::default()
+    };
+    let mp3 = ExportSettings {
+        format: ExportKind::Mp3,
+        mp3_kbps: 128,
+        ..remembered
+    };
+    // Without LAME, MP3 cannot be chosen (its bit rate is kept for later).
+    app.update(Message::ExportSettings(mp3));
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert_eq!(
+        calls.borrow().exports,
+        vec![(
+            PathBuf::from("Mix.wav"),
+            ExportSettings {
+                mp3_kbps: 128,
+                ..remembered
+            }
+        )]
+    );
+    assert_eq!(app.status(), Some("Exported Mix.wav"));
+    // With it, MP3 at 128 kbit/s; the next dialog opens on those settings.
+    calls.borrow_mut().mp3 = true;
+    app.update(Message::Export);
+    app.update(Message::ExportSettings(mp3));
+    app.update(Message::ConfirmExport);
+    app.update(Message::Export);
+    app.update(Message::ConfirmExport);
+    assert_eq!(
+        calls.borrow().exports.get(1..),
+        Some(
+            &[
+                (PathBuf::from("Mix.mp3"), mp3),
+                (PathBuf::from("Mix.mp3"), mp3)
+            ][..]
+        )
+    );
+    // Escape, Cancel and a cancelled save dialog export nothing.
+    app.update(Message::Export);
+    app.update(Message::ClearRange);
+    app.update(Message::ConfirmExport);
+    app.update(Message::Export);
+    app.update(Message::CancelExport);
+    calls.borrow_mut().export_cancelled = true;
+    app.update(Message::Export);
+    app.update(Message::ConfirmExport);
+    assert_eq!(calls.borrow().exports.len(), 3);
     Ok(())
 }
 

@@ -47,7 +47,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0021](0021-inputs-can-be-monitored-through-the-software-per.md) | Inputs can be monitored through the software per track | Accepted | [Input monitoring](../architecture/recording.md#input-monitoring) |
 | [ADR-0022](0022-the-engine-compensates-recording-and-effect.md) | The engine compensates recording and effect latency automatically | Accepted | [Recording alignment](../architecture/recording.md#recording-alignment) |
 | [ADR-0023](0023-expired-or-royalty-free-patents-may-be-implemented.md) | Expired or royalty-free patents may be implemented; others need a licensing SDK or review | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
-| [ADR-0024](0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md) | Compressed codecs go through AudioToolbox and MP3 export is deferred | Accepted | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
+| [ADR-0024](0024-compressed-codecs-go-through-audiotoolbox-and-mp3.md) | Compressed codecs go through AudioToolbox and MP3 export is deferred | Superseded by ADR-0129 | [Compressed audio codecs](../architecture/platform.md#compressed-audio-codecs) |
 | [ADR-0025](0025-wav-is-built-in-house-and-integer-exports-are.md) | WAV is built in-house and integer exports are dithered | Accepted | [WAV files](../architecture/import-export.md#wav-files) |
 | [ADR-0026](0026-the-workspace-is-split-into-seventeen-crates-in.md) | The workspace is split into seventeen crates in five dependency tiers | Accepted | [Crate map](../architecture/crates.md#crate-map) |
 | [ADR-0027](0027-the-commit-guard-parses-shell-commands-with-python.md) | The commit guard parses shell commands with Python's standard library | Accepted | [Commit gate](../architecture/tooling.md#commit-gate) |
@@ -152,4 +152,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0126](0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md) | Curve lanes are edited by refusing invalid shapes, with screen-linked handles, and a wired curve drives its parameter's control | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0127](0127-a-press-on-a-curve-lane-more-than-8-pixels-from.md) | A press on a curve lane more than 8 pixels from the curve seeks rather than adding a point | Accepted | [Layout](../architecture/user-interface.md#layout) |
 | [ADR-0128](0128-effects-read-each-parameter-once-per-block-as-a.md) | Effects read each parameter once per block as a Reading, and their derived ramps approach it by the next control point | Accepted | [Evaluation](../architecture/automation.md#evaluation) |
+| [ADR-0129](0129-mp3-export-runs-a-host-installed-lame-as-a.md) | MP3 export runs a host-installed LAME as a separate process | Accepted | [MP3 export](../architecture/import-export.md#mp3-export) |
+| [ADR-0130](0130-export-asks-for-the-format-and-its-settings-before.md) | Export asks for the format and its settings before the save dialog, and remembers them | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 

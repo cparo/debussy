@@ -5,22 +5,22 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
 use audio_engine::{Processor, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
-    ClickPreferences, DeviceChoice, ImportedTrack, Services, Spectrum, TakeFiles, TakeStatus,
-    spectrum_bands,
+    ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, Services, Spectrum,
+    TakeFiles, TakeStatus, spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
     WavClipAudio,
 };
 use engine_bridge::{ClickSound, track_renderers};
-use import_export::{import, safe_stem, unique_names};
+use import_export::{Lame, import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{AppSettings, Bundle, ClickSound as SavedClickSound};
@@ -28,6 +28,7 @@ use signal_graph::NodeId;
 use wav_files::WavReader;
 
 use crate::audio::AudioOutput;
+use crate::export_settings;
 use crate::project::{build_waveform_caches_for, export_state, waveform_cache};
 
 /// The bundled sound a remembered click sound names.
@@ -77,6 +78,8 @@ pub struct AppServices {
     spectrogram: Option<SpectrogramScratch>,
     /// The recording pass's writer, until its takes are kept or discarded.
     recorder: Option<Recorder>,
+    /// The host's LAME, found at startup; MP3 export is offered only with it (ADR-0129).
+    lame: Option<Lame>,
 }
 
 /// A spectrogram calculator with a frame's samples and levels.
@@ -94,6 +97,7 @@ impl AppServices {
         audio: AudioOutput,
         settings: AppSettings,
         settings_path: PathBuf,
+        lame: Option<Lame>,
     ) -> Self {
         AppServices {
             bundle,
@@ -106,6 +110,7 @@ impl AppServices {
             audio_files: BTreeMap::new(),
             spectrogram: None,
             recorder: None,
+            lame,
         }
     }
 }
@@ -334,25 +339,57 @@ impl Services for AppServices {
         Ok(imported)
     }
 
-    fn export(&mut self, state: &State, mono: bool) -> Result<Option<String>, String> {
-        let Some(path) = rfd::FileDialog::new()
-            .set_title(if mono {
+    fn export_settings(&mut self) -> ExportSettings {
+        export_settings::from_saved(self.settings.export)
+    }
+
+    fn mp3_available(&mut self) -> bool {
+        self.lame.is_some()
+    }
+
+    fn pick_export_path(&mut self, settings: &ExportSettings) -> Option<PathBuf> {
+        let kind = settings.format;
+        let filter = match kind {
+            ExportKind::Wav => "WAV",
+            ExportKind::Flac => "FLAC",
+            ExportKind::Aac => "AAC",
+            ExportKind::Mp3 => "MP3",
+        };
+        rfd::FileDialog::new()
+            .set_title(if settings.mono {
                 "Export mono mix"
             } else {
                 "Export mix"
             })
-            .set_file_name("Mix.wav")
-            .add_filter("WAV (24-bit)", &["wav"])
-            .add_filter("FLAC (24-bit)", &["flac"])
-            .add_filter("AAC", &["m4a"])
+            .set_file_name(format!("Mix.{}", kind.extension()))
+            .add_filter(filter, &[kind.extension()])
             .save_file()
-        else {
-            return Ok(None);
-        };
-        export_state(&self.bundle, state, &path, mono).map_err(|e| format!("{e:#}"))?;
-        Ok(Some(path.file_name().map_or_else(String::new, |n| {
-            n.to_string_lossy().into_owned()
-        })))
+    }
+
+    fn export(
+        &mut self,
+        state: &State,
+        path: &Path,
+        settings: &ExportSettings,
+    ) -> Result<String, String> {
+        let format = export_settings::to_format(settings);
+        export_state(
+            &self.bundle,
+            state,
+            path,
+            format,
+            settings.mono,
+            self.lame.as_ref(),
+        )
+        .map_err(|e| format!("{e:#}"))?;
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        self.settings.export = export_settings::to_saved(settings);
+        Ok(match self.settings.save(&self.settings_path) {
+            Ok(()) => name,
+            Err(e) => format!("{name} (the export settings could not be remembered: {e})"),
+        })
     }
 
     fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {

@@ -23,6 +23,12 @@ one accepted is `block` 0.1.6 (`uninhabited_static`), under `iced`'s wgpu Metal 
 Copyleft licences (GPL, LGPL, AGPL, and weak copyleft such as MPL) must not be added to the
 allowlist without human review, raised with the `flag-risk` skill ([ADR-0001](../adrs/0001-debussy-is-licensed-mit-or-apache-2-0-and-accepts.md)).
 
+## External programs
+
+A program under a licence outside the allowlist, such as LAME (LGPL), may be used only when the user
+installed it: Debussy runs it as a separate process, never links it, and never bundles or
+distributes it ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
+
 ## Bundled assets
 
 Audio and artwork compiled into the application are the project's own work or CC0-1.0. Each

@@ -1,6 +1,7 @@
 //! Export: an offline render of the project, folded to mono if asked, dithered to an integer
-//! depth, and written as WAV in-house or encoded through the platform's codecs
-//! (`docs/architecture/import-export.md` "Export", ADR-0025, ADR-0053).
+//! depth, and written as WAV in-house, encoded through the platform's codecs, or encoded to MP3
+//! by a host-installed `lame` (`docs/architecture/import-export.md` "Export", ADR-0025, ADR-0053,
+//! ADR-0129).
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -13,6 +14,7 @@ use signal_graph::{NodeId, Runner};
 use wav_files::{Channels, SampleFormat, Spec, WavWriter};
 
 use crate::error::Error;
+use crate::lame::Lame;
 
 /// The dither seeds of the left (or mono) and right channels: fixed, so an export is
 /// reproducible, and different, so the channels' noise is uncorrelated.
@@ -41,6 +43,45 @@ pub enum ExportFormat {
         /// Bit rate in kbit/s.
         bitrate_kbps: u32,
     },
+    /// MP3 through a host-installed `lame`, dithered to 16 bits first (ADR-0129).
+    Mp3 {
+        /// Constant bit rate.
+        bitrate: Mp3Bitrate,
+    },
+}
+
+/// The constant bit rates MP3 export offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mp3Bitrate {
+    /// 128 kbit/s.
+    Kbps128,
+    /// 256 kbit/s.
+    Kbps256,
+    /// 320 kbit/s.
+    Kbps320,
+}
+
+impl Mp3Bitrate {
+    /// Every bit rate, lowest first.
+    pub const ALL: [Mp3Bitrate; 3] = [
+        Mp3Bitrate::Kbps128,
+        Mp3Bitrate::Kbps256,
+        Mp3Bitrate::Kbps320,
+    ];
+
+    /// Kilobits per second.
+    pub const fn kbps(self) -> u32 {
+        match self {
+            Mp3Bitrate::Kbps128 => 128,
+            Mp3Bitrate::Kbps256 => 256,
+            Mp3Bitrate::Kbps320 => 320,
+        }
+    }
+
+    /// The bit rate of `kbps` kilobits per second, if it is one of [`Mp3Bitrate::ALL`].
+    pub fn from_kbps(kbps: u32) -> Option<Mp3Bitrate> {
+        Mp3Bitrate::ALL.into_iter().find(|b| b.kbps() == kbps)
+    }
 }
 
 /// The exported channels.
@@ -74,11 +115,13 @@ enum Sink {
     Codec(Box<dyn Encoder>),
 }
 
-/// Exports `render` to `path` as `format` with `channels`, at the project's `sample_rate`.
+/// Exports `render` to `path` as `format` with `channels`, at the project's `sample_rate`. MP3
+/// needs `lame`, the host's LAME found at startup.
 ///
 /// # Errors
 ///
-/// [`Error::Render`], [`Error::Wav`], [`Error::Codec`], [`Error::Io`].
+/// [`Error::Render`], [`Error::Wav`], [`Error::Codec`], [`Error::Io`], or
+/// [`Error::Mp3Unavailable`] for MP3 without `lame`.
 pub fn export(
     render: OfflineRender<'_>,
     format: ExportFormat,
@@ -86,6 +129,7 @@ pub fn export(
     sample_rate: u32,
     path: &Path,
     codecs: &dyn Codecs,
+    lame: Option<&Lame>,
 ) -> Result<(), Error> {
     let count = match channels {
         ExportChannels::Stereo => 2,
@@ -100,9 +144,9 @@ pub fn export(
         source,
     };
     let depth = match format {
-        ExportFormat::Wav(WavDepth::Int16) | ExportFormat::Flac(FlacDepth::Int16) => {
-            Some(Depth::Int16)
-        }
+        ExportFormat::Wav(WavDepth::Int16)
+        | ExportFormat::Flac(FlacDepth::Int16)
+        | ExportFormat::Mp3 { .. } => Some(Depth::Int16),
         ExportFormat::Wav(WavDepth::Int24) | ExportFormat::Flac(FlacDepth::Int24) => {
             Some(Depth::Int24)
         }
@@ -149,6 +193,13 @@ pub fn export(
                 )
                 .map_err(codec_error)?,
         ),
+        ExportFormat::Mp3 { bitrate } => {
+            let lame = lame.ok_or(Error::Mp3Unavailable)?;
+            Sink::Codec(Box::new(
+                lame.encoder(path, bitrate.kbps(), sample_rate, count as u16)
+                    .map_err(codec_error)?,
+            ))
+        }
     };
     let mut ditherers: Vec<Ditherer> = depth
         .map(|d| DITHER_SEEDS.iter().map(|&s| Ditherer::new(d, s)).collect())

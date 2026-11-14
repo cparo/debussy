@@ -9,8 +9,8 @@ use std::sync::Arc;
 use audio_buffers::Layout;
 use audio_engine::{ChannelClip, ClipAudio, RenderFeed, TrackFeed, TrackFeeds, TrackRenderer};
 use import_export::{
-    Error as IoError, ExportChannels, ExportFormat, ImportFormat, OfflineRender, WavDepth, export,
-    import,
+    Error as IoError, ExportChannels, ExportFormat, ImportFormat, Lame, Mp3Bitrate, OfflineRender,
+    WavDepth, export, import,
 };
 use platform_interfaces::test_doubles::{FakeCodecs, FakeFile};
 use platform_interfaces::{CodecFormat, FlacDepth, SourceInfo};
@@ -234,6 +234,17 @@ fn export_project(
     path: &Path,
     codecs: &FakeCodecs,
 ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
+    export_project_with(format, channels, path, codecs, None)
+}
+
+/// As [`export_project`], with `lame` for MP3.
+fn export_project_with(
+    format: ExportFormat,
+    channels: ExportChannels,
+    path: &Path,
+    codecs: &FakeCodecs,
+    lame: Option<&Lame>,
+) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
     let frames = 6000;
     let left = sine(frames, 48_000, 500.0, 0.0);
     let right = sine(frames, 48_000, 700.0, 0.5);
@@ -278,6 +289,7 @@ fn export_project(
         48_000,
         path,
         codecs,
+        lame,
     )?;
     Ok((left, right))
 }
@@ -412,4 +424,72 @@ fn test_export_to_a_missing_directory_fails_cleanly() -> Result<(), Box<dyn Erro
     );
     assert!(result.is_err());
     Ok(())
+}
+
+#[test]
+fn test_export_mp3_without_lame_asks_for_it() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("export-mp3-missing")?;
+    let path = dir.join("mix.mp3");
+    let result = export_project(
+        ExportFormat::Mp3 {
+            bitrate: Mp3Bitrate::Kbps320,
+        },
+        ExportChannels::Stereo,
+        &path,
+        &FakeCodecs::new(),
+    );
+    let error = result.err().ok_or("exported without lame")?;
+    assert!(error.to_string().contains("brew install lame"), "{error}");
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_export_mp3_sends_lame_dithered_16_bit_samples() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("export-mp3")?;
+    // A stand-in that answers the probe and otherwise passes its input through.
+    let script = dir.join("lame");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo LAME; else exec cat; fi\n",
+    )?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+    let lame = Lame::probe(&[script]).ok_or("the stand-in was not found")?;
+    let path = dir.join("mix.mp3");
+    let (left, right) = export_project_with(
+        ExportFormat::Mp3 {
+            bitrate: Mp3Bitrate::Kbps256,
+        },
+        ExportChannels::Stereo,
+        &path,
+        &FakeCodecs::new(),
+        Some(&lame),
+    )?;
+    let bytes = std::fs::read(&path)?;
+    assert_eq!(bytes.len(), left.len() * 2 * 2);
+    let samples: Vec<f32> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&b| f32::from(i16::from_le_bytes(b)) / 32_768.0)
+        .collect();
+    let lsb = 2.0f32.powi(-15);
+    for (&[a, b], (l, r)) in samples
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(left.iter().zip(&right))
+    {
+        assert!((a - l).abs() <= 1.5 * lsb && (b - r).abs() <= 1.5 * lsb);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_mp3_bitrate_from_kbps_offers_only_three() {
+    assert_eq!(Mp3Bitrate::from_kbps(320), Some(Mp3Bitrate::Kbps320));
+    assert_eq!(Mp3Bitrate::from_kbps(128).map(Mp3Bitrate::kbps), Some(128));
+    assert_eq!(Mp3Bitrate::from_kbps(192), None);
 }

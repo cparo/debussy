@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
 use audio_engine::Engine;
@@ -19,6 +19,7 @@ use project_model::{
 use crate::click::Click;
 use crate::curve_edit::{self, Side};
 use crate::curve_lane::Grab;
+use crate::export_dialog::{ExportDialog, ExportSettings, Key};
 use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
@@ -326,8 +327,14 @@ pub enum Message {
     NodeText(NodeId, String),
     /// Record the typed field as one step.
     CommitNodeText,
-    /// Export the mix, through a file dialog; the mono mix if `true`.
-    Export(bool),
+    /// Open the Export dialog, to choose the format and its settings.
+    Export,
+    /// Change the Export dialog's settings to these.
+    ExportSettings(ExportSettings),
+    /// Close the Export dialog, ask where through a save dialog, and export there.
+    ConfirmExport,
+    /// Close the Export dialog without exporting.
+    CancelExport,
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
@@ -421,6 +428,10 @@ pub struct App {
     pub(crate) click: Click,
     /// Every mixer's and built-in effect's parameters, read once at launch.
     catalog: ParameterCatalog,
+    /// The open Export dialog.
+    pub(crate) export_dialog: Option<ExportDialog>,
+    /// The settings the Export dialog opens on: the last chosen.
+    export_settings: ExportSettings,
 }
 
 /// How far the view is zoomed (`docs/architecture/user-interface.md` "Transport and seeking").
@@ -443,6 +454,7 @@ impl App {
         mut services: Box<dyn Services>,
     ) -> App {
         let preferences = services.click_preferences();
+        let export_settings = services.export_settings();
         engine.set_click_level(preferences.level_db);
         let mut app = App {
             session,
@@ -489,6 +501,8 @@ impl App {
             meters: BTreeMap::new(),
             click: Click::new(preferences),
             catalog: ParameterCatalog::new(),
+            export_dialog: None,
+            export_settings,
         };
         app.saved_revision = app.session.revision();
         app.refresh_devices();
@@ -770,8 +784,25 @@ impl App {
         }
     }
 
+    /// Renders the project to `path` with `settings`, and reports the result on the status
+    /// line.
+    fn export(&mut self, path: &Path, settings: &ExportSettings) {
+        self.status = Some(
+            match self.services.export(self.session.state(), path, settings) {
+                Ok(name) => format!("Exported {name}"),
+                Err(message) => message,
+            },
+        );
+    }
+
     /// Handles `message`, without saving.
     fn handle(&mut self, message: Message) {
+        // The MP3 bit rate dialog takes the keyboard while it is open.
+        let message = match self.export_dialog.as_mut().map(|d| d.key(&message)) {
+            Some(Key::Taken) => return,
+            Some(Key::Press(pressed)) => pressed,
+            Some(Key::Ignored) | None => message,
+        };
         // A frame tick, a scroll or typing leaves the status line and the open menu alone;
         // anything else replaces the status and closes the menu, except the click dialog's own
         // controls, which leave it open.
@@ -1128,11 +1159,24 @@ impl App {
                     self.commit_node_text(node, &text);
                 }
             }
-            Message::Export(mono) => match self.services.export(self.session.state(), mono) {
-                Ok(Some(name)) => self.status = Some(format!("Exported {name}")),
-                Ok(None) => {}
-                Err(message) => self.status = Some(message),
-            },
+            Message::Export => {
+                let mp3 = self.services.mp3_available();
+                self.export_dialog = Some(ExportDialog::new(self.export_settings, mp3));
+            }
+            Message::ExportSettings(settings) => {
+                if let Some(dialog) = &mut self.export_dialog {
+                    dialog.set(settings);
+                }
+            }
+            Message::ConfirmExport => {
+                if let Some(dialog) = self.export_dialog.take() {
+                    self.export_settings = dialog.settings;
+                    if let Some(path) = self.services.pick_export_path(&dialog.settings) {
+                        self.export(&path, &dialog.settings);
+                    }
+                }
+            }
+            Message::CancelExport => self.export_dialog = None,
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {

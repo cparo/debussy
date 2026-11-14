@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::Error;
 
-/// A compressed format the platform may handle (ADR-0024). MP3 is decode-only.
+/// A compressed format the platform may handle (ADR-0024). MP3 is decode-only here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodecFormat {
     /// MPEG-1/2 Layer III; decode only.
@@ -94,7 +94,8 @@ pub trait Encoder: Send {
 pub trait Codecs: Send + Sync {
     /// Whether this platform can decode `format`.
     fn can_decode(&self, format: CodecFormat) -> bool;
-    /// Whether this platform can encode `format`. MP3 is never encoded (ADR-0024).
+    /// Whether this platform can encode `format`. MP3 is never encoded here (ADR-0024); MP3
+    /// export runs a host-installed `lame` instead (ADR-0129).
     fn can_encode(&self, format: CodecFormat) -> bool;
     /// Opens `path` for decoding, detecting its format.
     ///

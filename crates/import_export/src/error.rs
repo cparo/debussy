@@ -47,6 +47,9 @@ pub enum Error {
         /// What is wrong.
         reason: String,
     },
+    /// MP3 export was asked for, but no LAME was found at startup (ADR-0129).
+    #[error("MP3 export needs LAME: `brew install lame`")]
+    Mp3Unavailable,
     /// The offline render failed.
     #[error(transparent)]
     Render(#[from] audio_engine::Error),

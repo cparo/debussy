@@ -491,8 +491,22 @@ mod tests {
         fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
             Ok(Vec::new())
         }
-        fn export(&mut self, _: &State, _: bool) -> Result<Option<String>, String> {
-            Ok(None)
+        fn export_settings(&mut self) -> crate::ExportSettings {
+            crate::ExportSettings::default()
+        }
+        fn mp3_available(&mut self) -> bool {
+            false
+        }
+        fn pick_export_path(&mut self, _: &crate::ExportSettings) -> Option<PathBuf> {
+            None
+        }
+        fn export(
+            &mut self,
+            _: &State,
+            _: &Path,
+            _: &crate::ExportSettings,
+        ) -> Result<String, String> {
+            Err("no export here".into())
         }
         fn devices(&mut self) -> (Vec<DeviceChoice>, Option<String>) {
             (Vec::new(), None)
