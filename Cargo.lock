@@ -553,6 +553,7 @@ dependencies = [
  "audio_engine",
  "engine_bridge",
  "iced",
+ "modulation",
  "project_model",
  "signal_graph",
 ]

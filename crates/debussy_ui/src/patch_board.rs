@@ -1,6 +1,6 @@
 //! The patch board: the routing drawn as nodes and mono wires beside the tracks, with the
-//! track lanes' ports in the gutter between them (`docs/architecture/user-interface.md`
-//! "Patch board").
+//! track lanes' and curve lanes' ports in the gutter between them
+//! (`docs/architecture/user-interface.md` "Patch board").
 //!
 //! [`layout`] places everything from the model, so it is tested without a window; [`BoardView`]
 //! and [`GutterView`] draw it.
@@ -10,10 +10,10 @@ use std::collections::BTreeMap;
 use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
-use project_model::{ConnectionId, Endpoint, NodeId, NodeKind, Side, State};
+use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State};
 
 use crate::app::Message;
-use crate::theme::{mix, tokens, tone_of};
+use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 
 /// The distance between two port circles on a node, in logical pixels.
 pub const PORT_SPACING: f32 = 48.0;
@@ -181,9 +181,38 @@ pub fn occupied(state: &State, pin: Pin) -> bool {
 }
 
 /// Whether a wire may run from output `from` to input `to`: an output to a free input of
-/// another endpoint.
+/// another endpoint carrying the same kind of signal, audio to audio or control to control.
 pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
-    from.output && !to.output && from.endpoint != to.endpoint && !occupied(state, to)
+    from.output
+        && !to.output
+        && from.endpoint != to.endpoint
+        && from.endpoint.is_control() == to.endpoint.is_control()
+        && !occupied(state, to)
+}
+
+/// The colour of a signal from `endpoint`: lavender for control, the tone's audio colour
+/// otherwise.
+fn signal_colour(t: &Tokens, endpoint: Endpoint) -> iced::Color {
+    if endpoint.is_control() {
+        CONTROL
+    } else {
+        t.audio
+    }
+}
+
+/// Node `node`'s curve port pins, one per assigned parameter, by port number.
+fn curve_port_pins(node: &project_model::Node) -> Vec<Pin> {
+    let mut numbers: Vec<u32> = node.curve_ports.values().copied().collect();
+    numbers.sort_unstable();
+    numbers
+        .into_iter()
+        .map(|n| Pin {
+            endpoint: Endpoint::CurvePort(node.id, n),
+            output: false,
+            port: 0,
+            side: None,
+        })
+        .collect()
 }
 
 /// The pins of `endpoint`'s ports in order: each port's sides, top to bottom.
@@ -232,12 +261,30 @@ fn depths(state: &State) -> BTreeMap<NodeId, usize> {
     depth
 }
 
-/// Lays out `state`'s routing. `lanes` gives each track's lane centres, top to bottom, in the
-/// shared vertical coordinates; the board is at least `min` in size. Nodes are placed in
-/// columns by graph depth, each column ordered by where its inputs come from; the L and R
-/// outputs sit just inside the right edge, level with what feeds them.
-pub fn layout(state: &State, lanes: &[(project_model::TrackId, Vec<f32>)], min: Size) -> Board {
+/// Lays out `state`'s routing. `lanes` gives each track's lane centres, top to bottom, and
+/// `curves` each curve lane's centre, in the shared vertical coordinates; the board is at least
+/// `min` in size. Nodes are placed in columns by graph depth, each column ordered by where its
+/// inputs come from; a node's curve ports follow its audio inputs. The L and R outputs sit just
+/// inside the right edge, level with what feeds them.
+pub fn layout(
+    state: &State,
+    lanes: &[(project_model::TrackId, Vec<f32>)],
+    curves: &[(CurveId, f32)],
+    min: Size,
+) -> Board {
     let mut pins = BTreeMap::new();
+    for &(curve, y) in curves {
+        if state.curve(curve).is_none() {
+            continue;
+        }
+        let pin = Pin {
+            endpoint: Endpoint::Curve(curve),
+            output: true,
+            port: 0,
+            side: None,
+        };
+        pins.insert(pin, Point::new(0.0, y));
+    }
     for (track, centres) in lanes {
         let Some(t) = state.track(*track) else {
             continue;
@@ -281,7 +328,8 @@ pub fn layout(state: &State, lanes: &[(project_model::TrackId, Vec<f32>)], min: 
         let mut next_free = MARGIN - PORT_SPACING / 2.0;
         for (key, node) in placed {
             let (inputs, outputs) = ports(&node.kind);
-            let inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
+            let mut inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
+            inputs.extend(curve_port_pins(node));
             let outputs = pins_of(Endpoint::Node(node.id), true, &outputs);
             let height = node_height(inputs.len().max(outputs.len()));
             // A node the user placed stays there; the rest stack down their column.
@@ -555,15 +603,22 @@ impl Program<Message> for BoardView {
     ) -> Vec<Geometry> {
         let t = tokens(tone_of(theme));
         let selected = mix(t.audio, t.text, 0.6);
+        // A selected wire's tint, mixed from its signal's colour.
+        let tint = |endpoint: Endpoint| mix(signal_colour(t, endpoint), t.text, 0.6);
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
         for w in &board.wires {
             if let (Some(a), Some(b)) = (board.pins.get(&w.from), board.pins.get(&w.to)) {
                 let chosen = self.selection == Some(Selection::Wire(w.connection));
+                let colour = if chosen {
+                    tint(w.from.endpoint)
+                } else {
+                    signal_colour(t, w.from.endpoint)
+                };
                 let stroke = Stroke::default()
                     .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
-                    .with_color(if chosen { selected } else { t.audio });
+                    .with_color(colour);
                 frame.stroke(&curve(*a, *b), stroke);
             }
         }
@@ -572,7 +627,7 @@ impl Program<Message> for BoardView {
         {
             let stroke = Stroke::default()
                 .with_width(WIRE_WIDTH)
-                .with_color(selected);
+                .with_color(tint(from.endpoint));
             frame.stroke(&curve(*a, to), stroke);
         }
         for node in &board.nodes {
@@ -596,7 +651,7 @@ impl Program<Message> for BoardView {
         for (p, at) in &board.pins {
             match p.endpoint {
                 // Drawn in the gutter; the wire starts at the board's edge.
-                Endpoint::Track(_) => {}
+                Endpoint::Track(_) | Endpoint::Curve(_) => {}
                 Endpoint::Output => {
                     pin(&mut frame, *at, OUTPUT_RADIUS, t.lane, t.audio);
                     frame.fill_text(Text {
@@ -615,8 +670,18 @@ impl Program<Message> for BoardView {
                     });
                 }
                 Endpoint::Node(_) => pin(&mut frame, *at, PIN_RADIUS, t.lane, t.audio),
-                // The board lays out no curve pins yet (issue #63).
-                Endpoint::Curve(_) | Endpoint::CurvePort(..) => {}
+                Endpoint::CurvePort(_, number) => {
+                    pin(&mut frame, *at, PIN_RADIUS, t.lane, CONTROL);
+                    frame.fill_text(Text {
+                        content: number.to_string(),
+                        position: *at,
+                        color: t.text,
+                        size: 11.0.into(),
+                        align_x: iced::alignment::Horizontal::Center.into(),
+                        align_y: iced::alignment::Vertical::Center,
+                        ..Text::default()
+                    });
+                }
             }
         }
         vec![frame.into_geometry()]
@@ -646,7 +711,8 @@ impl Program<Message> for BoardView {
 }
 
 /// Draws the port gutter on the board's colour: a pin on each lane near the divider, with a stub
-/// to the board. Pressing a pin starts a wire from it.
+/// to the board, in the audio colour for a track and lavender for a curve. Pressing a pin starts
+/// a wire from it.
 pub struct GutterView(pub Vec<(Pin, f32)>);
 
 /// The x of a gutter pin's centre: its outer edge, stroke included, sits [`GUTTER_PIN_INSET`] from
@@ -687,13 +753,14 @@ impl Program<Message> for GutterView {
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let x = gutter_pin_x();
-        for &(_, y) in &self.0 {
+        for &(p, y) in &self.0 {
+            let colour = signal_colour(t, p.endpoint);
             frame.fill_rectangle(
                 Point::new(x, y - WIRE_WIDTH / 2.0),
                 Size::new(bounds.width - x, WIRE_WIDTH),
-                t.audio,
+                colour,
             );
-            pin(&mut frame, Point::new(x, y), PIN_RADIUS, t.lane, t.audio);
+            pin(&mut frame, Point::new(x, y), PIN_RADIUS, t.lane, colour);
         }
         vec![frame.into_geometry()]
     }
@@ -798,7 +865,7 @@ mod tests {
         let vocal = session.add_track("Vocal", Layout::Mono)?;
         let keys = session.add_track("Keys", Layout::Stereo)?;
         let lanes = vec![(vocal, vec![90.0]), (keys, vec![244.0, 372.0])];
-        let board = layout(session.state(), &lanes, Size::new(500.0, 400.0));
+        let board = layout(session.state(), &lanes, &[], Size::new(500.0, 400.0));
         assert_eq!(board.nodes.len(), 1);
         let mixer = &board.nodes[0];
         // Three mono inputs: three slots, plus the title.
@@ -838,7 +905,7 @@ mod tests {
         session.connect(Endpoint::Node(bus), 0, Endpoint::Node(delay), 0)?;
         session.connect(Endpoint::Node(delay), 0, Endpoint::Node(bus), 0)?;
         session.connect(Endpoint::Node(delay), 0, Endpoint::Node(mixer), 0)?;
-        let board = layout(session.state(), &[], Size::new(100.0, 100.0));
+        let board = layout(session.state(), &[], &[], Size::new(100.0, 100.0));
         let x = |id| {
             board
                 .nodes
@@ -864,7 +931,7 @@ mod tests {
         for _ in 0..3 {
             session.add_node(NodeKind::Bus(Layout::Stereo))?;
         }
-        let board = layout(session.state(), &[], Size::new(100.0, 100.0));
+        let board = layout(session.state(), &[], &[], Size::new(100.0, 100.0));
         for pair in board.nodes.windows(2) {
             assert!(pair[1].rect.y >= pair[0].rect.y + pair[0].rect.height);
         }
@@ -878,6 +945,7 @@ mod tests {
         let board = layout(
             session.state(),
             &[(vocal, vec![90.0])],
+            &[],
             Size::new(600.0, 400.0),
         );
         let mixer = &board.nodes[0];
@@ -937,12 +1005,71 @@ mod tests {
     }
 
     #[test]
+    fn test_layout_adds_curve_pins_and_ports_and_grows_nodes() -> Result {
+        let mut session = Session::new_project();
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        let curve = session.add_curve("Curve 1", modulation::Curve::default())?;
+        let before = layout(
+            session.state(),
+            &[],
+            &[(curve, 50.0)],
+            Size::new(100.0, 100.0),
+        );
+        let gutter = Pin {
+            endpoint: Endpoint::Curve(curve),
+            output: true,
+            port: 0,
+            side: None,
+        };
+        assert_eq!(before.pins.get(&gutter), Some(&Point::new(0.0, 50.0)));
+        let height = before.nodes[0].rect.height;
+        session.assign_curve_port(mixer, "channel 1 gain")?;
+        session.assign_curve_port(mixer, "channel 1 pan")?;
+        session.connect_curve(curve, mixer, 2)?;
+        let after = layout(
+            session.state(),
+            &[],
+            &[(curve, 50.0)],
+            Size::new(100.0, 100.0),
+        );
+        // One mono input and two curve ports now outnumber the stereo output's two pins.
+        assert!(after.nodes[0].rect.height > height);
+        assert_eq!(after.nodes[0].rect.height, node_height(3));
+        let port = |n| Pin {
+            endpoint: Endpoint::CurvePort(mixer, n),
+            output: false,
+            port: 0,
+            side: None,
+        };
+        // Below the audio inputs, in number order.
+        let (one, two) = (after.pins[&port(1)], after.pins[&port(2)]);
+        assert!(two.y > one.y);
+        assert!(
+            after
+                .wires
+                .iter()
+                .any(|w| w.from == gutter && w.to == port(2))
+        );
+        // A curve wires only to a curve port.
+        let input = Pin {
+            endpoint: Endpoint::Node(mixer),
+            output: false,
+            port: 1,
+            side: None,
+        };
+        session.add_mixer_channels(mixer, 1)?;
+        assert!(!can_connect(session.state(), gutter, input));
+        assert!(can_connect(session.state(), gutter, port(1)));
+        Ok(())
+    }
+
+    #[test]
     fn test_placed_nodes_and_outputs_stay_where_put() -> Result {
         let mut session = Session::new_project();
         let mixer = session.state().project_mixer().ok_or("no mixer")?;
         session.move_node(mixer, Some(project_model::Position { x: 300.0, y: 500.0 }))?;
         session.move_output(Some(40.0))?;
-        let board = layout(session.state(), &[], Size::new(100.0, 100.0));
+        let board = layout(session.state(), &[], &[], Size::new(100.0, 100.0));
         assert_eq!(board.nodes[0].rect.position(), Point::new(300.0, 500.0));
         let left = Pin {
             endpoint: Endpoint::Output,

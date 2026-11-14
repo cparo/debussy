@@ -2,7 +2,7 @@
 //! [`Theme`] for each, and the widget styles built from them (`docs/architecture/
 //! user-interface.md` "Layout").
 
-use iced::widget::{button, container, svg};
+use iced::widget::{button, container, slider, svg};
 use iced::{Background, Border, Color, Theme, border};
 
 /// The playhead: the lane cursor and the position bar.
@@ -30,6 +30,10 @@ pub const LABEL: Color = Color::from_rgb8(0x9C, 0x9C, 0x9C);
 
 /// Full scale (0 dBFS) on a display's axes, the same in both tones: a thin red line.
 pub const FULL_SCALE: Color = Color::from_rgb8(0xD0, 0x30, 0x30);
+
+/// Control signals, the same in both tones: automation curve lanes, curve pins, ports and
+/// wires, and a lit curve port button (`docs/architecture/user-interface.md` "Layout").
+pub const CONTROL: Color = Color::from_rgb8(0xB3, 0xA6, 0xE8);
 
 /// Light or dark chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -249,6 +253,8 @@ pub enum Accent {
     Audio,
     /// [`RECORD`] red with black ink: the record button and the arm toggle.
     Record,
+    /// [`CONTROL`] lavender with black ink: a curve port button with a port assigned.
+    Control,
 }
 
 /// A toolbar button's face and ink colours, before its status changes them.
@@ -256,6 +262,7 @@ fn tool_colours(t: &Tokens, selected: bool, accent: Accent) -> (Color, Color) {
     match (selected, accent) {
         (true, Accent::Audio) => (t.audio, t.audio_text),
         (true, Accent::Record) => (RECORD, Color::BLACK),
+        (true, Accent::Control) => (CONTROL, Color::BLACK),
         (false, _) => (t.face, t.face_text),
     }
 }
@@ -274,6 +281,31 @@ pub fn tool_icon(selected: bool, enabled: bool) -> impl Fn(&Theme, svg::Status) 
             color: Some(if enabled { ink } else { mix(face, ink, 0.4) }),
         }
     }
+}
+
+/// A curve port button: a lavender face when `lit` (a port is assigned), otherwise as an unlit
+/// [`tool`] button.
+pub fn control_button(lit: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| styled(theme, status, lit, Place::Alone, true, Accent::Control)
+}
+
+/// A slider following its curve: `iced`'s sliders have no disabled state, so a driven one is
+/// drawn greyed out instead, its rail and handle faded towards the chrome.
+pub fn slider_driven(theme: &Theme, _status: slider::Status) -> slider::Style {
+    let t = tokens(tone_of(theme));
+    let mut style = slider::default(theme, slider::Status::Active);
+    let grey = |c: Color| mix(c, t.chrome, 0.6);
+    let fade = |b: Background| match b {
+        Background::Color(c) => Background::Color(grey(c)),
+        other => other,
+    };
+    style.rail.backgrounds = (
+        fade(style.rail.backgrounds.0),
+        fade(style.rail.backgrounds.1),
+    );
+    style.handle.background = fade(style.handle.background);
+    style.handle.border_color = grey(style.handle.border_color);
+    style
 }
 
 /// The record button's dot: [`RECORD`] red on the button's face, greyed towards the face when
@@ -585,6 +617,20 @@ mod tests {
             );
         }
         assert_eq!(RECORD, Color::from_rgb8(0xBB, 0x00, 0x00));
+    }
+
+    #[test]
+    fn test_control_button_is_lavender_when_lit_and_tool_like_when_not() {
+        for tone in [Tone::Light, Tone::Dark] {
+            let theme = theme(tone);
+            let lit = control_button(true)(&theme, button::Status::Active);
+            assert_eq!(lit.background, Some(Background::Color(CONTROL)));
+            let unlit = control_button(false)(&theme, button::Status::Active);
+            assert_eq!(
+                unlit.background,
+                tool(false, Place::Alone)(&theme, button::Status::Active).background
+            );
+        }
     }
 
     #[test]

@@ -36,6 +36,17 @@ value to that grid and moves it one step, a linear slider drags in that step, an
 text has the step's decimal places
 ([ADR-0110](../adrs/0110-a-parameter-may-declare-its-step-the-mixer-strip.md)).
 
+Beside each automatable parameter's control (not stopped-only, not stepped; see
+`docs/architecture/automation.md` "Curves") is a 20-pixel curve port button: the
+curve icon while the parameter has no port, else the port's number on a lavender face. A press,
+or Space or Enter while it has the keyboard focus, gives the parameter the lowest free port or
+takes its port and wire away, as one step, also while playing; arrows do nothing on it. A
+parameter that is not automatable has a space as wide in its place. In Tab order each port button
+comes just before its control. While a curve is wired to its port, the parameter is shown at the
+curve's value at the playhead, mapped into its range: its slider is greyed out and follows the
+curve, and drags and arrow keys leave it unchanged
+([ADR-0126](../adrs/0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md)).
+
 ## Mixer dialogs
 
 **Mixer dialogs** have a "Channels" field with up and down buttons, clamped on commit from one
@@ -46,7 +57,9 @@ pan slider between L (top) and R (bottom) labels. Each slider has a tic mark und
 0 dB or centre, and shows its value only as a hover tip. Soloing a channel unsolos the mixer's
 others in the same step. A keyboard focus, drawn as an accent ring, goes to a control when it is
 pressed, leaves on a press on the dialog's background, and moves with Tab and Shift-Tab from the
-field down each strip's mute, solo, gain and pan, strip by strip, then "Delete", wrapping. The up and down
+field down each strip's mute, solo, gain and pan, strip by strip, then "Delete", wrapping. The gain
+and pan each have a curve port button above their top label, as in any node dialog ("Node
+dialogs"), before them in Tab order. The up and down
 arrows step the focused field or slider (1 channel, 1 dB, 1 % pan with up to the left), each
 press one step, never the hovered slider; Space or Enter presses a focused button
 ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).

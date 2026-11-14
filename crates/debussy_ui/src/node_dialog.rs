@@ -18,6 +18,9 @@ pub enum DialogFocus {
     Mixer(MixerFocus),
     /// An effect dialog's control, by index into its kind's parameters.
     Parameter(usize),
+    /// An effect dialog's curve port button, by index into its kind's parameters; before its
+    /// control in Tab order.
+    Port(usize),
     /// The dialog's "Delete" button, last in Tab order.
     Delete,
 }
@@ -68,6 +71,9 @@ pub enum DialogMessage {
         /// The new value.
         value: f32,
     },
+    /// A parameter's curve port button: give the open node's parameter of this name the lowest
+    /// free curve port, or take its port away, as one undo step.
+    TogglePort(String),
     /// A mixer channel's mute or solo button: set the channel to `mode`, or back to playing if it
     /// is already. Soloing a channel unsolos the mixer's others in the same undo step.
     ToggleMode {
@@ -123,6 +129,13 @@ pub(crate) enum Command {
     CommitNodeText,
     /// Delete this node: its delete confirmation's "Delete" was pressed.
     DeleteNode(NodeId),
+    /// Assign node `node`'s parameter `name` a curve port, or take its port away, as one step.
+    TogglePort {
+        /// The mixer or effect node.
+        node: NodeId,
+        /// The parameter's name.
+        name: String,
+    },
 }
 
 /// The delete confirmation's button with the keyboard focus: what Space or Enter presses.
@@ -144,6 +157,8 @@ pub(crate) struct Context<'a> {
     pub playing: bool,
     /// The selected node: the one whose dialog is open, if any.
     pub open: Option<NodeId>,
+    /// The playhead's timeline frame, where a wired curve is read.
+    pub playhead: u64,
 }
 
 /// The open node dialog's keyboard focus, the slider being dragged, and its delete
@@ -171,6 +186,10 @@ impl NodeDialog {
                 if let Some(refusal) = self.refusal(cx, node, &name) {
                     return vec![refusal];
                 }
+                // A slider a curve drives follows the curve and takes no drags.
+                if self.is_driven(cx, node, &name) {
+                    return Vec::new();
+                }
                 self.live = Some(Live {
                     node,
                     name: name.clone(),
@@ -188,6 +207,10 @@ impl NodeDialog {
                 self.set_parameter(cx, node, name, value)
             }
             DialogMessage::ApplyPreset { node, preset } => self.apply_preset(cx, node, preset),
+            DialogMessage::TogglePort(name) => match open_node(cx) {
+                Some(node) => vec![Command::TogglePort { node, name }],
+                None => Vec::new(),
+            },
             DialogMessage::ToggleMode {
                 node,
                 channel,
@@ -204,7 +227,9 @@ impl NodeDialog {
                 let open = match focus {
                     None => true,
                     Some(DialogFocus::Mixer(_)) => mixer(cx).is_some(),
-                    Some(DialogFocus::Parameter(_)) => self.effect(cx).is_some(),
+                    Some(DialogFocus::Parameter(_) | DialogFocus::Port(_)) => {
+                        self.effect(cx).is_some()
+                    }
                     Some(DialogFocus::Delete) => open_node(cx).is_some(),
                 };
                 if open {
@@ -243,12 +268,25 @@ impl NodeDialog {
                     }
                     return Vec::new();
                 }
+                if let Some(DialogFocus::Port(index)) = self.focus {
+                    let name = self
+                        .effect(cx)
+                        .and_then(|p| Some(p.infos().get(index)?.name.clone()));
+                    return match (open_node(cx), name) {
+                        (Some(node), Some(name)) => vec![Command::TogglePort { node, name }],
+                        _ => Vec::new(),
+                    };
+                }
                 if self.effect(cx).is_some() {
                     return self.press_parameter_focus(cx);
                 }
                 let Some((node, _)) = mixer(cx) else {
                     return Vec::new();
                 };
+                if let Some((control, ch)) = self.mixer_focus().and_then(MixerFocus::port) {
+                    let name = parameter_name(ch, control);
+                    return vec![Command::TogglePort { node, name }];
+                }
                 let (channel, mode) = match self.mixer_focus() {
                     Some(MixerFocus::Mute(ch)) => (ch, Mode::Mute),
                     Some(MixerFocus::Solo(ch)) => (ch, Mode::Solo),
@@ -358,8 +396,16 @@ impl NodeDialog {
                 .map(DialogFocus::Mixer)
                 .collect()
         } else if let Some(parameters) = self.effect(cx) {
-            let order = parameters.shown_order();
-            order.into_iter().map(DialogFocus::Parameter).collect()
+            // Each automatable control's port button comes just before it.
+            let infos = parameters.infos();
+            parameters
+                .shown_order()
+                .into_iter()
+                .flat_map(|i| {
+                    let port = infos[i].is_automatable().then_some(DialogFocus::Port(i));
+                    port.into_iter().chain([DialogFocus::Parameter(i)])
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -370,7 +416,12 @@ impl NodeDialog {
     /// Node `node`'s parameters as its dialog shows them, with the slider being dragged.
     fn parameters<'a>(&'a self, cx: &Context<'a>, node: NodeId) -> Option<NodeParameters<'a>> {
         cx.catalog
-            .view(cx.state, node, self.live.as_ref(), cx.playing)
+            .view(cx.state, node, self.live.as_ref(), cx.playing, cx.playhead)
+    }
+
+    /// Whether a curve wired to its port drives node `node`'s parameter `name`.
+    fn is_driven(&self, cx: &Context<'_>, node: NodeId, name: &str) -> bool {
+        self.parameters(cx, node).is_some_and(|p| p.is_driven(name))
     }
 
     /// The open node's parameters, if it is a built-in effect this build knows.
@@ -386,7 +437,8 @@ impl NodeDialog {
             .then(|| Command::Status(format!("Pause or stop playback to change the {name}.")))
     }
 
-    /// Sets node `node`'s parameter `name` to `value` as one undo step, unless refused.
+    /// Sets node `node`'s parameter `name` to `value` as one undo step, unless refused; nothing
+    /// while a curve drives it.
     fn set_parameter(
         &self,
         cx: &Context<'_>,
@@ -394,6 +446,9 @@ impl NodeDialog {
         name: String,
         value: f32,
     ) -> Vec<Command> {
+        if self.is_driven(cx, node, &name) {
+            return Vec::new();
+        }
         let command = self
             .refusal(cx, node, &name)
             .unwrap_or_else(|| set_parameter(node, name, value));
@@ -609,6 +664,7 @@ mod tests {
                 state: self.session.state(),
                 playing: self.playing,
                 open: Some(self.node),
+                playhead: 0,
             };
             self.dialog.update(message, &cx)
         }
@@ -632,15 +688,24 @@ mod tests {
                     self.node,
                     self.dialog.live(),
                     self.playing,
+                    0,
                 )
                 .map_or(f32::NAN, |p| p.value(name))
+        }
+
+        /// The focus on parameter `name`'s curve port button.
+        fn port(&self, name: &str) -> Result<DialogFocus, Box<dyn std::error::Error>> {
+            match self.on(name)? {
+                DialogFocus::Parameter(index) => Ok(DialogFocus::Port(index)),
+                other => Err(format!("unexpected focus {other:?}").into()),
+            }
         }
 
         /// The focus on parameter `name`.
         fn on(&self, name: &str) -> Result<DialogFocus, Box<dyn std::error::Error>> {
             let view = self
                 .catalog
-                .view(self.session.state(), self.node, None, false)
+                .view(self.session.state(), self.node, None, false, 0)
                 .ok_or("no parameters")?;
             let index = view
                 .infos()
@@ -662,10 +727,18 @@ mod tests {
         assert_eq!(f.send(DialogMessage::FocusNext), []);
         assert_eq!(f.dialog.focus(), Some(f.on("high-pass enabled")?));
         assert_eq!(f.dialog.mixer_focus(), None);
-        for _ in 0..6 {
+        // Each automatable control's port button comes just before it; the toggles, the order
+        // and the band type have none.
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.focus(), Some(f.port("high-pass cutoff")?));
+        f.send(DialogMessage::FocusNext);
+        assert_eq!(f.dialog.focus(), Some(f.on("high-pass cutoff")?));
+        for _ in 0..7 {
             f.send(DialogMessage::FocusNext);
         }
         assert_eq!(f.dialog.focus(), Some(f.on("band 1 gain")?));
+        f.send(DialogMessage::FocusPrevious);
+        assert_eq!(f.dialog.focus(), Some(f.port("band 1 gain")?));
         f.send(DialogMessage::FocusPrevious);
         assert_eq!(f.dialog.focus(), Some(f.on("band 1 frequency")?));
         // "Delete" comes last; Shift-Tab from the first control wraps to it.
@@ -688,6 +761,7 @@ mod tests {
             state: f.session.state(),
             playing: false,
             open: None,
+            playhead: 0,
         };
         assert_eq!(f.dialog.update(DialogMessage::FocusNext, &cx), []);
         assert_eq!(f.dialog.focus(), None);
@@ -866,7 +940,9 @@ mod tests {
         let order = [
             MixerFocus::Mute(0),
             MixerFocus::Solo(0),
+            MixerFocus::GainPort(0),
             MixerFocus::Gain(0),
+            MixerFocus::PanPort(0),
             MixerFocus::Pan(0),
             MixerFocus::Mute(1),
         ];

@@ -14,6 +14,7 @@ audio_effects = { path = "../audio_effects" }
 audio_engine = { path = "../audio_engine" }
 engine_bridge = { path = "../engine_bridge" }
 iced = { version = "0.14.0", default-features = false, features = ["advanced", "wgpu", "tiny-skia", "canvas", "svg", "image-without-codecs", "thread-pool"] }
+modulation = { path = "../modulation" }
 project_model = { path = "../project_model" }
 signal_graph = { path = "../signal_graph" }
 

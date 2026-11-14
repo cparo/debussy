@@ -13,10 +13,12 @@ use audio_buffers::Layout;
 use audio_engine::Engine;
 use engine_bridge::Bridge;
 use project_model::{
-    Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
+    CurveId, Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session, Track, TrackId,
 };
 
 use crate::click::Click;
+use crate::curve_edit::{self, Side};
+use crate::curve_lane::Grab;
 use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
@@ -80,6 +82,55 @@ pub(crate) enum Moving {
     Node(NodeId, Position),
     /// The L/R outputs, L now at this height.
     Output(f32),
+}
+
+/// What is being renamed in the track pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renaming {
+    /// A track.
+    Track(TrackId),
+    /// An automation curve lane.
+    Curve(CurveId),
+}
+
+/// A drag of a curve point or handle not yet recorded.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CurveDrag {
+    /// The curve.
+    pub curve: CurveId,
+    /// What was grabbed.
+    pub grab: Grab,
+    /// Where the press was: a timeline frame and a value.
+    pub press: (f64, f32),
+    /// The lane's pixels per frame and per unit of value, for linked handles.
+    pub scale: (f64, f64),
+    /// The curve's points when the drag began.
+    pub origin: Vec<modulation::Point>,
+    /// The points as last dragged to a valid shape: shown, not yet recorded.
+    pub live: Vec<modulation::Point>,
+}
+
+/// A row of the track pane, top to bottom.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PaneRow {
+    /// A track: its header's top and each lane's centre.
+    Track {
+        /// The track.
+        id: TrackId,
+        /// The header's top, from the top of the pane's contents.
+        header: f32,
+        /// Each channel's lane centre.
+        lanes: Vec<f32>,
+    },
+    /// An automation curve: its header's top and its lane's centre.
+    Curve {
+        /// The curve.
+        id: CurveId,
+        /// The header's top.
+        header: f32,
+        /// The lane's centre.
+        lane: f32,
+    },
 }
 
 /// Something the user did, or a frame tick.
@@ -209,8 +260,36 @@ pub enum Message {
     AddTrack(Layout),
     /// Delete a track, its clips and its connections.
     DeleteTrack(TrackId),
-    /// Start renaming a track.
-    StartRename(TrackId),
+    /// Add an automation curve lane, "Curve N", holding one point, below the others.
+    AddCurve,
+    /// Delete an automation curve lane and its connections.
+    DeleteCurve(CurveId),
+    /// A press on curve lane `curve` at timeline frame `frame` and value `value`: grabs what it
+    /// `hit`, or adds a point.
+    CurvePress {
+        /// The curve.
+        curve: CurveId,
+        /// The timeline frame pressed.
+        frame: f64,
+        /// The value pressed, from 0 at the lane's bottom to 1 at its top.
+        value: f32,
+        /// The point or handle under the press, if any.
+        hit: Option<Grab>,
+        /// The lane's width in logical pixels.
+        width: f32,
+    },
+    /// The pointer, dragging from a curve press, is at timeline frame `frame` and value `value`;
+    /// `alt` (⌥ held) breaks a handle's link to its opposite.
+    CurveMove {
+        /// The timeline frame under the pointer.
+        frame: f64,
+        /// The value under the pointer, unclamped.
+        value: f32,
+        /// Whether ⌥ is held.
+        alt: bool,
+    },
+    /// Start renaming a track or curve lane.
+    StartRename(Renaming),
     /// The new name being typed.
     RenameText(String),
     /// Finish renaming: record the typed name as one step.
@@ -289,8 +368,12 @@ pub struct App {
     /// The window's physical pixels per logical pixel, which the lanes are drawn at.
     pub(crate) scale_factor: f32,
     pub(crate) menu: Option<Menu>,
-    /// The track being renamed, and the name typed so far.
-    pub(crate) renaming: Option<(TrackId, String)>,
+    /// The track or curve being renamed, and the name typed so far.
+    pub(crate) renaming: Option<(Renaming, String)>,
+    /// The selected curve point: its curve and index.
+    pub(crate) curve_point: Option<(CurveId, usize)>,
+    /// A curve point or handle being dragged.
+    pub(crate) curve_drag: Option<CurveDrag>,
     /// How far the tracks, gutter and board are scrolled down, in logical pixels.
     pub(crate) scrolled: f32,
     /// The track pane's share of the window's width.
@@ -379,6 +462,8 @@ impl App {
             scale_factor: 1.0,
             menu: None,
             renaming: None,
+            curve_point: None,
+            curve_drag: None,
             scrolled: 0.0,
             split: DEFAULT_SPLIT,
             selection: None,
@@ -512,18 +597,55 @@ impl App {
         &self.lanes
     }
 
+    /// The track pane's rows, top to bottom: each track, then each curve lane; and the height
+    /// of them all. Every position in the pane comes from here.
+    pub(crate) fn pane_rows(&self) -> (Vec<PaneRow>, f32) {
+        use crate::view::{HEADER_HEIGHT, LANE_HEIGHT};
+        let mut top = 0.0;
+        let mut rows = Vec::new();
+        for (id, lanes) in &self.lanes {
+            let first = top + HEADER_HEIGHT;
+            let centres = (0..lanes.len())
+                .map(|k| first + LANE_HEIGHT * (k as f32 + 0.5))
+                .collect();
+            rows.push(PaneRow::Track {
+                id: *id,
+                header: top,
+                lanes: centres,
+            });
+            top = first + LANE_HEIGHT * lanes.len() as f32;
+        }
+        for lane in &self.session.state().curves {
+            rows.push(PaneRow::Curve {
+                id: lane.id,
+                header: top,
+                lane: top + HEADER_HEIGHT + LANE_HEIGHT / 2.0,
+            });
+            top += HEADER_HEIGHT + LANE_HEIGHT;
+        }
+        (rows, top)
+    }
+
     /// Each track's lane centres, top to bottom, from the top of the track pane's contents.
     pub fn lane_centres(&self) -> Vec<(TrackId, Vec<f32>)> {
-        let mut top = 0.0;
-        self.lanes
-            .iter()
-            .map(|(id, lanes)| {
-                let first = top + crate::view::HEADER_HEIGHT;
-                let centres = (0..lanes.len())
-                    .map(|k| first + crate::view::LANE_HEIGHT * (k as f32 + 0.5))
-                    .collect();
-                top = first + crate::view::LANE_HEIGHT * lanes.len() as f32;
-                (*id, centres)
+        self.pane_rows()
+            .0
+            .into_iter()
+            .filter_map(|row| match row {
+                PaneRow::Track { id, lanes, .. } => Some((id, lanes)),
+                PaneRow::Curve { .. } => None,
+            })
+            .collect()
+    }
+
+    /// Each curve lane's centre, top to bottom, from the top of the track pane's contents.
+    pub fn curve_centres(&self) -> Vec<(CurveId, f32)> {
+        self.pane_rows()
+            .0
+            .into_iter()
+            .filter_map(|row| match row {
+                PaneRow::Curve { id, lane, .. } => Some((id, lane)),
+                PaneRow::Track { .. } => None,
             })
             .collect()
     }
@@ -531,8 +653,9 @@ impl App {
     /// The patch board laid out at least `min` in size.
     pub fn board(&self, min: iced::Size) -> crate::patch_board::Board {
         let state = self.session.state();
+        let (lanes, curves) = (self.lane_centres(), self.curve_centres());
         let Some(moving) = self.moving else {
-            return crate::patch_board::layout(state, &self.lane_centres(), min);
+            return crate::patch_board::layout(state, &lanes, &curves, min);
         };
         // Show the move under way without recording it.
         let mut shown = state.clone();
@@ -544,7 +667,7 @@ impl App {
             }
             Moving::Output(y) => shown.output_y = Some(y),
         }
-        crate::patch_board::layout(&shown, &self.lane_centres(), min)
+        crate::patch_board::layout(&shown, &lanes, &curves, min)
     }
 
     /// The selected node or wire.
@@ -557,9 +680,24 @@ impl App {
         self.range?.resolve(self.session.state())
     }
 
-    /// Whether a drag from a lane is under way.
+    /// Whether a drag from a lane, audio or curve, is under way.
     pub fn is_dragging(&self) -> bool {
+        self.drag.is_some() || self.curve_drag.is_some()
+    }
+
+    /// Whether a drag from an audio lane, selecting a range, is under way.
+    pub(crate) fn is_selecting(&self) -> bool {
         self.drag.is_some()
+    }
+
+    /// The selected curve point, if its curve still has it: the curve and the point's index.
+    pub fn curve_point(&self) -> Option<(CurveId, usize)> {
+        self.curve_point.filter(|&(curve, i)| {
+            self.session
+                .state()
+                .curve(curve)
+                .is_some_and(|lane| i < lane.curve.points().len())
+        })
     }
 
     /// The excerpt last cut or copied.
@@ -658,6 +796,7 @@ impl App {
                     | Message::DragOutput(_)
                     | Message::NodeText(..)
                     | Message::LaneDrag { .. }
+                    | Message::CurveMove { .. }
                     | Message::LaneRelease
                     | Message::TempoText(_)
                     | Message::ClickLevel(_)
@@ -711,7 +850,10 @@ impl App {
                 extend,
             } => self.lane_press(track, frame, extend),
             Message::LaneDrag { track, frame } => self.lane_drag(track, frame),
-            Message::LaneRelease => self.drag = None,
+            Message::LaneRelease => {
+                self.drag = None;
+                self.finish_curve_drag();
+            }
             Message::ClearRange if self.dialog.confirming().is_some() => {
                 self.dialog.cancel_delete();
             }
@@ -853,12 +995,31 @@ impl App {
                 }
                 self.refresh_lanes();
             }
-            Message::StartRename(track) => {
-                self.renaming = self
-                    .session
-                    .state()
-                    .track(track)
-                    .map(|t| (track, t.name.clone()));
+            Message::AddCurve => self.add_curve(),
+            Message::DeleteCurve(curve) => {
+                if self.refuse_while_playing("delete a curve") {
+                    return;
+                }
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.remove_curve(curve));
+                self.report(result.map_err(|e| e.to_string()));
+            }
+            Message::CurvePress {
+                curve,
+                frame,
+                value,
+                hit,
+                width,
+            } => self.curve_press(curve, (frame, value), hit, width),
+            Message::CurveMove { frame, value, alt } => self.curve_move(frame, value, alt),
+            Message::StartRename(what) => {
+                let state = self.session.state();
+                let name = match what {
+                    Renaming::Track(track) => state.track(track).map(|t| t.name.clone()),
+                    Renaming::Curve(curve) => state.curve(curve).map(|c| c.name.clone()),
+                };
+                self.renaming = name.map(|name| (what, name));
             }
             Message::RenameText(name) => {
                 if let Some((_, typed)) = &mut self.renaming {
@@ -954,6 +1115,7 @@ impl App {
                     state: self.session.state(),
                     playing: self.engine.is_playing(),
                     open,
+                    playhead: self.engine.playhead(),
                 };
                 let commands = self.dialog.update(message, &cx);
                 self.run(commands);
@@ -1009,6 +1171,7 @@ impl App {
             node,
             self.dialog.live(),
             self.engine.is_playing(),
+            self.engine.playhead(),
         )
     }
 
@@ -1049,6 +1212,7 @@ impl App {
                     }
                 }
                 Command::DeleteNode(node) => self.delete_node(node),
+                Command::TogglePort { node, name } => self.toggle_port(node, &name),
             }
         }
     }
@@ -1231,6 +1395,7 @@ impl App {
         self.seek(frame);
         self.current_track = Some(track);
         self.range = None;
+        self.curve_point = None;
         self.drag = Some((track, frame));
     }
 
@@ -1270,6 +1435,20 @@ impl App {
     fn delete_range(&mut self) {
         // Delete and Backspace edit the text being typed instead.
         if self.renaming.is_some() || self.node_text.is_some() {
+            return;
+        }
+        // A selected curve point goes first, as one step.
+        if let Some((curve, i)) = self.curve_point()
+            && !self.node_dialog_open()
+        {
+            if self.refuse_while_playing("edit curves") {
+                return;
+            }
+            let points = self.curve_points(curve);
+            if let Some(next) = curve_edit::remove(&points, i) {
+                self.set_curve(curve, next);
+            }
+            self.curve_point = None;
             return;
         }
         let Some((tracks, range)) = self.selected_range() else {
@@ -1347,20 +1526,156 @@ impl App {
     }
 
     fn finish_rename(&mut self) {
-        let Some((track, name)) = self.renaming.take() else {
+        let Some((what, name)) = self.renaming.take() else {
             return;
         };
         let name = name.trim().to_owned();
-        let unchanged = self
-            .session
-            .state()
-            .track(track)
-            .is_none_or(|t| t.name == name);
+        let state = self.session.state();
+        let unchanged = match what {
+            Renaming::Track(track) => state.track(track).is_none_or(|t| t.name == name),
+            Renaming::Curve(curve) => state.curve(curve).is_none_or(|c| c.name == name),
+        };
         if name.is_empty() || unchanged {
             return;
         }
+        let result = self.bridge.edit(&mut self.session, |s| match what {
+            Renaming::Track(track) => s.apply(Edit::RenameTrack { track, name }),
+            Renaming::Curve(curve) => s.rename_curve(curve, &name),
+        });
+        self.report(result.map_err(|e| e.to_string()));
+    }
+
+    /// Adds "Curve N", for the lowest N no curve is named, holding one point at frame 0 halfway
+    /// up, as one step. Refused while playing.
+    fn add_curve(&mut self) {
+        if self.refuse_while_playing("add a curve") {
+            return;
+        }
+        let state = self.session.state();
+        let name = (1..)
+            .map(|n| format!("Curve {n}"))
+            .find(|name| state.curves.iter().all(|c| c.name != *name))
+            .unwrap_or_default();
+        let result = modulation::Curve::new(vec![modulation::Point::new(0, 0.5)])
+            .map_err(|e| e.to_string())
+            .and_then(|curve| {
+                self.bridge
+                    .edit(&mut self.session, |s| s.add_curve(&name, curve))
+                    .map_err(|e| e.to_string())
+            });
+        self.report(result.map(|_| ()));
+    }
+
+    /// Curve `curve`'s points; empty if there is no such curve.
+    fn curve_points(&self, curve: CurveId) -> Vec<modulation::Point> {
+        self.session
+            .state()
+            .curve(curve)
+            .map(|lane| lane.curve.points().to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Replaces curve `curve`'s points as one step.
+    fn set_curve(&mut self, curve: CurveId, points: Vec<modulation::Point>) {
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.set_curve(curve, points));
+        self.report(result.map_err(|e| e.to_string()));
+    }
+
+    /// A press on curve lane `curve` at `at` (a frame and a value), `width` pixels wide: selects
+    /// and starts dragging the point or handle it `hit`, or adds a point there as one step and
+    /// selects it. While playing a press only selects; adding and dragging are refused.
+    fn curve_press(&mut self, curve: CurveId, at: (f64, f32), hit: Option<Grab>, width: f32) {
+        let points = self.curve_points(curve);
+        // Delete then removes the curve point, not a wire selected earlier.
+        if matches!(self.selection, Some(Selection::Wire(_))) {
+            self.selection = None;
+        }
+        if let Some(grab) = hit {
+            let (Grab::Anchor(i) | Grab::In(i) | Grab::Out(i)) = grab;
+            self.curve_point = Some((curve, i));
+            if self.refuse_while_playing("edit curves") {
+                return;
+            }
+            let span = self.view_span().max(1) as f64;
+            self.curve_drag = Some(CurveDrag {
+                curve,
+                grab,
+                press: at,
+                scale: (f64::from(width) / span, f64::from(crate::view::LANE_HEIGHT)),
+                origin: points.clone(),
+                live: points,
+            });
+            return;
+        }
+        if self.refuse_while_playing("edit curves") {
+            return;
+        }
+        let frame = at.0.round().max(0.0) as i64;
+        if let Some((next, i)) = curve_edit::add(&points, frame, at.1) {
+            self.set_curve(curve, next);
+            self.curve_point = Some((curve, i));
+        }
+    }
+
+    /// The pointer, dragging from a curve press, is at `frame` and `value`: the grabbed point or
+    /// handle moves by as much as the pointer has from the press. A shape that is not a valid
+    /// curve is ignored, so the drag stays at its last valid place.
+    fn curve_move(&mut self, frame: f64, value: f32, alt: bool) {
+        let Some(drag) = &mut self.curve_drag else {
+            return;
+        };
+        let (d_frame, d_value) = (frame - drag.press.0, value - drag.press.1);
+        let origin = &drag.origin;
+        let moved = match drag.grab {
+            Grab::Anchor(i) => origin.get(i).and_then(|p| {
+                curve_edit::move_anchor(origin, i, p.frame as f64 + d_frame, p.value + d_value)
+            }),
+            Grab::In(i) | Grab::Out(i) => origin.get(i).and_then(|p| {
+                let (side, handle) = match drag.grab {
+                    Grab::In(_) => (Side::In, p.in_handle),
+                    _ => (Side::Out, p.out_handle),
+                };
+                curve_edit::move_handle(
+                    origin,
+                    i,
+                    side,
+                    handle.d_frame + d_frame,
+                    handle.d_value + d_value,
+                    !alt,
+                    drag.scale,
+                )
+            }),
+        };
+        if let Some(points) = moved {
+            drag.live = points;
+        }
+    }
+
+    /// Ends a curve drag, recording its shape as one step if it changed.
+    fn finish_curve_drag(&mut self) {
+        if let Some(drag) = self.curve_drag.take()
+            && drag.live != drag.origin
+        {
+            self.set_curve(drag.curve, drag.live);
+        }
+    }
+
+    /// Gives node `node`'s parameter `name` the lowest free curve port, or takes its port away,
+    /// as one step.
+    fn toggle_port(&mut self, node: NodeId, name: &str) {
+        let assigned = self
+            .session
+            .state()
+            .node(node)
+            .is_some_and(|n| n.curve_ports.contains_key(name));
         let result = self.bridge.edit(&mut self.session, |s| {
-            s.apply(Edit::RenameTrack { track, name })
+            if assigned {
+                s.unassign_curve_port(node, name)
+            } else {
+                s.assign_curve_port(node, name).map(|_| ())
+            }
         });
         self.report(result.map_err(|e| e.to_string()));
     }

@@ -42,6 +42,8 @@ pub enum Icon {
     Dark,
     /// Open a ≡ menu.
     Menu,
+    /// Give a parameter a curve port.
+    Curve,
 }
 
 /// Declares the artwork file of each icon, and a lazily parsed handle for it.
@@ -86,6 +88,7 @@ artwork! {
     Light: LIGHT = "light.svg";
     Dark: DARK = "dark.svg";
     Menu: MENU = "menu.svg";
+    Curve: CURVE = "curve.svg";
 }
 
 impl Icon {
@@ -109,6 +112,7 @@ impl Icon {
             Icon::Light => "Light Mode",
             Icon::Dark => "Dark Mode",
             Icon::Menu => "Menu",
+            Icon::Curve => "Curve port",
         }
     }
 }
@@ -117,7 +121,7 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 17] = [
+    const ALL: [Icon; 18] = [
         Icon::Waveform,
         Icon::Spectrogram,
         Icon::Grid,
@@ -135,6 +139,7 @@ mod tests {
         Icon::Light,
         Icon::Dark,
         Icon::Menu,
+        Icon::Curve,
     ];
 
     /// Every icon's artwork is a single-colour SVG with no text, as tinting requires.

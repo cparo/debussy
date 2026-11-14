@@ -40,9 +40,21 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   [ADR-0086](../adrs/0086-the-bottom-bar-opens-the-audio-device-list-and-the.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
-  or stereo track; automation curves are listed but disabled. A red cursor marks the playhead in
+  or stereo track, or an automation curve ("Curve N", the lowest N not in use, holding one point
+  at frame 0 halfway up). A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.
+- **Curve lanes** follow the tracks: each a header (its name and a ≡ menu: rename, delete) over
+  one 128-pixel lane drawing the curve in lavender, value 0 at the bottom and 1 at the top, with
+  8-pixel square anchors and, for the selected point, its handles as small circles on stems. A
+  press on empty lane adds a point there as one step and selects it; a press within 6 pixels of
+  the selected point's handle, else of an anchor, selects that point and drags what it caught.
+  Dragging a handle keeps the opposite handle pointing the opposite way at its on-screen length;
+  ⌥ breaks that link. A drag that would make the curve invalid stops at the last valid shape, and
+  is recorded as one step on release. Delete or Backspace removes the selected point. While
+  playing a press only selects, and adding, dragging, deleting a point or a curve and adding a
+  curve are refused with "Stop playback to …". Curve lanes share the audio lanes' playhead, grid,
+  sideways-scroll panning, and hiding behind a node dialog ([ADR-0126](../adrs/0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md)).
 - **Divider, gutter and board:** a draggable divider (starting at 60 % tracks, 40 % board), the
   port gutter, and the [patch board](#patch-board). The track pane, gutter and board scroll
   vertically together under one scrollbar at the window's right edge.
@@ -68,7 +80,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Colours:** audio signals (and a selected button's face, and the logo) are orange in the dark
   tone and blue in the light tone
   ([ADR-0071](../adrs/0071-the-audio-colour-is-orange-on-dark-chrome-and-blue.md)); control
-  signals are lavender in both. The logo is the exception: sage green (`#84A07C`) in the light
+  signals (curve lanes, curve pins, curve ports and their wires, and a lit curve port button) are
+  lavender (`#B3A6E8`) in both. The logo is the exception: sage green (`#84A07C`) in the light
   tone. The interface opens in the dark tone whatever the system's appearance, and does not
   follow it; the toggle is not saved
   ([ADR-0090](../adrs/0090-the-interface-opens-in-the-dark-tone-and-the-light.md)).
@@ -107,13 +120,17 @@ its pane, is never narrower than its pane, and does not zoom.
 - The gutter is drawn in the board's colour and holds one port per lane, centred vertically on
   the lane with its left edge 4 pixels from the divider. A port's hover tip names its track, with
   " L" or " R" for one side of a stereo port
-  ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)).
-- Every wire is mono and in the audio colour ("Layout"). A stereo port is drawn as two circles, left above right; a
+  ([ADR-0089](../adrs/0089-the-mixer-dialog-shows-narrow-numbered-strips-with.md)). Each curve
+  lane has a lavender port at its centre, its hover tip the curve's name.
+- Every wire is mono, in the audio colour, or lavender from a curve ("Layout"); a selected
+  wire's tint is mixed from its own colour. A stereo port is drawn as two circles, left above right; a
   connection that names a side joins that circle, and a whole-port connection is drawn as a wire
   per side.
 - Node ports are 48 pixels apart, inputs on the left and outputs on the right, and a node's height
   follows from its taller side. A mixer has a mono input per channel and a stereo output; a bus or
-  feedback delay one port of its layout each way; an effect is drawn with one stereo port each way.
+  feedback delay one port of its layout each way; an effect is drawn with one stereo port each way. Below a node's audio inputs come its curve
+  ports, one per assigned parameter in port order, lavender with the port's number inside, and
+  counted in its height ([ADR-0126](../adrs/0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md)).
 - A node the user has moved stays where they put it. The rest are placed automatically in
   columns by graph depth (one past the deepest node feeding them), each column ordered by the
   height of what feeds it.
@@ -123,7 +140,8 @@ its pane, is never narrower than its pane, and does not zoom.
 Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)):
 
 - Drag from an output to an input to connect; at a stereo port the connection names its side. An
-  input takes one wire; a drop on an occupied input, an output, or empty board does nothing.
+  input takes one wire; a drop on an occupied input, an output, empty board, or an input of the
+  other signal kind (a curve on an audio input, audio on a curve port) does nothing.
 - Drag a node, or the L and R outputs (vertically), to move them; the move is one undo step.
 - Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes a
   selected wire, except while text is being typed; a node is deleted only through its dialog
@@ -175,8 +193,9 @@ While a slider is dragged its value goes straight to the running graph's paramet
 records one undo step. A mute or solo press is one step. Undo and redo are refused while the
 transport is playing ([ADR-0056](../adrs/0056-the-interface-owns-the-session-and-reaches-i-o.md)).
 
-A mixer's or effect's parameter is shown at the value being dragged, else the model's, else its
-declared default. Every reader of a node's parameters, from its controls, display, presets and
+A mixer's or effect's parameter is shown at its wired curve's value at the playhead, else the
+value being dragged, else the model's, else its declared default
+([ADR-0126](../adrs/0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md)). Every reader of a node's parameters, from its controls, display, presets and
 arrow keys to the stopped-only guard, reads one view over static metadata, never the running graph
 ([ADR-0106](../adrs/0106-a-node-s-parameters-as-shown-come-from-one-view.md)).
 

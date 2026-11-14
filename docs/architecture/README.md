@@ -74,6 +74,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Curves](automation.md#curves)
   - [Curves in the project](automation.md#curves-in-the-project)
   - [Evaluation](automation.md#evaluation)
+  - [Interface](automation.md#interface)
 - [Crates](crates.md)
   - [Crate map](crates.md#crate-map)
   - [Dependency rules](crates.md#dependency-rules)

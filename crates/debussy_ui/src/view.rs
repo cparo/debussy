@@ -10,10 +10,11 @@ use iced::widget::{
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Padding, Size};
-use project_model::{Endpoint, NodeKind, Side, TrackId};
+use project_model::{CurveId, Endpoint, NodeKind, Side, TrackId};
 
-use crate::app::{App, Message, NewNode};
+use crate::app::{App, Message, NewNode, PaneRow, Renaming};
 use crate::click::{COUNT_IN_BARS, format_bpm};
+use crate::curve_lane::CurveLaneView;
 use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
@@ -52,7 +53,7 @@ const DIALOG_PADDING: f32 = 12.0;
 /// The space kept clear at the right of a node dialog's body for its vertical scrollbar: the
 /// scrollbar's default width and a gap.
 const BODY_SCROLLBAR_ROOM: f32 = 14.0;
-/// The id of the track name being edited, to focus it.
+/// The id of the track or curve name being edited, to focus it.
 pub(crate) const RENAME_INPUT: &str = "rename-track";
 
 /// The size of a toolbar button's icon, and of the project name's text, in logical pixels.
@@ -596,7 +597,7 @@ impl App {
         let gutter: Vec<(crate::patch_board::Pin, f32)> = board
             .pins
             .iter()
-            .filter(|(p, _)| matches!(p.endpoint, Endpoint::Track(_)))
+            .filter(|(p, _)| matches!(p.endpoint, Endpoint::Track(_) | Endpoint::Curve(_)))
             .map(|(p, at)| (*p, at.y))
             .collect();
         // Each gutter pin's name shows on hover; the tip's anchor captures nothing, so a press
@@ -607,10 +608,14 @@ impl App {
                 .height(Length::Fixed(height))
         ];
         for (p, y) in &gutter {
-            let Endpoint::Track(track) = p.endpoint else {
-                continue;
+            let name = match p.endpoint {
+                Endpoint::Track(track) => self.port_name(track, p.side),
+                Endpoint::Curve(curve) => {
+                    self.session().state().curve(curve).map(|c| c.name.clone())
+                }
+                _ => None,
             };
-            let Some(name) = self.port_name(track, p.side) else {
+            let Some(name) = name else {
                 continue;
             };
             let anchor = tooltip(
@@ -728,7 +733,7 @@ impl App {
             NodeKind::Effect { .. } => match self.parameters(id) {
                 Some(parameters) => crate::effect_panel::effect_panel(
                     &parameters,
-                    self.effect_focus(),
+                    self.focus(),
                     self.tone(),
                     self.sample_rate(),
                     self.session()
@@ -808,7 +813,7 @@ impl App {
         let cursor = self.playhead_fraction();
         let (start, span) = (self.view_start(), self.view_span());
         let selected = self.selected_range();
-        let dragging = self.is_dragging();
+        let dragging = self.is_selecting();
         let grid = self.grid().then(|| GridView {
             tempo: self.session().state().tempo,
             rate: self.sample_rate(),
@@ -862,6 +867,44 @@ impl App {
                 );
             }
         }
+        for lane in &self.session().state().curves {
+            tracks = tracks.push(self.curve_header(lane.id, &lane.name));
+            if hidden {
+                tracks = tracks.push(Space::new().height(Length::Fixed(LANE_HEIGHT)));
+                continue;
+            }
+            // While dragging, the live shape is drawn, not yet recorded.
+            let points = match &self.curve_drag {
+                Some(drag) if drag.curve == lane.id => drag.live.as_slice(),
+                _ => lane.curve.points(),
+            };
+            let selected = self
+                .curve_point()
+                .filter(|(curve, _)| *curve == lane.id)
+                .map(|(_, i)| i);
+            let view = CurveLaneView {
+                curve: lane.id,
+                points,
+                start,
+                span,
+                selected,
+                dragging: self.curve_drag.as_ref().is_some_and(|d| d.curve == lane.id),
+            };
+            tracks = tracks.push(
+                stack![
+                    canvas(view).width(Fill).height(Fill),
+                    canvas(CursorView {
+                        at: cursor,
+                        band: None,
+                        grid
+                    })
+                    .width(Fill)
+                    .height(Fill),
+                ]
+                .width(Fill)
+                .height(Length::Fixed(LANE_HEIGHT)),
+            );
+        }
         let add = container(
             button(text("+").size(24).center())
                 .on_press(Message::OpenMenu(Menu::AddTrack))
@@ -873,9 +916,14 @@ impl App {
         column![tracks, add].width(Fill).into()
     }
 
-    fn track_header<'a>(&'a self, id: TrackId, name: &'a str) -> Element<'a, Message> {
-        let label: Element<'a, Message> = match &self.renaming {
-            Some((renaming, typed)) if *renaming == id => text_input("Track name", typed)
+    /// The name of `what`, or the rename field while it is being renamed.
+    fn header_label<'a>(&'a self, what: Renaming, name: &'a str) -> Element<'a, Message> {
+        let placeholder = match what {
+            Renaming::Track(_) => "Track name",
+            Renaming::Curve(_) => "Curve name",
+        };
+        match &self.renaming {
+            Some((renaming, typed)) if *renaming == what => text_input(placeholder, typed)
                 .id(RENAME_INPUT)
                 .on_input(Message::RenameText)
                 .on_submit(Message::FinishRename)
@@ -884,7 +932,28 @@ impl App {
                 .width(Length::Fixed(260.0))
                 .into(),
             _ => text(name.to_owned()).size(15).into(),
-        };
+        }
+    }
+
+    /// A curve lane's header: its name, or the rename field, and its ≡ menu.
+    fn curve_header<'a>(&'a self, id: CurveId, name: &'a str) -> Element<'a, Message> {
+        container(
+            row![
+                self.header_label(Renaming::Curve(id), name),
+                Space::new().width(Fill),
+                burger(Menu::Curve(id), 14.0, 4.0)
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding([0, 6])
+        .width(Fill)
+        .center_y(Length::Fixed(HEADER_HEIGHT))
+        .style(theme::chrome)
+        .into()
+    }
+
+    fn track_header<'a>(&'a self, id: TrackId, name: &'a str) -> Element<'a, Message> {
+        let label = self.header_label(Renaming::Track(id), name);
         let playing = self.engine().is_playing();
         let unless_playing = |message: Message| (!playing).then_some(message);
         let arming = self.arming(id);
@@ -936,16 +1005,24 @@ impl App {
         let pane_top = BAR_HEIGHT + SPACING - self.scrolled;
         let (x, y) = match menu {
             Menu::App => (size.width - MENU_WIDTH - 8.0, BAR_HEIGHT),
-            Menu::Track(id) => {
-                let above: f32 = self
-                    .lanes
-                    .iter()
-                    .take_while(|(t, _)| *t != id)
-                    .map(|(_, lanes)| HEADER_HEIGHT + LANE_HEIGHT * lanes.len() as f32)
-                    .sum();
+            Menu::Track(_) | Menu::Curve(_) => {
+                let header = self
+                    .pane_rows()
+                    .0
+                    .into_iter()
+                    .find_map(|row| match (row, menu) {
+                        (PaneRow::Track { id, header, .. }, Menu::Track(t)) if id == t => {
+                            Some(header)
+                        }
+                        (PaneRow::Curve { id, header, .. }, Menu::Curve(c)) if id == c => {
+                            Some(header)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(0.0);
                 (
                     track_pane - MENU_WIDTH - 8.0,
-                    pane_top + above + HEADER_HEIGHT,
+                    pane_top + header + HEADER_HEIGHT,
                 )
             }
             Menu::AddTrack => (16.0, pane_top + self.tracks_height() + 16.0 + 46.0),
@@ -971,12 +1048,9 @@ impl App {
         )
     }
 
-    /// The height of every track's header and lanes.
+    /// The height of every track's and curve's header and lanes.
     fn tracks_height(&self) -> f32 {
-        self.lanes
-            .iter()
-            .map(|(_, lanes)| HEADER_HEIGHT + LANE_HEIGHT * lanes.len() as f32)
-            .sum()
+        self.pane_rows().1
     }
 
     fn menu_entries(&self, menu: Menu) -> Element<'_, Message> {
@@ -998,9 +1072,13 @@ impl App {
                 ]
             }
             Menu::Track(id) => vec![
-                Entry::item("Rename", Some(Message::StartRename(id))),
+                Entry::item("Rename", Some(Message::StartRename(Renaming::Track(id)))),
                 Entry::item("Import audio into…", when_stopped(Message::ImportInto(id))),
                 Entry::item("Delete", when_stopped(Message::DeleteTrack(id))),
+            ],
+            Menu::Curve(id) => vec![
+                Entry::item("Rename", Some(Message::StartRename(Renaming::Curve(id)))),
+                Entry::item("Delete", when_stopped(Message::DeleteCurve(id))),
             ],
             Menu::AddTrack => vec![
                 Entry::item("Mono track", when_stopped(Message::AddTrack(Layout::Mono))),
@@ -1008,7 +1086,7 @@ impl App {
                     "Stereo track",
                     when_stopped(Message::AddTrack(Layout::Stereo)),
                 ),
-                Entry::item("Automation curve", None),
+                Entry::item("Automation curve", when_stopped(Message::AddCurve)),
             ],
             Menu::Click => return self.click_dialog(),
             Menu::Device => self.device_menu(),
