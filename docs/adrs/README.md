@@ -141,4 +141,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0115](0115-delay-and-reverb-displays-plot-a-simulated-impulse.md) | Delay and reverb displays plot a simulated impulse response | Accepted | [Impulse response display](../architecture/effect-displays.md#impulse-response-display) |
 | [ADR-0116](0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md) | A parameter may be shown only while a toggle is on or off | Accepted | [Effect nodes](../architecture/signal-graph.md#effect-nodes) |
 | [ADR-0117](0117-block-0-1-6-s-uninhabited-static-lint-is-accepted.md) | block 0.1.6's uninhabited-static lint is accepted until iced moves to wgpu 29 | Accepted | [Dependency licences](../architecture/licensing.md#dependency-licences) |
+| [ADR-0118](0118-modulation-sources-live-in-a-new-real-time-core.md) | Modulation sources live in a new real-time-core modulation crate | Accepted | [Crate map](../architecture/crates.md#crate-map) |
+| [ADR-0119](0119-lfo-shapes-are-sine-triangle-saws-square-and.md) | LFO shapes are sine, triangle, saws, square and sample-and-hold, without smooth random | Accepted | [LFO](../architecture/modulation.md#lfo) |
+| [ADR-0120](0120-chorus-and-flanger-are-lfo-modulated-delays-read.md) | Chorus and flanger are LFO-modulated delays read by 4-point Hermite interpolation | Accepted | [Modulated delay](../architecture/modulation.md#modulated-delay) |
 

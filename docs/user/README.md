@@ -146,6 +146,18 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   **Decay** is how long the reverb takes to die away, and **Damping** makes high frequencies die
   sooner: lower it for a darker, softer space. **Mix** sets how loud the reverb is against the
   original.
+- **Chorus** thickens the sound with copies of it whose pitch wavers slowly. **Rate** sets how
+  fast they waver, or turn on **Sync** to pick a **Note** length and **Feel** that follow the
+  project tempo. **Shape** is how the wavering moves: **sine** smoothly, **triangle** evenly.
+  **Delay** is how far behind the copies sit and **Depth** how far they swing; **Voices** sets how
+  many copies (1 to 4). **Spread** moves the left and right copies apart, from none (mono) to
+  180°, for a wider sound. **Mix** sets how loud the copies are against the original. Presets:
+  Subtle and Wide.
+- **Flanger** gives a sweeping, jet-like whoosh. It has the same **Rate**, **Sync**, **Shape**
+  and **Spread** controls as the chorus. **Delay** is a very short time behind the original and
+  **Depth** how far the sweep swings around it. **Feedback** makes the sweep ring: positive
+  values sound hollow and bright, negative ones more metallic. **Mix** sets how loud the swept
+  copy is against the original. Presets: Jet and Metallic.
 - The **Delay** and **Reverb** pictures show what you would hear after a single click: its
   level over time, left channel on top and right below, from full level down to −96 dB. The
   spike at the start is the original sound; the delay's repeats are spikes after it and the

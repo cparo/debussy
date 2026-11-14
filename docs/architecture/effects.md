@@ -17,6 +17,8 @@ state.
 | `amplifier` | Amplifier | "Amplifier" |
 | `delay` | Delay | `docs/architecture/delay-and-reverb.md` "Delay" |
 | `reverb` | Reverb | `docs/architecture/delay-and-reverb.md` "Reverb" |
+| `chorus` | Chorus | `docs/architecture/modulation.md` "Chorus" |
+| `flanger` | Flanger | `docs/architecture/modulation.md` "Flanger" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
