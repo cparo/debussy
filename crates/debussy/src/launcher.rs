@@ -186,7 +186,10 @@ impl Launcher for AppLauncher {
         if let Some(dir) = self.projects_dir.as_ref().filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
         }
-        dialog.pick_folder()
+        // A project is a package (ADR-0131), which the open panel picks as a file.
+        dialog
+            .add_filter("Debussy project", &[EXTENSION])
+            .pick_file()
     }
 
     fn projects(&mut self) -> Vec<ProjectEntry> {

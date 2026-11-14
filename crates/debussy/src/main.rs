@@ -1,5 +1,6 @@
 //! Debussy: opens a project and its window, playing through the default output device, or
-//! without a project the start screen, to create or open one.
+//! without a project the start screen, to create or open one; projects double-clicked in the
+//! Finder open in the window.
 //! Command-line import and export stand in until the interface has them (#64, ADR-0057).
 
 #![forbid(unsafe_code)]
@@ -12,7 +13,7 @@ mod project;
 mod services;
 
 use anyhow::{Context, Result};
-use macos_platform::folders;
+use macos_platform::{documents, folders};
 
 fn main() -> Result<()> {
     let args = args::parse(std::env::args().skip(1))?;
@@ -40,9 +41,16 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             let start = launcher.ready(bundle, session)?;
-            Some(start())
+            // Absolute, to match the paths the Finder sends.
+            let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+            Some((start(), path))
         }
         None => None,
     };
-    debussy_ui::run(Box::new(launcher), app).map_err(|e| anyhow::anyhow!("the window failed: {e}"))
+    // Projects double-clicked in the Finder, at launch or later (ADR-0132).
+    let requests = debussy_ui::OpenRequests::new();
+    documents::on_open_documents(requests.sender())
+        .context("listening for documents opened from the Finder")?;
+    debussy_ui::run(Box::new(launcher), app, requests)
+        .map_err(|e| anyhow::anyhow!("the window failed: {e}"))
 }

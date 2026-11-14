@@ -42,6 +42,7 @@
 //! - `theme`: the palette and the light and dark themes.
 //! - `services`: [`Services`].
 //! - `launcher`: [`Launcher`], opening and creating projects.
+//! - `open_requests`: [`OpenRequests`], projects asked for from outside the window.
 //! - `shell`: the window's state: the open project, the start screen and switching projects.
 
 #![forbid(unsafe_code)]
@@ -66,6 +67,7 @@ mod menu;
 mod mixer_strip;
 mod node_dialog;
 mod node_parameters;
+mod open_requests;
 mod patch_board;
 mod plot;
 mod range_selection;
@@ -84,6 +86,7 @@ mod typeface;
 mod view;
 mod waveform;
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use shell::Shell;
@@ -96,6 +99,7 @@ pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use mixer_strip::MixerFocus;
 pub use node_dialog::{DialogFocus, DialogMessage};
+pub use open_requests::OpenRequests;
 pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
@@ -109,17 +113,23 @@ pub use waveform::{
     Spectrum, spectrum_bands,
 };
 
-/// Opens the main window over `app`, or the start screen without one, and runs until it
-/// closes; projects are opened and created through `launcher`. The chrome opens dark, whatever
-/// the system's appearance, until the user toggles it.
+/// Opens the main window over `app`, the project open at its path, or the start screen without
+/// one, and runs until it closes; projects are opened and created through `launcher`, and those
+/// sent through `requests` are opened as if chosen in the Open browser. The chrome opens dark,
+/// whatever the system's appearance, until the user toggles it.
 ///
 /// # Errors
 ///
 /// Whatever stops `iced` from opening the window.
-pub fn run(launcher: Box<dyn Launcher>, app: Option<App>) -> iced::Result {
+pub fn run(
+    launcher: Box<dyn Launcher>,
+    app: Option<(App, PathBuf)>,
+    requests: OpenRequests,
+) -> iced::Result {
     // iced may ask for the initial state more than once; only the first gets the app and the
     // launcher.
     let initial = Mutex::new(Some((launcher, app)));
+    let inbox = requests.into_inbox();
     iced::application(
         move || {
             let (launcher, app) = initial
@@ -127,8 +137,9 @@ pub fn run(launcher: Box<dyn Launcher>, app: Option<App>) -> iced::Result {
                 .ok()
                 .and_then(|mut a| a.take())
                 .map_or((None, None), |(l, a)| (Some(l), a));
+            let (app, path) = app.map_or((None, None), |(a, p)| (Some(a), Some(p)));
             (
-                Shell::new(launcher, app),
+                Shell::new(launcher, app, path, inbox.clone()),
                 iced::window::latest()
                     .and_then(iced::window::scale_factor)
                     .map(Message::Rescaled),

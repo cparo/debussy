@@ -1587,11 +1587,15 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 name = "macos_platform"
 version = "0.0.0"
 dependencies = [
+ "block2 0.6.2",
  "cpal",
+ "objc2 0.6.5",
  "objc2-audio-toolbox",
  "objc2-core-audio-types",
  "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
  "platform_interfaces",
+ "thiserror 2.0.21",
  "wav_files",
 ]
 

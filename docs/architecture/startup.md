@@ -21,9 +21,16 @@ still being saved. New project asks where to save through a save dialog, opened 
 
 The Open browser lists the projects folder's projects by name and age ("just now", "5 min ago",
 "3 h ago", "12 days ago"), or says the folder has none, and offers Browse…, which asks for a
-bundle anywhere through a folder dialog; as a modal it also has Cancel, and Escape or a press
+bundle anywhere through an open dialog filtered to projects; as a modal it also has Cancel, and Escape or a press
 outside it cancels. Opening never creates a project
 ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md)).
+
+A project opened from the Finder ([Documents opened from the Finder](platform.md#documents-opened-from-the-finder)),
+at launch or later, is opened as if chosen in the Open browser, from the start screen or over an
+open project, under the same conditions; one asked for before the window starts opens once it
+does, and asking for the project already open does nothing. The command line ignores the `-psn_`
+argument older macOS passes to apps the Finder launches
+([ADR-0132](../adrs/0132-finder-open-document-events-arrive-through-an.md)).
 
 Switching saves and closes the open project, then replaces the whole `App`, with its services and
 audio output; the tone and scale factor carry over. Opening goes through `debussy_ui`'s `Launcher`

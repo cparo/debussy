@@ -154,4 +154,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0128](0128-effects-read-each-parameter-once-per-block-as-a.md) | Effects read each parameter once per block as a Reading, and their derived ramps approach it by the next control point | Accepted | [Evaluation](../architecture/automation.md#evaluation) |
 | [ADR-0129](0129-mp3-export-runs-a-host-installed-lame-as-a.md) | MP3 export runs a host-installed LAME as a separate process | Accepted | [MP3 export](../architecture/import-export.md#mp3-export) |
 | [ADR-0130](0130-export-asks-for-the-format-and-its-settings-before.md) | Export asks for the format and its settings before the save dialog, and remembers them | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
+| [ADR-0131](0131-debussy-ships-as-a-debussy-app-bundle-that.md) | Debussy ships as a Debussy.app bundle that declares the project as a package type | Accepted | [App bundle](../architecture/platform.md#app-bundle) |
+| [ADR-0132](0132-finder-open-document-events-arrive-through-an.md) | Finder open-document events arrive through an Apple Event handler installed at will-finish-launching | Accepted | [Documents opened from the Finder](../architecture/platform.md#documents-opened-from-the-finder) |
 

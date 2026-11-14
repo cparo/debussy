@@ -124,8 +124,8 @@ A project is a directory named `<name>.debussy`, containing:
   regenerated.
 
 A reader must refuse a `format_version` newer than it supports and must migrate older ones ([ADR-0013](../adrs/0013-a-project-is-a-bundle-directory-with-versioned.md)).
-macOS shows the bundle as a folder until the type is declared as a package
-([#128](https://github.com/cparo/debussy/issues/128)).
+macOS presents the bundle as a single document of type `io.github.cparo.debussy.project`
+([App bundle](platform.md#app-bundle), [ADR-0131](../adrs/0131-debussy-ships-as-a-debussy-app-bundle-that.md)).
 
 ## Projects folder
 

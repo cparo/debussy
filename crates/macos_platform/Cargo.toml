@@ -8,7 +8,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+block2 = { version = "0.6.2", default-features = false, features = ["std"] }
 cpal = "0.18.2"
+objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
     "std",
     "AudioConverter",
@@ -27,7 +29,19 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
     "CFBase",
     "CFURL",
 ] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "NSAppleEventDescriptor",
+    "NSAppleEventManager",
+    "NSNotification",
+    "NSObject",
+    "NSOperation",
+    "NSString",
+    "NSURL",
+] }
 platform_interfaces = { path = "../platform_interfaces" }
+thiserror = "2.0.21"
 
 [dev-dependencies]
 wav_files = { path = "../wav_files" }
