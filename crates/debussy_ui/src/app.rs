@@ -39,6 +39,9 @@ const DEFAULT_SPLIT: f32 = 0.6;
 const MIN_SPLIT: f32 = 0.2;
 /// The widest the divider leaves the track pane.
 const MAX_SPLIT: f32 = 0.85;
+/// How far above or below the curve, in logical pixels, a press on a curve lane may land and
+/// still add a point; further away it seeks.
+const CURVE_REACH: f32 = 8.0;
 /// How far a drag must go, in lane columns, before it selects a range rather than clicks.
 const DRAG_COLUMNS: u64 = 4;
 
@@ -1584,8 +1587,9 @@ impl App {
     }
 
     /// A press on curve lane `curve` at `at` (a frame and a value), `width` pixels wide: selects
-    /// and starts dragging the point or handle it `hit`, or adds a point there as one step and
-    /// selects it. While playing a press only selects; adding and dragging are refused.
+    /// and starts dragging the point or handle it `hit`; or, within [`CURVE_REACH`] of the curve,
+    /// adds a point there as one step and selects it; or, further away, seeks there. While
+    /// playing a press only selects or seeks; adding and dragging are refused.
     fn curve_press(&mut self, curve: CurveId, at: (f64, f32), hit: Option<Grab>, width: f32) {
         let points = self.curve_points(curve);
         // Delete then removes the curve point, not a wire selected earlier.
@@ -1609,10 +1613,16 @@ impl App {
             });
             return;
         }
+        let frame = at.0.round().max(0.0) as i64;
+        let on_curve = modulation::Curve::new(points.clone())
+            .map_or(modulation::EMPTY_VALUE, |c| c.value_at(frame));
+        if (on_curve - at.1).abs() * crate::view::LANE_HEIGHT > CURVE_REACH {
+            self.seek(frame as u64);
+            return;
+        }
         if self.refuse_while_playing("edit curves") {
             return;
         }
-        let frame = at.0.round().max(0.0) as i64;
         if let Some((next, i)) = curve_edit::add(&points, frame, at.1) {
             self.set_curve(curve, next);
             self.curve_point = Some((curve, i));

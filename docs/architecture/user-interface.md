@@ -47,12 +47,16 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Curve lanes** follow the tracks: each a header (its name and a ≡ menu: rename, delete) over
   one 128-pixel lane drawing the curve in lavender, value 0 at the bottom and 1 at the top, with
   8-pixel square anchors and, for the selected point, its handles as small circles on stems. A
-  press on empty lane adds a point there as one step and selects it; a press within 6 pixels of
+  press on empty lane within 8 pixels above or below the curve adds a point there as one step and
+  selects it, and further away seeks there, also while playing
+  ([ADR-0127](../adrs/0127-a-press-on-a-curve-lane-more-than-8-pixels-from.md)); a press within
+  6 pixels of
   the selected point's handle, else of an anchor, selects that point and drags what it caught.
   Dragging a handle keeps the opposite handle pointing the opposite way at its on-screen length;
   ⌥ breaks that link. A drag that would make the curve invalid stops at the last valid shape, and
   is recorded as one step on release. Delete or Backspace removes the selected point. While
-  playing a press only selects, and adding, dragging, deleting a point or a curve and adding a
+  playing a press only selects or seeks, and adding, dragging, deleting a point or a curve and
+  adding a
   curve are refused with "Stop playback to …". Curve lanes share the audio lanes' playhead, grid,
   sideways-scroll panning, and hiding behind a node dialog ([ADR-0126](../adrs/0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md)).
 - **Divider, gutter and board:** a draggable divider (starting at 60 % tracks, 40 % board), the

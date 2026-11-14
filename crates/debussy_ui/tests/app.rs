@@ -2413,10 +2413,10 @@ fn test_curve_press_on_an_empty_lane_adds_a_point_in_one_step() -> Result<(), Bo
     let (mut app, mut processor, _, _) = app()?;
     app.update(Message::AddCurve);
     let (curve, _) = only_curve(&app)?;
-    app.update(curve_press(curve, 1000.2, 0.25, None));
+    app.update(curve_press(curve, 1000.2, 0.52, None));
     let (_, points) = only_curve(&app)?;
     assert_eq!(points.len(), 2);
-    assert_eq!((points[1].frame, points[1].value), (1000, 0.25));
+    assert_eq!((points[1].frame, points[1].value), (1000, 0.52));
     assert_eq!(app.curve_point(), Some((curve, 1)));
     app.update(Message::Undo);
     assert_eq!(only_curve(&app)?.1.len(), 1);
@@ -2438,16 +2438,41 @@ fn test_curve_press_on_an_empty_lane_adds_a_point_in_one_step() -> Result<(), Bo
 }
 
 #[test]
+fn test_curve_press_away_from_the_line_seeks_instead_of_adding() -> Result<(), Box<dyn Error>> {
+    let (mut app, mut processor, _, _) = app()?;
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    let revision = app.session().revision();
+    // The curve is flat at 0.5; on a 128-pixel lane, 8 pixels is 0.0625.
+    app.update(curve_press(curve, 2000.0, 0.5 + 9.0 / 128.0, None));
+    assert_eq!(app.session().revision(), revision);
+    assert_eq!(app.return_point(), 2000);
+    app.update(curve_press(curve, 3000.0, 0.5 - 9.0 / 128.0, None));
+    assert_eq!(app.return_point(), 3000);
+    // Within 8 pixels it adds a point and does not seek.
+    app.update(curve_press(curve, 4000.0, 0.5 + 7.0 / 128.0, None));
+    assert_eq!(only_curve(&app)?.1.len(), 2);
+    assert_eq!(app.return_point(), 3000);
+    // Seeking is allowed while playing.
+    app.update(Message::Play);
+    block(&mut processor)?;
+    app.update(curve_press(curve, 1000.0, 0.95, None));
+    assert_eq!(app.return_point(), 1000);
+    assert_eq!(only_curve(&app)?.1.len(), 2);
+    Ok(())
+}
+
+#[test]
 fn test_curve_anchor_drag_is_one_step_recorded_on_release() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     app.update(Message::AddCurve);
     let (curve, _) = only_curve(&app)?;
-    app.update(curve_press(curve, 1000.0, 0.25, None));
+    app.update(curve_press(curve, 1000.0, 0.5, None));
     let revision = app.session().revision();
     app.update(curve_press(
         curve,
         1000.0,
-        0.25,
+        0.5,
         Some(debussy_ui::Grab::Anchor(1)),
     ));
     assert!(app.is_dragging());
@@ -2475,7 +2500,7 @@ fn test_curve_handle_drag_keeps_the_last_valid_shape() -> Result<(), Box<dyn Err
     let (mut app, _processor, _, _) = app()?;
     app.update(Message::AddCurve);
     let (curve, _) = only_curve(&app)?;
-    app.update(curve_press(curve, 900.0, 0.25, None));
+    app.update(curve_press(curve, 900.0, 0.5, None));
     let before = only_curve(&app)?.1[1].in_handle;
     app.update(curve_press(
         curve,
@@ -2505,7 +2530,7 @@ fn test_delete_removes_the_selected_curve_point() -> Result<(), Box<dyn Error>> 
     let (mut app, _processor, _, _) = app()?;
     app.update(Message::AddCurve);
     let (curve, _) = only_curve(&app)?;
-    app.update(curve_press(curve, 1000.0, 0.25, None));
+    app.update(curve_press(curve, 1000.0, 0.5, None));
     app.update(Message::DeleteRange);
     assert_eq!(only_curve(&app)?.1, [modulation::Point::new(0, 0.5)]);
     assert_eq!(app.curve_point(), None);

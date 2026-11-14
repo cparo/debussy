@@ -150,4 +150,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0124](0124-project-format-5-saves-automation-curve-lanes.md) | Project format 5 saves automation curve lanes, curve ports and control wires | Accepted | [Curves in the project](../architecture/automation.md#curves-in-the-project) |
 | [ADR-0125](0125-curves-drive-parameters-on-a-32-frame-timeline.md) | Curves drive parameters on a 32-frame timeline grid, read behind by each node's arrival time, overriding the set value | Accepted | [Evaluation](../architecture/automation.md#evaluation) |
 | [ADR-0126](0126-curve-lanes-are-edited-by-refusing-invalid-shapes.md) | Curve lanes are edited by refusing invalid shapes, with screen-linked handles, and a wired curve drives its parameter's control | Accepted | [Layout](../architecture/user-interface.md#layout) |
+| [ADR-0127](0127-a-press-on-a-curve-lane-more-than-8-pixels-from.md) | A press on a curve lane more than 8 pixels from the curve seeks rather than adding a point | Accepted | [Layout](../architecture/user-interface.md#layout) |
 
