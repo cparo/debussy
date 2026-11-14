@@ -193,10 +193,26 @@ impl<'a> NodeParameters<'a> {
             .collect())
     }
 
+    /// Whether parameter `info`'s control is shown: always, unless it is shown only while a
+    /// toggle is in a state the toggle is not in now ([`ParameterInfo::shown_while`]).
+    pub(crate) fn is_shown(&self, info: &ParameterInfo) -> bool {
+        info.shown_while
+            .as_ref()
+            .is_none_or(|(toggle, on)| (self.value(toggle) >= 0.5) == *on)
+    }
+
+    /// The controls drawn and visited by Tab now: [`tab_order`] less those not shown.
+    pub(crate) fn shown_order(&self) -> Vec<usize> {
+        tab_order(self.infos)
+            .into_iter()
+            .filter(|&i| self.is_shown(&self.infos[i]))
+            .collect()
+    }
+
     /// The parameter name and value `delta` arrow presses give parameter `infos[index]`
-    /// ([`stepped`]); `None` past the end, or for a toggle.
+    /// ([`stepped`]); `None` past the end, for a toggle, or for a parameter not shown.
     pub(crate) fn stepped(&self, index: usize, delta: i32) -> Option<(String, f32)> {
-        let info = self.infos.get(index)?;
+        let info = self.infos.get(index).filter(|i| self.is_shown(i))?;
         let value = stepped(info, self.value(&info.name), delta)?;
         Some((info.name.clone(), value))
     }
@@ -208,9 +224,12 @@ impl<'a> NodeParameters<'a> {
     }
 
     /// The parameter name and value a press gives parameter `infos[index]`: a toggle flipped;
-    /// `None` past the end, or for any other scale.
+    /// `None` past the end, for any other scale, or for a parameter not shown.
     pub(crate) fn pressed(&self, index: usize) -> Option<(String, f32)> {
-        let info = self.infos.get(index).filter(|i| i.scale == Scale::Toggle)?;
+        let info = self
+            .infos
+            .get(index)
+            .filter(|i| i.scale == Scale::Toggle && self.is_shown(i))?;
         let on = self.value(&info.name) >= 0.5;
         Some((info.name.clone(), if on { 0.0 } else { 1.0 }))
     }
@@ -316,6 +335,42 @@ mod tests {
         assert_eq!(view.node(), NODE);
         assert_eq!(view.kind(), None);
         assert_eq!(view.infos().len(), 3);
+    }
+
+    #[test]
+    fn test_shown_order_hides_by_the_toggle() -> TestResult {
+        let infos = audio_effects::parameter_infos("delay").ok_or("no delay")?;
+        let index = |name: &str| infos.iter().position(|i| i.name == name);
+        let (time, note, feel) = (index("time"), index("note"), index("feel"));
+        let names = |sync: f32| {
+            let stored = stored(&[("sync", sync)]);
+            let view = NodeParameters::new(NODE, None, &infos, &stored, None, false);
+            let order = view.shown_order();
+            let has = |i: Option<usize>| i.is_some_and(|i| order.contains(&i));
+            let keys = |i: Option<usize>| i.and_then(|i| view.stepped(i, 1)).is_some();
+            (has(time), has(note), has(feel), keys(time), keys(note))
+        };
+        assert_eq!(names(0.0), (true, false, false, true, false));
+        assert_eq!(names(1.0), (false, true, true, false, true));
+        Ok(())
+    }
+
+    #[test]
+    fn test_pressed_ignores_a_hidden_toggle() {
+        let infos = [
+            ParameterInfo::new("on", 0.0, 1.0, 0.0).with_scale(Scale::Toggle),
+            ParameterInfo::new("extra", 0.0, 1.0, 0.0)
+                .with_scale(Scale::Toggle)
+                .shown_while("on", true),
+        ];
+        let off = BTreeMap::new();
+        let view = NodeParameters::new(NODE, None, &infos, &off, None, false);
+        assert_eq!(view.pressed(1), None);
+        assert_eq!(view.shown_order(), [0]);
+        let on = stored(&[("on", 1.0)]);
+        let view = NodeParameters::new(NODE, None, &infos, &on, None, false);
+        assert_eq!(view.pressed(1), Some(("extra".to_owned(), 1.0)));
+        assert_eq!(view.shown_order(), [0, 1]);
     }
 
     #[test]

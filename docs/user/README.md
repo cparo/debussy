@@ -133,7 +133,8 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   reduces harsh, out-of-tune overtones at high drive, at the cost of more CPU and a short delay; it
   can only be changed while stopped or paused.
 - **Delay** repeats the sound. Set the **Time** in milliseconds, or turn on **Sync** to pick a
-  **Note** length (with a **Feel** of straight, dotted or triplet) that follows the project tempo.
+  **Note** length (with a **Feel** of straight, dotted or triplet) that follows the project tempo
+  instead; only the controls for the choice you made are shown.
   **Feedback** sets how much of each repeat comes back again. In **ping-pong** mode the repeats
   bounce between left and right; **Offset** delays the right side a little more or less than the
   left. Turn on the **Low-pass** to make each repeat darker than the last, and **Saturation** to

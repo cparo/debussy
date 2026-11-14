@@ -18,7 +18,8 @@ range at the graph's rate, allocated when the node is prepared. Per frame and ch
 4. **Output.** `x·(1 − mix) + y·mix`.
 
 The left tap is the time in frames, rounded, clamped to 1 frame and 4 s; the right tap adds
-`offset`, clamped to the buffer. A free time is `time` in milliseconds. A synced time is the note
+`offset`, clamped to the buffer. A free time is `time` in milliseconds, shown while `sync` is off; `note` and `feel` are shown
+while it is on (`docs/architecture/signal-graph.md` "Effect nodes"). A synced time is the note
 value × feel (straight ×1, dotted ×1.5, triplet ×2/3) of a whole note, given by the graph (see
 `docs/architecture/signal-graph.md` "Effect nodes"). `feedback`, `mix` and the low-pass cutoff
 (in its logarithm) ramp; the mode, `low-pass enabled` and `saturation` crossfade their shares

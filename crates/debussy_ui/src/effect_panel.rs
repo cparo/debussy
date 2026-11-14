@@ -11,7 +11,7 @@ use crate::effect_display::display_area;
 use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
 use crate::node_dialog::{DialogFocus, DialogMessage};
-use crate::node_parameters::{NodeParameters, tab_order};
+use crate::node_parameters::NodeParameters;
 use crate::theme::{self, Tone};
 use crate::view::toggle_button;
 
@@ -70,7 +70,7 @@ pub(crate) fn effect_panel<'a>(
     );
     // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's run
     // as a strip.
-    let order = tab_order(infos);
+    let order = parameters.shown_order();
     let split = order.partition_point(|&i| infos[i].group.is_empty());
     let (ungrouped, grouped) = order.split_at(split);
     let control = |i: usize| control(parameters, i, focus == Some(i));

@@ -81,9 +81,14 @@ fn info(control: Control) -> ParameterInfo {
         Control::Time => ParameterInfo::new("time", MIN_DELAY_MS, MAX_DELAY_MS, 375.0)
             .with_unit("ms")
             .with_scale(Scale::Logarithmic)
-            .with_group("time"),
-        Control::Note => choice("note", &NOTES, 2.0).with_group("time"),
-        Control::Feel => choice("feel", &FEELS, 0.0).with_group("time"),
+            .with_group("time")
+            .shown_while("sync", false),
+        Control::Note => choice("note", &NOTES, 2.0)
+            .with_group("time")
+            .shown_while("sync", true),
+        Control::Feel => choice("feel", &FEELS, 0.0)
+            .with_group("time")
+            .shown_while("sync", true),
         Control::Mode => choice("mode", &MODES, 0.0).with_group("stereo"),
         Control::Offset => ParameterInfo::new("offset", -MAX_OFFSET_MS, MAX_OFFSET_MS, 0.0)
             .with_unit("ms")
