@@ -4,6 +4,7 @@
 
 use audio_buffers::Layout;
 use dsp::{FOLD_DOWN_GAIN, OnePole, OnePoleCoefficients, TapDelay};
+use modulation::sync::{FEELS, synced_frames, whole_note};
 
 use crate::tap::{Tap, to_tap};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
@@ -58,9 +59,6 @@ const ALL: [Control; CONTROLS] = [
 /// The note values' names, by index: each is twice the one before, from a 32nd note.
 const NOTES: [&str; 6] = ["1/32", "1/16", "1/8", "1/4", "1/2", "1/1"];
 
-/// The feels' names, by index.
-const FEELS: [&str; 3] = ["straight", "dotted", "triplet"];
-
 /// The modes' names, by index.
 const MODES: [&str; 2] = ["stereo", "ping-pong"];
 
@@ -102,32 +100,6 @@ fn info(control: Control) -> ParameterInfo {
         Control::Saturation => toggle("saturation").with_group("feedback"),
         Control::Mix => percent("mix", 30.0).with_group("output"),
     }
-}
-
-/// The length of a synced delay, in frames: note value `note` (an index into [`NOTES`], rounded
-/// and clamped) times feel `feel` (an index into [`FEELS`]: ×1, ×1.5 or ×2/3), for a whole note
-/// of `frames_per_whole_note` frames. Not clamped to the buffer.
-pub(crate) fn synced_frames(frames_per_whole_note: f64, note: f32, feel: f32) -> f64 {
-    // Both are held in small ranges first, so the casts are exact.
-    #[allow(clippy::cast_possible_truncation)]
-    let note = note.round().clamp(0.0, 5.0) as i32;
-    let fraction = f64::from(2_i32.pow(note.unsigned_abs())) / 32.0;
-    let feel = if feel >= 1.5 {
-        2.0 / 3.0
-    } else if feel >= 0.5 {
-        1.5
-    } else {
-        1.0
-    };
-    frames_per_whole_note * fraction * feel
-}
-
-/// The whole-note length to run at for `frames_per_whole_note` at `sample_rate`: the length
-/// itself if it is positive, or 120 BPM in 4/4, two seconds, if it is not or none is given.
-fn whole_note(frames_per_whole_note: Option<f64>, sample_rate: u32) -> f64 {
-    frames_per_whole_note
-        .filter(|f| f.is_finite() && *f > 0.0)
-        .unwrap_or(2.0 * f64::from(sample_rate))
 }
 
 /// The longest delay time at `sample_rate`, in frames.
@@ -473,27 +445,6 @@ mod tests {
         assert_eq!(infos[Control::Mix as usize].default, 30.0);
         assert!(infos.iter().all(|i| !i.stopped_only));
         Ok(())
-    }
-
-    #[test]
-    fn test_synced_frames_follows_note_and_feel() {
-        // 120 BPM in 4/4 at 48 kHz: a whole note is 96 000 frames.
-        let whole = 96_000.0;
-        assert_eq!(synced_frames(whole, 2.0, 0.0), 12_000.0);
-        assert_eq!(synced_frames(whole, 0.0, 0.0), 3_000.0);
-        assert_eq!(synced_frames(whole, 5.0, 0.0), 96_000.0);
-        assert_eq!(synced_frames(whole, 2.0, 1.0), 18_000.0);
-        assert_eq!(synced_frames(whole, 3.0, 2.0), 16_000.0);
-        // Out-of-range indices are clamped.
-        assert_eq!(synced_frames(whole, 9.0, 7.0), 64_000.0);
-    }
-
-    #[test]
-    fn test_synced_frames_in_six_eight() {
-        // 6/8 at 120 eighth notes per minute, 48 kHz: 24 000 frames a beat, beat unit 8.
-        let whole = 24_000.0 * 8.0;
-        assert_eq!(synced_frames(whole, 2.0, 0.0), 24_000.0);
-        assert_eq!(synced_frames(whole, 2.0, 1.0), 36_000.0);
     }
 
     #[test]

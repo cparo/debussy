@@ -4,10 +4,12 @@
 use signal_graph::{Node, ParameterInfo};
 
 use crate::amplifier::{self, Amplifier};
+use crate::chorus::Chorus;
 use crate::curve::CurveFn;
 use crate::delay::{self, Delay};
 use crate::dynamics::{self, Dynamics};
 use crate::filters::{self, Butterworth, Response};
+use crate::flanger::Flanger;
 use crate::parametric::{self, ParametricEq};
 use crate::reverb::{self, Reverb};
 
@@ -69,6 +71,18 @@ pub const EFFECTS: &[EffectKind] = &[
         name: "Reverb",
         build: build_reverb,
         curve: Some(reverb::impulse_curve),
+    },
+    EffectKind {
+        id: "chorus",
+        name: "Chorus",
+        build: build_chorus,
+        curve: None,
+    },
+    EffectKind {
+        id: "flanger",
+        name: "Flanger",
+        build: build_flanger,
+        curve: None,
     },
 ];
 
@@ -155,6 +169,36 @@ pub const PRESETS: &[Preset] = &[
             ("mix", 40.0),
         ],
     },
+    Preset {
+        name: "Subtle",
+        kind: "chorus",
+        values: &[("depth", 2.0), ("mix", 35.0)],
+    },
+    Preset {
+        name: "Wide",
+        kind: "chorus",
+        values: &[("voices", 3.0), ("depth", 4.0), ("spread", 180.0)],
+    },
+    Preset {
+        name: "Jet",
+        kind: "flanger",
+        values: &[
+            ("rate", 0.1),
+            ("delay", 2.0),
+            ("depth", 90.0),
+            ("feedback", 70.0),
+        ],
+    },
+    Preset {
+        name: "Metallic",
+        kind: "flanger",
+        values: &[
+            ("rate", 0.5),
+            ("delay", 0.5),
+            ("depth", 50.0),
+            ("feedback", -85.0),
+        ],
+    },
 ];
 
 impl Preset {
@@ -226,6 +270,16 @@ fn build_delay() -> Option<Box<dyn Node>> {
     Some(Box::new(Delay::new().ok()?))
 }
 
+/// A new chorus.
+fn build_chorus() -> Option<Box<dyn Node>> {
+    Some(Box::new(Chorus::new().ok()?))
+}
+
+/// A new flanger.
+fn build_flanger() -> Option<Box<dyn Node>> {
+    Some(Box::new(Flanger::new().ok()?))
+}
+
 /// A new reverb.
 fn build_reverb() -> Option<Box<dyn Node>> {
     Some(Box::new(Reverb::new().ok()?))
@@ -295,6 +349,8 @@ mod tests {
             assert_eq!(matching_preset("dynamics", &infos, changed), None);
         }
         assert_eq!(presets("delay").count(), 3);
+        assert_eq!(presets("chorus").count(), 2);
+        assert_eq!(presets("flanger").count(), 2);
         assert_eq!(presets("low-pass").count(), 0);
         let gate = preset("Gate").ok_or("no gate")?;
         assert_eq!((gate.get("range"), gate.get("knee")), (Some(80.0), None));

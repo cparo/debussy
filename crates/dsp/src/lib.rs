@@ -16,7 +16,8 @@
 //!   [`butterworth_q`].
 //! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
 //!   or limiter, and [`DelayLine`] for lookahead (ADR-0099).
-//! - `delay`: [`TapDelay`], a delay line read at any whole-frame tap.
+//! - `delay`: [`TapDelay`], a delay line read at any whole-frame tap, or at a fractional one by
+//!   linear or cubic Hermite interpolation.
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `oversample`: [`Oversampler`], 2× or 4× oversampling around a nonlinearity (ADR-0102).
 //! - `error`: [`Error`].

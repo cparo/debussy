@@ -16,6 +16,12 @@
 //!   oversampling, and [`ShaperCurve`], its curve (`docs/architecture/effects.md` "Amplifier").
 //! - `delay`: [`Delay`], a whole-frame tap delay, free or tempo-synced, in stereo or ping-pong
 //!   (`docs/architecture/delay-and-reverb.md` "Delay").
+//! - `chorus`: the chorus, 1 to 4 LFO-swept delay voices per channel
+//!   (`docs/architecture/modulation.md` "Chorus").
+//! - `flanger`: the flanger, an LFO-swept short delay with feedback
+//!   (`docs/architecture/modulation.md` "Flanger").
+//! - `modulated_delay`: the node the chorus and flanger share: the LFO, lines, spread and mix
+//!   around each kind's sweep.
 //! - `reverb`: [`Reverb`], a feedback delay network or Dattorro's plate behind a pre-delay
 //!   (`docs/architecture/delay-and-reverb.md` "Reverb").
 //! - `tap`: a whole-frame tap that crossfades when it changes, for `delay` and `reverb`.
@@ -33,13 +39,16 @@
 #![forbid(unsafe_code)]
 
 mod amplifier;
+mod chorus;
 mod curve;
 mod delay;
 mod dynamics;
 mod error;
 mod filters;
+mod flanger;
 mod impulse;
 mod mixer;
+mod modulated_delay;
 mod parametric;
 mod registry;
 mod response;

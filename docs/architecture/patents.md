@@ -29,4 +29,10 @@ feedback, and the low-pass and saturation in the feedback path
 reverb: the fixed-length eight-line Hadamard feedback delay network with outputs taken before the
 matrix, and Dattorro's plate with linear-interpolated modulated allpasses, with no size control and
 no crossfade between them
-([ADR-0113](../adrs/0113-the-reverb-is-a-fixed-length-feedback-delay.md)).
+([ADR-0113](../adrs/0113-the-reverb-is-a-fixed-length-feedback-delay.md)), and the LFO: the
+phase accumulator, sine, triangle, saw, square and sample-and-hold shapes, offset reads for stereo
+spread and tempo-synced periods, without a smooth-random shape
+([ADR-0119](../adrs/0119-lfo-shapes-are-sine-triangle-saws-square-and.md)), and the chorus and
+flanger: LFO-modulated delays read by 4-point Hermite interpolation, with in-node flanger
+feedback and without through-zero flanging
+([ADR-0120](../adrs/0120-chorus-and-flanger-are-lfo-modulated-delays-read.md)).
