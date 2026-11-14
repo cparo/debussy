@@ -1,6 +1,6 @@
 //! Scrolling the node dialog's focused control into view: Tab may move the keyboard focus to a
 //! control scrolled out of sight, such as an equaliser band past the right edge of its strips
-//! (`docs/architecture/user-interface.md` "Layout", ADR-0109).
+//! (`docs/architecture/node-dialogs.md` "Mixer dialogs", ADR-0109).
 //!
 //! The focus ring around the focused control carries the id [`FOCUSED`]. [`reveal`] runs two
 //! widget operations: the first finds that ring's bounds, the second scrolls each scrollable

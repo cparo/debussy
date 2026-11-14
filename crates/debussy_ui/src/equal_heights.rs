@@ -1,5 +1,5 @@
 //! A row whose children are all as tall as its tallest, so a dialog's strips line up at the
-//! bottom (`docs/architecture/user-interface.md` "Layout"). iced's `row` cannot do this: a
+//! bottom (`docs/architecture/node-dialogs.md` "Node dialogs"). iced's `row` cannot do this: a
 //! `Fill`-height child of a `Shrink`-height row is laid out against no height at all.
 
 use iced::advanced::widget::{Operation, Tree, Widget};

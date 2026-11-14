@@ -1,6 +1,6 @@
 //! A built-in effect's dialog body: one control per parameter, chosen by its scale and grouped
 //! into strips as tall as the tallest; and the keyboard focus that Tab and presses move through
-//! them (`docs/architecture/user-interface.md` "Layout").
+//! them (`docs/architecture/node-dialogs.md` "Node dialogs").
 
 use iced::widget::{Space, column, container, pick_list, row, scrollable, slider, text, tooltip};
 use iced::{Element, Length};

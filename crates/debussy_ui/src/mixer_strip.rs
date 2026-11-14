@@ -1,6 +1,6 @@
 //! A mixer's dialog body: a "Channels" field above narrow numbered strips, each with mute above
 //! solo, then vertical gain and pan sliders with their values as hover tips; and the keyboard
-//! focus that Tab and presses move through them (`docs/architecture/user-interface.md` "Layout").
+//! focus that Tab and presses move through them (`docs/architecture/node-dialogs.md` "Mixer dialogs").
 
 use audio_effects::{Control, Mode, parameter_name};
 use iced::widget::canvas::{Frame, Geometry, Path, Program, Stroke};
