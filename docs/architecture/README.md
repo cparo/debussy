@@ -83,6 +83,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Dynamics display](effect-displays.md#dynamics-display)
   - [Amplifier display](effect-displays.md#amplifier-display)
   - [Impulse response display](effect-displays.md#impulse-response-display)
+  - [Modulation display](effect-displays.md#modulation-display)
 - [Effects](effects.md)
   - [Effect kinds](effects.md#effect-kinds)
   - [Effect presets](effects.md#effect-presets)

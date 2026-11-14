@@ -7,11 +7,8 @@ use audio_effects::ImpulseCurve;
 use iced::Color;
 
 use crate::effect_display::{DisplayContext, Pixels};
-use crate::plot::{Axis, BOTTOM_DB, Canvas, LABEL_INSET, LABEL_SIZE, Plot, columns, db_label};
+use crate::plot::{Axis, BOTTOM_DB, Canvas, Plot, columns, db_label, lanes, time_marks, time_step};
 use crate::theme::{self, GRID, GRID_ZERO};
-
-/// The gap between the two lanes, in logical pixels.
-const LANE_GAP: f32 = 8.0;
 
 /// The spacing of a lane's grid lines, in dB.
 const LANE_DB_STEP: f32 = 24.0;
@@ -21,9 +18,6 @@ const LANE_MARKS: [f32; 3] = [0.0, -48.0, BOTTOM_DB];
 
 /// The level a lane's tag ("L" or "R") is centred on in the gutter, in dB: between two labels.
 const TAG_DB: f32 = -24.0;
-
-/// The most marks the time axis shows.
-const MAX_TIME_MARKS: usize = 8;
 
 /// `curve` drawn on its grid for `context`, on a transparent background: time across, from the
 /// impulse to the curve's span; the left channel's level in the top lane and the right's in the
@@ -47,9 +41,7 @@ pub(crate) fn render(curve: &ImpulseCurve, context: &DisplayContext) -> Option<P
     }
     canvas.labels(&top, none, &lane_marks);
     canvas.labels(&bottom, &time_marks(span, step), &lane_marks);
-    for (lane, tag) in [(&top, "L"), (&bottom, "R")] {
-        canvas.text(tag, LABEL_INSET + 1.0, lane.y(TAG_DB) + LABEL_SIZE / 2.0);
-    }
+    canvas.lane_tags([&top, &bottom], TAG_DB);
     let bins = columns(&top, canvas.scale()).count();
     let peaks = curve.peak_levels(bins);
     let accent = theme::tokens(context.tone).audio;
@@ -72,20 +64,6 @@ fn lane_lines() -> impl Iterator<Item = f32> {
     (0..=count).map(|i| -f32::from(i) * LANE_DB_STEP)
 }
 
-/// `plot` split into two lanes, top then bottom, each half its height less half of
-/// [`LANE_GAP`].
-fn lanes(plot: Plot) -> [Plot; 2] {
-    let height = ((plot.height - LANE_GAP) / 2.0).max(1.0);
-    [
-        Plot { height, ..plot },
-        Plot {
-            top: plot.top + height + LANE_GAP,
-            height,
-            ..plot
-        },
-    ]
-}
-
 /// The point of each of `peaks` (equal slices of `span` seconds) in `lane`: at its slice's
 /// middle, at its level in dB, with silence and NaN at the bottom edge.
 fn points<'a>(
@@ -103,57 +81,6 @@ fn points<'a>(
         // `max` turns NaN and silence (−∞) into the bottom edge.
         (lane.x(t), lane.y(db.max(BOTTOM_DB)))
     })
-}
-
-/// The time axis's mark spacing for a span of `span` seconds: the smallest 1, 2 or 5 × 10ᵏ
-/// seconds that gives at most [`MAX_TIME_MARKS`] marks, so at least four.
-fn time_step(span: f32) -> f32 {
-    let span = if span.is_finite() && span > 0.0 {
-        span
-    } else {
-        1.0
-    };
-    // At most `MAX_TIME_MARKS` − 1 steps across the span.
-    #[allow(clippy::cast_precision_loss)]
-    let rough = span / (MAX_TIME_MARKS - 1) as f32;
-    let decade = 10.0_f32.powf(rough.log10().floor());
-    [1.0, 2.0, 5.0, 10.0]
-        .into_iter()
-        .map(|m| m * decade)
-        .find(|&step| step >= rough)
-        .unwrap_or(10.0 * decade)
-}
-
-/// The time axis's marks: every `step` seconds from 0 to `span`, each with its
-/// [`time_label`].
-fn time_marks(span: f32, step: f32) -> Vec<(f32, String)> {
-    // A handful of marks.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let count = (span / step + 1e-3).floor().max(0.0) as u16;
-    (0..=count)
-        .map(|i| {
-            let t = f32::from(i) * step;
-            (t, time_label(t))
-        })
-        .collect()
-}
-
-/// The label of a time, such as `"0"`, `"250ms"`, `"1s"` or `"1.5s"`.
-fn time_label(seconds: f32) -> String {
-    // Display times: at most 20 s, to the millisecond.
-    #[allow(clippy::cast_possible_truncation)]
-    let ms = (seconds * 1000.0).round() as i32;
-    if ms == 0 {
-        "0".to_owned()
-    } else if ms < 1000 {
-        format!("{ms}ms")
-    } else if ms % 1000 == 0 {
-        format!("{}s", ms / 1000)
-    } else if ms % 100 == 0 {
-        format!("{}.{}s", ms / 1000, (ms % 1000) / 100)
-    } else {
-        format!("{}.{:02}s", ms / 1000, (ms % 1000) / 10)
-    }
 }
 
 #[cfg(test)]
@@ -243,42 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn test_lanes_stack_with_a_gap() {
-        let plot = Plot::new(600.0, Axis::linear(0.0, 1.0), lane_axis());
-        let [top, bottom] = lanes(plot);
-        assert_eq!(top.top, plot.top);
-        assert!((bottom.top - top.bottom() - LANE_GAP).abs() < 1e-4);
-        assert!((bottom.bottom() - plot.bottom()).abs() < 1e-4);
-    }
-
-    #[test]
     fn test_lane_lines_every_24_db() {
         assert_eq!(
             lane_lines().collect::<Vec<_>>(),
             [0.0, -24.0, -48.0, -72.0, -96.0]
-        );
-    }
-
-    #[test]
-    fn test_time_step_gives_four_to_eight_marks() {
-        for span in [0.05, 0.07, 0.26, 1.0, 1.7, 3.21, 7.5, 20.0] {
-            let step = time_step(span);
-            let marks = time_marks(span, step).len();
-            assert!(
-                (4..=MAX_TIME_MARKS).contains(&marks),
-                "{span}: {step} {marks}"
-            );
-        }
-        assert!((time_step(1.7) - 0.5).abs() < 1e-6);
-        assert!((time_step(0.05) - 0.01).abs() < 1e-6);
-        assert!((time_step(f32::NAN) - 0.2).abs() < 1e-6);
-    }
-
-    #[test]
-    fn test_time_label_formats() {
-        assert_eq!(
-            [0.0, 0.01, 0.25, 1.0, 1.5, 2.25].map(time_label),
-            ["0", "10ms", "250ms", "1s", "1.5s", "2.25s"]
         );
     }
 }

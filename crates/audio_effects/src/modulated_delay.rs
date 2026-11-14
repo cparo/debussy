@@ -30,6 +30,12 @@ enum LfoControl {
 /// How many LFO parameters there are.
 const LFO_CONTROLS: usize = 5;
 
+/// How many parameters a modulated delay whose kind declares `own` of its own has: the LFO's,
+/// the kind's, `spread` and `mix`.
+pub(crate) const fn controls(own: usize) -> usize {
+    LFO_CONTROLS + own + 2
+}
+
 /// What one kind of modulated delay adds to the shared node: its own parameters, declared between
 /// the LFO's and `spread` and `mix`, and how it reads and writes the lines each frame.
 pub(crate) trait Sweep: Send + Sized {
@@ -143,6 +149,20 @@ fn shape(value: f32) -> Shape {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let index = value.round().clamp(0.0, last) as usize;
     SHAPES.get(index).map_or(Shape::Sine, |&(_, shape)| shape)
+}
+
+/// A modulated delay of kind `S` at `values` (every parameter, in declaration order) from
+/// silence, at `sample_rate` for a whole note of `frames_per_whole_note` frames, at LFO phase 0:
+/// each call runs one frame of input through it. Missing values read as 0. Allocates.
+pub(crate) fn response<S: Sweep>(
+    values: &[f32],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> impl FnMut(f32, f32) -> (f32, f32) + use<S> {
+    let mut running = Running::<S>::new(sample_rate, Some(frames_per_whole_note), &|i| {
+        values.get(i).copied().unwrap_or(0.0)
+    });
+    move |left, right| running.frame(left, right)
 }
 
 /// A prepared modulated delay.
@@ -321,7 +341,7 @@ mod tests {
     fn assert_wrapped<S: Sweep>() {
         assert_eq!(S::infos().len(), S::CONTROLS);
         let infos = infos::<S>();
-        assert_eq!(infos.len(), LFO_CONTROLS + S::CONTROLS + 2);
+        assert_eq!(infos.len(), controls(S::CONTROLS));
         let names: Vec<&str> = infos.iter().map(|i| i.name.as_str()).collect();
         let groups: Vec<&str> = infos.iter().map(|i| i.group.as_str()).collect();
         let tail = infos.len() - 2;

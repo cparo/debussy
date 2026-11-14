@@ -4,12 +4,12 @@
 use signal_graph::{Node, ParameterInfo};
 
 use crate::amplifier::{self, Amplifier};
-use crate::chorus::Chorus;
+use crate::chorus::{self, Chorus};
 use crate::curve::CurveFn;
 use crate::delay::{self, Delay};
 use crate::dynamics::{self, Dynamics};
 use crate::filters::{self, Butterworth, Response};
-use crate::flanger::Flanger;
+use crate::flanger::{self, Flanger};
 use crate::parametric::{self, ParametricEq};
 use crate::reverb::{self, Reverb};
 
@@ -76,13 +76,13 @@ pub const EFFECTS: &[EffectKind] = &[
         id: "chorus",
         name: "Chorus",
         build: build_chorus,
-        curve: None,
+        curve: Some(chorus::curve),
     },
     EffectKind {
         id: "flanger",
         name: "Flanger",
         build: build_flanger,
-        curve: None,
+        curve: Some(flanger::curve),
     },
 ];
 

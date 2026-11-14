@@ -13,7 +13,7 @@ use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use crate::app::Message;
 use crate::raster::draw_tiled;
 use crate::theme::{self, Tone};
-use crate::{amplifier_display, impulse_display, response_display, transfer_display};
+use crate::{amplifier_display, gain_display, impulse_display, response_display, transfer_display};
 
 /// The display area's height, in logical pixels; its width fills the dialog.
 pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
@@ -76,6 +76,7 @@ pub(crate) fn draw(curve: &Curve, context: &DisplayContext) -> Option<Pixels> {
         Curve::Transfer(transfer) => transfer_display::render(transfer, context),
         Curve::Shaper(shaper) => amplifier_display::render(shaper, context),
         Curve::Impulse(impulse) => impulse_display::render(impulse, context),
+        Curve::Spectrogram(spectrogram) => gain_display::render(spectrogram, context),
     }
 }
 

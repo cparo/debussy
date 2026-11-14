@@ -45,6 +45,12 @@ pub(crate) const BOTTOM_DB: f32 = -96.0;
 /// The spacing of a decibel axis's grid, in dB.
 pub(crate) const DB_STEP: f32 = 12.0;
 
+/// The gap between the two lanes, in logical pixels.
+pub(crate) const LANE_GAP: f32 = 8.0;
+
+/// The most marks the time axis shows.
+pub(crate) const MAX_TIME_MARKS: usize = 8;
+
 /// How an axis spaces its values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Scale {
@@ -273,6 +279,19 @@ impl Canvas {
         self.raster.paint(&mask, LABEL);
     }
 
+    /// A rectangle filled with `color`, at `(x, y)` and `width` × `height`, in logical pixels.
+    pub(crate) fn fill(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color) {
+        self.raster.fill_rect(x, y, width, height, color);
+    }
+
+    /// The lane tags "L" and "R", left-aligned in the left gutter of `lanes` (top then bottom),
+    /// centred on `at` on each lane's vertical axis.
+    pub(crate) fn lane_tags(&mut self, lanes: [&Plot; 2], at: f32) {
+        for (lane, tag) in lanes.into_iter().zip(["L", "R"]) {
+            self.text(tag, LABEL_INSET + 1.0, lane.y(at) + LABEL_SIZE / 2.0);
+        }
+    }
+
     /// The curve through `points`, drawn by [`polyline`] in `color`.
     pub(crate) fn curve(
         &mut self,
@@ -393,6 +412,71 @@ pub(crate) fn polyline(mask: &mut Mask, plot: &Plot, points: impl IntoIterator<I
             mask.stroke_segment(x0, y0, x, y, CURVE_WIDTH);
         }
         previous = Some((x, y));
+    }
+}
+
+/// `plot` split into two lanes, top then bottom, each half its height less half of
+/// [`LANE_GAP`].
+pub(crate) fn lanes(plot: Plot) -> [Plot; 2] {
+    let height = ((plot.height - LANE_GAP) / 2.0).max(1.0);
+    [
+        Plot { height, ..plot },
+        Plot {
+            top: plot.top + height + LANE_GAP,
+            height,
+            ..plot
+        },
+    ]
+}
+
+/// The time axis's mark spacing for a span of `span` seconds: the smallest 1, 2 or 5 × 10ᵏ
+/// seconds that gives at most [`MAX_TIME_MARKS`] marks, so at least four.
+pub(crate) fn time_step(span: f32) -> f32 {
+    let span = if span.is_finite() && span > 0.0 {
+        span
+    } else {
+        1.0
+    };
+    // At most `MAX_TIME_MARKS` − 1 steps across the span.
+    #[allow(clippy::cast_precision_loss)]
+    let rough = span / (MAX_TIME_MARKS - 1) as f32;
+    let decade = 10.0_f32.powf(rough.log10().floor());
+    [1.0, 2.0, 5.0, 10.0]
+        .into_iter()
+        .map(|m| m * decade)
+        .find(|&step| step >= rough)
+        .unwrap_or(10.0 * decade)
+}
+
+/// The time axis's marks: every `step` seconds from 0 to `span`, each with its
+/// [`time_label`].
+pub(crate) fn time_marks(span: f32, step: f32) -> Vec<(f32, String)> {
+    // A handful of marks.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let count = (span / step + 1e-3).floor().max(0.0) as u16;
+    (0..=count)
+        .map(|i| {
+            let t = f32::from(i) * step;
+            (t, time_label(t))
+        })
+        .collect()
+}
+
+/// The label of a time, such as `"0"`, `"250ms"`, `"1s"` or `"1.5s"`.
+pub(crate) fn time_label(seconds: f32) -> String {
+    // Display times: at most 20 s, to the millisecond.
+    #[allow(clippy::cast_possible_truncation)]
+    let ms = (seconds * 1000.0).round() as i32;
+    if ms == 0 {
+        "0".to_owned()
+    } else if ms < 1000 {
+        format!("{ms}ms")
+    } else if ms % 1000 == 0 {
+        format!("{}s", ms / 1000)
+    } else if ms % 100 == 0 {
+        format!("{}.{}s", ms / 1000, (ms % 1000) / 100)
+    } else {
+        format!("{}.{:02}s", ms / 1000, (ms % 1000) / 10)
     }
 }
 
@@ -610,5 +694,37 @@ mod tests {
         assert_eq!((pixels.width(), pixels.height()), (900, 480));
         assert_eq!(pixels.rgba().len(), 900 * 480 * 4);
         Ok(())
+    }
+
+    #[test]
+    fn test_lanes_stack_with_a_gap() {
+        let plot = Plot::new(600.0, Axis::linear(0.0, 1.0), Axis::decibels());
+        let [top, bottom] = lanes(plot);
+        assert_eq!(top.top, plot.top);
+        assert!((bottom.top - top.bottom() - LANE_GAP).abs() < 1e-4);
+        assert!((bottom.bottom() - plot.bottom()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_time_step_gives_four_to_eight_marks() {
+        for span in [0.05, 0.07, 0.26, 1.0, 1.7, 3.21, 7.5, 20.0] {
+            let step = time_step(span);
+            let marks = time_marks(span, step).len();
+            assert!(
+                (4..=MAX_TIME_MARKS).contains(&marks),
+                "{span}: {step} {marks}"
+            );
+        }
+        assert!((time_step(1.7) - 0.5).abs() < 1e-6);
+        assert!((time_step(0.05) - 0.01).abs() < 1e-6);
+        assert!((time_step(f32::NAN) - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_time_label_formats() {
+        assert_eq!(
+            [0.0, 0.01, 0.25, 1.0, 1.5, 2.25].map(time_label),
+            ["0", "10ms", "250ms", "1s", "1.5s", "2.25s"]
+        );
     }
 }

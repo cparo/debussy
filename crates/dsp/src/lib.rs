@@ -7,7 +7,8 @@
 //!
 //! # Modules
 //!
-//! - `noise`: [`Noise`], a seeded pseudo-random generator for dither.
+//! - `noise`: [`Noise`], a seeded pseudo-random generator for dither, and [`Pink`], seeded pink
+//!   noise (ADR-0122).
 //! - `dither`: [`Ditherer`], TPDF dither and quantisation to 16 or 24 bits (ADR-0025).
 //! - `level`: gain in decibels, the −3 dB pan law (ADR-0018) and the mono fold-down (ADR-0030).
 //! - `fft`: [`Fft`] and [`RealFft`], radix-2 transforms, and [`Stft`], Hann-windowed spectra
@@ -51,6 +52,6 @@ pub use filter::{
 pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
-pub use noise::Noise;
+pub use noise::{Noise, Pink};
 pub use oversample::{Factor, MAX_FACTOR as MAX_OVERSAMPLING, Oversampler};
 pub use resample::{MAX_PHASES, Quality, Resampler};

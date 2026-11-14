@@ -5,7 +5,8 @@ use dsp::TapDelay;
 use modulation::Lfo;
 use signal_graph::{ParameterInfo, Ramp, Scale};
 
-use crate::modulated_delay::{LfoDefaults, ModulatedDelay, Sweep, ms_to_frames};
+use crate::gain_spectrogram::SpectrogramCurve;
+use crate::modulated_delay::{LfoDefaults, ModulatedDelay, Sweep, controls, ms_to_frames};
 
 /// A chorus: each channel's input written into a line read by 1 to 4 voices, each at a delay the
 /// LFO sweeps from `delay` up to `delay + depth`, the voices at evenly spaced LFO phases and the
@@ -137,6 +138,26 @@ impl Sweep for Voices {
         }
         wet
     }
+}
+
+/// How many parameters a chorus has.
+pub(crate) const CONTROLS: usize = controls(<Voices as Sweep>::CONTROLS);
+
+/// The curve of a `chorus` effect whose parameters stand at `values`, in declaration order (see
+/// [`crate::CurveFn`]): its gain over [`crate::gain_spectrogram::SPAN`] of pink noise, simulated
+/// when it is read.
+pub(crate) fn curve(
+    values: &[f32],
+    sample_rate: u32,
+    frames_per_whole_note: f64,
+) -> Option<crate::Curve> {
+    let values = <&[f32; CONTROLS]>::try_from(values).ok()?;
+    let whole = modulation::sync::whole_note(Some(frames_per_whole_note), sample_rate);
+    Some(crate::Curve::Spectrogram(SpectrogramCurve::chorus(
+        *values,
+        sample_rate,
+        whole,
+    )))
 }
 
 #[cfg(test)]
