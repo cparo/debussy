@@ -115,4 +115,7 @@ pub enum Error {
     /// A sample format the writer does not produce.
     #[error("cannot write {0:?}: the writer produces 16- and 24-bit integer and 32-bit float")]
     UnsupportedWriteFormat(SampleFormat),
+    /// A file to repair is not laid out as the writer lays files out.
+    #[error("the file cannot be repaired: {0}")]
+    UnrepairableLayout(&'static str),
 }

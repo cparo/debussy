@@ -8,12 +8,12 @@
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use audio_buffers::{Block, BlockPool, Consumer, Layout, Producer, queue};
 use wav_files::{Channels, SampleFormat, Spec, WavWriter};
@@ -35,14 +35,17 @@ pub struct RecorderConfig {
     pub sample_rate: u32,
     /// How much of each take can wait in memory for the disk: 2 s by default (ADR-0078).
     pub buffer: Duration,
+    /// How often the writer syncs each file while writing it: 1 s by default.
+    pub sync_interval: Duration,
 }
 
 impl RecorderConfig {
-    /// The default buffer of 2 s at `sample_rate`.
+    /// The default buffer of 2 s and sync interval of 1 s at `sample_rate`.
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
             buffer: Duration::from_secs(2),
+            sync_interval: Duration::from_secs(1),
         }
     }
 }
@@ -74,6 +77,11 @@ struct WriterTake {
     returns: Producer<Block>,
     /// Frames in the file so far.
     written: u64,
+    /// When the file was last synced, and how often to.
+    synced: Instant,
+    sync_interval: Duration,
+    /// Whether frames have been written since the last sync.
+    unsynced: bool,
     error: Option<String>,
     done: bool,
 }
@@ -107,6 +115,27 @@ impl WriterTake {
             self.fail(error.to_string());
         }
         self.written += samples.len() as u64;
+        self.unsynced = true;
+    }
+
+    /// Flushes and syncs the file if frames are waiting and the interval has passed, so a crash
+    /// loses at most about that much of the take (`docs/architecture/recording.md` "Writer
+    /// thread"). A failure fails the take.
+    fn sync_if_due(&mut self) {
+        if !self.unsynced || self.synced.elapsed() < self.sync_interval {
+            return;
+        }
+        self.unsynced = false;
+        self.synced = Instant::now();
+        if let Some(file) = &mut self.file {
+            let buffered = file.get_mut();
+            if let Err(error) = buffered
+                .flush()
+                .and_then(|()| buffered.get_ref().sync_data())
+            {
+                self.fail(error.to_string());
+            }
+        }
     }
 
     fn fail(&mut self, message: String) {
@@ -156,6 +185,7 @@ fn run(mut takes: Vec<WriterTake>, mut events: Producer<TakeEvent>, stop: Arc<At
                 take.append(stamped);
                 idle = false;
             }
+            take.sync_if_due();
             if ended || stopping {
                 let frames = if ended {
                     take.shared.frames.load(Ordering::Relaxed)
@@ -223,6 +253,9 @@ impl Recorder {
                     blocks: blocks_rx,
                     returns: returns_tx,
                     written: 0,
+                    synced: Instant::now(),
+                    sync_interval: config.sync_interval,
+                    unsynced: false,
                     error: None,
                     done: false,
                 });

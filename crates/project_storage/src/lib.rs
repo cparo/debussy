@@ -12,6 +12,7 @@
 //! - `validate`: conversion to and from `project_model`, with every check and limit.
 //! - `migrate`: load limits on the text, the format version, and migrations.
 //! - `bundle`: [`Bundle`]: the directory, crash-safe writes, version stamps, cleanup.
+//! - `recovery`: the recording marker, and recovering takes a crash cut off.
 //! - `settings`: [`AppSettings`], the application's settings outside any project.
 //! - `error`: [`Error`].
 
@@ -21,6 +22,7 @@ mod bundle;
 mod error;
 mod format;
 mod migrate;
+mod recovery;
 mod settings;
 mod validate;
 
@@ -28,6 +30,7 @@ pub use bundle::{Bundle, MAX_FILE_BYTES, MAX_VERSIONS};
 pub use error::Error;
 pub use format::FORMAT_VERSION;
 pub use migrate::MAX_DEPTH;
+pub use recovery::{MAX_RECORDING_BYTES, Recording, RecordingStart, RecoveredPass, Recovery};
 pub use settings::{
     AppSettings, ClickSound, ExportDepth, ExportFormatName, ExportPreferences, MAX_CLICK_LEVEL_DB,
     MIN_CLICK_LEVEL_DB, SETTINGS_VERSION,

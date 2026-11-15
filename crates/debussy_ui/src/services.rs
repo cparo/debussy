@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
-use audio_engine::{Processor, Streams, TakeSink, TrackFeeds};
+use audio_engine::{Processor, Streams, TakeInfo, TakeSink, TrackFeeds};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
@@ -67,6 +67,38 @@ pub enum TakeStatus {
         /// What went wrong.
         message: String,
     },
+}
+
+/// A recording pass as the crash marker records it, so its takes can be recovered if the
+/// application dies before placing them (`docs/architecture/recording.md` "Take recovery").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassMarker {
+    /// The device's input plus output latency when the pass started, in frames.
+    pub device_latency: u64,
+    /// Each armed track and its files, left first.
+    pub tracks: Vec<(TrackId, Vec<String>)>,
+}
+
+/// Takes of a pass a crash cut off, repaired and ready to place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredPass {
+    /// Each track still in the project, and its files, left first.
+    pub tracks: Vec<(TrackId, Vec<String>)>,
+    /// The length every take is placed with, in frames.
+    pub frames: u64,
+    /// Where capture began.
+    pub info: TakeInfo,
+    /// The device latency when the pass started, in frames.
+    pub device_latency: u64,
+}
+
+/// What opening the project found of a pass a crash cut off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recovered {
+    /// Takes to place.
+    Takes(RecoveredPass),
+    /// Nothing could be recovered; the files are deleted.
+    Discarded,
 }
 
 /// The click's per-machine preferences (`docs/architecture/recording.md` "Click track").
@@ -243,6 +275,27 @@ pub trait Services {
 
     /// Ends the pass, deleting `files`.
     fn discard_takes(&mut self, files: &[String]);
+
+    /// Records the pass just started in the crash marker.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; recording goes on unprotected.
+    fn mark_pass(&mut self, marker: &PassMarker) -> Result<(), String>;
+
+    /// Adds where capture began to the crash marker, which recovery needs to place the takes.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn mark_pass_started(&mut self, info: TakeInfo) -> Result<(), String>;
+
+    /// Removes the crash marker, once the pass's takes are placed or discarded. A marker left
+    /// behind is found on the next open; takes already placed are then skipped.
+    fn clear_pass_marker(&mut self);
+
+    /// What opening the project found of a pass a crash cut off, the first time it is asked.
+    fn take_recovered(&mut self) -> Option<Recovered>;
 
     /// The click preferences remembered on this machine.
     fn click_preferences(&mut self) -> ClickPreferences;

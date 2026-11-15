@@ -121,6 +121,7 @@ fn test_overrun_drops_frames_counts_and_pads_with_silence() -> Result<(), Box<dy
     let config = RecorderConfig {
         sample_rate: RATE,
         buffer: Duration::from_millis(1),
+        ..RecorderConfig::new(RATE)
     };
     let (mut recorder, mut takes) = Recorder::start(&paths, config)?;
     let take = &mut takes[0];
@@ -157,6 +158,42 @@ fn test_overrun_drops_frames_counts_and_pads_with_silence() -> Result<(), Box<dy
     assert!(samples[3072..gap_end].iter().all(|&s| s == 0.0));
     assert_eq!(&samples[gap_end..], &second[..]);
     assert_eq!(recorder.overruns(0), Some(take.overruns()));
+    drop(takes);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+#[test]
+fn test_writer_syncs_audio_to_disk_before_the_take_ends() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("synced")?;
+    let paths = [dir.join("a.wav")];
+    let config = RecorderConfig {
+        sync_interval: Duration::from_millis(10),
+        ..RecorderConfig::new(RATE)
+    };
+    let (mut recorder, mut takes) = Recorder::start(&paths, config)?;
+    let header = std::fs::metadata(&paths[0])?.len();
+    let samples: Vec<f32> = (0..1024).map(value).collect();
+    assert_eq!(write(&mut takes[0], &samples)?, samples.len());
+    // One whole block, which the take hands over; with the header, less than the buffered writer
+    // holds, so only a sync puts it in the file.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while std::fs::metadata(&paths[0])?.len() < header + 4 * 1024 {
+        if Instant::now() > deadline {
+            return Err("the take never reached the disk".into());
+        }
+        sleep(Duration::from_millis(5));
+    }
+    assert!(recorder.poll_event().is_none());
+    assert_realtime(|| takes.iter_mut().for_each(Take::end));
+    assert_eq!(
+        events(&mut recorder, 1)?,
+        [TakeEvent::Finished {
+            take: 0,
+            frames: 1024
+        }]
+    );
     drop(takes);
     drop(recorder);
     let _ = std::fs::remove_dir_all(&dir);

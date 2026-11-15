@@ -9,7 +9,7 @@ use audio_engine::{ArmedTrack, TakeInfo};
 use project_model::{AudioFile, Clip, Source, TrackId};
 
 use crate::app::App;
-use crate::services::{TakeFiles, TakeStatus};
+use crate::services::{PassMarker, Recovered, TakeFiles, TakeStatus};
 
 /// The quietest level an input meter shows, in dBFS.
 pub const METER_FLOOR_DB: f32 = -60.0;
@@ -258,6 +258,16 @@ impl App {
             pass_tracks.push((id, layout, files));
             sinks.insert(id, s);
         }
+        let marker = PassMarker {
+            device_latency: latency,
+            tracks: pass_tracks
+                .iter()
+                .map(|(id, _, files)| (*id, files.clone()))
+                .collect(),
+        };
+        if let Err(message) = self.services.mark_pass(&marker) {
+            self.status = Some(unprotected(&message));
+        }
         let armed = self.armed_tracks(Some(sinks));
         let count_in = self.count_in_frames();
         let result = self
@@ -275,18 +285,24 @@ impl App {
             // Re-arming ends the unused takes.
             self.sync_arming();
             self.services.discard_takes(&pass.files());
+            self.services.clear_pass_marker();
             return;
         }
         self.pass = Some(pass);
     }
 
     /// Notes where the pending pass's capture began, if the engine says, before the engine is
-    /// replaced.
+    /// replaced, and adds it to the crash marker.
     pub(crate) fn keep_take_info(&mut self) {
         if let Some(pass) = &mut self.pass
             && pass.info.is_none()
         {
             pass.info = self.engine.take();
+            if let Some(info) = pass.info
+                && let Err(message) = self.services.mark_pass_started(info)
+            {
+                self.status = Some(unprotected(&message));
+            }
         }
     }
 
@@ -315,7 +331,7 @@ impl App {
     }
 
     /// Adds the pass's takes as one step, or discards them if nothing was recorded or a file
-    /// failed.
+    /// failed, then clears the crash marker.
     fn place_takes(&mut self, pass: Pass) {
         let files = pass.files();
         let overruns = self.services.take_overruns();
@@ -326,22 +342,95 @@ impl App {
                 Some(Err(message)) => {
                     self.status = Some(format!("Recording failed: {message}"));
                     self.services.discard_takes(&files);
+                    self.services.clear_pass_marker();
                     self.after_pass();
                     return;
                 }
                 None => frames = 0,
             }
         }
-        let placement = pass.info.map(|info| info.placement(pass.latency));
-        let Some((position, offset)) = placement.filter(|&(_, offset)| frames > offset) else {
-            self.services.discard_takes(&files);
-            self.after_pass();
+        let tracks: Vec<(TrackId, Vec<String>)> = pass
+            .tracks
+            .into_iter()
+            .map(|(id, _, files)| (id, files))
+            .collect();
+        match self.add_takes(&tracks, frames, pass.info, pass.latency) {
+            Ok(true) if overruns > 0 => {
+                self.status = Some(format!(
+                    "The disk fell behind {overruns} times while recording; the gaps are silent."
+                ));
+            }
+            Ok(true) => {}
+            Ok(false) => self.services.discard_takes(&files),
+            Err(message) => {
+                self.status = Some(format!("The take could not be added: {message}"));
+                self.services.discard_takes(&files);
+            }
+        }
+        self.services.clear_pass_marker();
+        self.after_pass();
+        self.refresh_lanes();
+    }
+
+    /// Places the takes of a pass a crash cut off, as one step that undo removes, saves, and
+    /// clears the crash marker (`docs/architecture/recording.md` "Take recovery"). Called once,
+    /// when the project opens.
+    pub(crate) fn recover_takes(&mut self) {
+        let Some(recovered) = self.services.take_recovered() else {
             return;
         };
-        let clips: Vec<(TrackId, Clip)> = pass
-            .tracks
+        let placed = match recovered {
+            Recovered::Discarded => false,
+            Recovered::Takes(pass) => {
+                let added = self.add_takes(
+                    &pass.tracks,
+                    pass.frames,
+                    Some(pass.info),
+                    pass.device_latency,
+                );
+                if !matches!(added, Ok(true)) {
+                    let files: Vec<String> = pass.tracks.into_iter().flat_map(|(_, f)| f).collect();
+                    self.services.discard_takes(&files);
+                }
+                matches!(added, Ok(true))
+            }
+        };
+        self.services.clear_pass_marker();
+        self.status = Some(if placed {
+            "Recovered a take interrupted by a crash.".into()
+        } else {
+            "A take interrupted by a crash could not be recovered.".into()
+        });
+        self.refresh_lanes();
+    }
+
+    /// Adds a clip for each of `tracks`' takes of `frames` frames as one step, placed where
+    /// `info` says for a device latency of `device_latency` (`docs/architecture/recording.md`
+    /// "Take placement"), summarises their files, and saves at once, so the step is on disk
+    /// before the crash marker goes. Tracks no longer in the project, or whose layout does not
+    /// match their files, are skipped. Returns whether anything was added; the caller discards
+    /// the files otherwise.
+    fn add_takes(
+        &mut self,
+        tracks: &[(TrackId, Vec<String>)],
+        frames: u64,
+        info: Option<TakeInfo>,
+        device_latency: u64,
+    ) -> Result<bool, String> {
+        let placement = info.map(|info| info.placement(device_latency));
+        let Some((position, offset)) = placement.filter(|&(_, offset)| frames > offset) else {
+            return Ok(false);
+        };
+        let state = self.session.state();
+        let mut placed = Vec::new();
+        let clips: Vec<(TrackId, Clip)> = tracks
             .iter()
-            .filter_map(|(id, _, names)| {
+            .filter(|(id, names)| {
+                state
+                    .track(*id)
+                    .is_some_and(|t| t.layout.channels() == names.len())
+            })
+            .filter_map(|(id, names)| {
                 let file = |name: &String| AudioFile {
                     name: name.clone(),
                     frames,
@@ -354,33 +443,28 @@ impl App {
                     },
                     _ => return None,
                 };
+                placed.extend(names.iter().cloned());
                 Some((*id, Clip::new(source, offset, frames - offset, position)))
             })
             .collect();
-        if let Err(message) = self.services.keep_takes(&files) {
+        if clips.is_empty() {
+            return Ok(false);
+        }
+        if let Err(message) = self.services.keep_takes(&placed) {
             self.status = Some(format!("The take's waveform could not be drawn: {message}"));
         }
-        let result = self.bridge.edit(&mut self.session, |s| s.add_clips(clips));
-        match result {
-            Ok(_) if overruns > 0 => {
-                self.status = Some(format!(
-                    "The disk fell behind {overruns} times while recording; the gaps are silent."
-                ));
-            }
-            Ok(_) => {}
-            Err(error) => {
-                self.status = Some(format!("The take could not be added: {error}"));
-                self.services.discard_takes(&files);
-            }
-        }
-        self.after_pass();
-        self.refresh_lanes();
+        self.bridge
+            .edit(&mut self.session, |s| s.add_clips(clips))
+            .map_err(|e| e.to_string())?;
+        self.autosave();
+        Ok(true)
     }
 
     /// Discards the pending pass's takes and disarms every track. Only while stopped.
     pub(crate) fn discard_pass(&mut self) {
         if let Some(pass) = self.pass.take() {
             self.services.discard_takes(&pass.files());
+            self.services.clear_pass_marker();
         }
         if !self.arming.is_empty() {
             self.arming.clear();
@@ -423,6 +507,11 @@ impl App {
     fn track_layout(&self, track: TrackId) -> Option<Layout> {
         self.session.state().track(track).map(|t| t.layout)
     }
+}
+
+/// The status line's warning when the crash marker could not be written.
+fn unprotected(message: &str) -> String {
+    format!("If Debussy crashes, this take cannot be recovered: {message}")
 }
 
 #[cfg(test)]

@@ -584,6 +584,16 @@ mod tests {
             Ok(())
         }
         fn discard_takes(&mut self, _: &[String]) {}
+        fn mark_pass(&mut self, _: &crate::PassMarker) -> Result<(), String> {
+            Ok(())
+        }
+        fn mark_pass_started(&mut self, _: audio_engine::TakeInfo) -> Result<(), String> {
+            Ok(())
+        }
+        fn clear_pass_marker(&mut self) {}
+        fn take_recovered(&mut self) -> Option<crate::Recovered> {
+            None
+        }
         fn click_preferences(&mut self) -> ClickPreferences {
             ClickPreferences::default()
         }

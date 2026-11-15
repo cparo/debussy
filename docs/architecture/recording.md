@@ -72,7 +72,8 @@ take is discarded ([ADR-0084](../adrs/0084-recording-s-count-in-splits-the-block
 (see `docs/architecture/project.md` "Stored audio") on one non-real-time thread, `disk-recording`.
 Each channel has a pool of 2 seconds of 1024-frame blocks. The real-time side fills a block,
 stamps it with its take-relative start frame, and queues it; the writer appends it and returns
-the empty block.
+the empty block. While a take is written, the writer flushes and syncs each file about once a
+second ([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
 
 When the pool is empty because the disk fell behind, the real-time side drops the frames and
 counts an overrun in an atomic counter. The writer fills the gap with silence from the stamps, so
@@ -88,3 +89,23 @@ its offset into the file is the deficit, so the file keeps every sample. When ev
 pass has finished, one clip per armed track is added in a single edit: one undo step and one
 autosave. The new clip goes on the top layer. An empty take is discarded and its files removed
 ([ADR-0078](../adrs/0078-recording-captures-armed-inputs-on-the-real-time.md)).
+
+## Take recovery
+
+While a pass is recorded, `recording.json` in the bundle names its tracks and their files and the
+device latency at the start; once capture begins, it adds the start frame and plan latency. It is
+written crash-safely like `project.json` and removed once the takes are placed or discarded.
+
+On open, a marker present is read as untrusted input within the limits in `docs/architecture/project.md`
+"Loading". Each named file is repaired: its header sizes are rebuilt from the file length, a
+partial last frame is cut off, and a file not laid out as the writer lays files out is refused.
+The takes are then placed as in [Take placement](#take-placement), with every file's length set
+to the shortest, as one undo step that is autosaved before the marker is removed, and the status
+line says so.
+
+A track no longer in the project, whose layout does not match its files, or with a file that
+cannot be repaired is skipped; files already used by the project are skipped. A marker that
+breaks a limit, has no start (the crash came during the count-in), or leaves nothing to place is
+removed, its files are left to cleanup, and the status line says the take could not be
+recovered. A bad marker never refuses the bundle
+([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).

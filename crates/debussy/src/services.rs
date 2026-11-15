@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
-use audio_engine::{Processor, TakeSink};
+use audio_engine::{Processor, TakeInfo, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
-    ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, Services, Spectrum,
-    TakeFiles, TakeStatus, spectrum_bands,
+    ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, PassMarker,
+    Recovered, RecoveredPass, Services, Spectrum, TakeFiles, TakeStatus, spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
@@ -23,7 +23,9 @@ use engine_bridge::{ClickSound, track_renderers};
 use import_export::{Lame, import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
-use project_storage::{AppSettings, Bundle, ClickSound as SavedClickSound};
+use project_storage::{
+    AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart, Recovery,
+};
 use signal_graph::NodeId;
 use wav_files::WavReader;
 
@@ -78,6 +80,8 @@ pub struct AppServices {
     spectrogram: Option<SpectrogramScratch>,
     /// The recording pass's writer, until its takes are kept or discarded.
     recorder: Option<Recorder>,
+    /// The pass in the crash marker, while there is one.
+    marker: Option<Recording>,
     /// The host's LAME, found at startup; MP3 export is offered only with it (ADR-0129).
     lame: Option<Lame>,
 }
@@ -110,6 +114,7 @@ impl AppServices {
             audio_files: BTreeMap::new(),
             spectrogram: None,
             recorder: None,
+            marker: None,
             lame,
         }
     }
@@ -474,6 +479,55 @@ impl Services for AppServices {
         let dir = self.bundle.audio_dir();
         for file in files {
             let _ = std::fs::remove_file(dir.join(file));
+        }
+    }
+
+    fn mark_pass(&mut self, marker: &PassMarker) -> Result<(), String> {
+        let recording = Recording {
+            device_latency: marker.device_latency,
+            start: None,
+            tracks: marker.tracks.clone(),
+        };
+        let result = self.bundle.mark_recording(&recording);
+        self.marker = Some(recording);
+        result.map_err(|e| e.to_string())
+    }
+
+    fn mark_pass_started(&mut self, info: TakeInfo) -> Result<(), String> {
+        let Some(recording) = &mut self.marker else {
+            return Ok(());
+        };
+        recording.start = Some(RecordingStart {
+            start_frame: info.start_frame,
+            plan_latency: info.latency,
+        });
+        self.bundle
+            .mark_recording(recording)
+            .map_err(|e| e.to_string())
+    }
+
+    fn clear_pass_marker(&mut self) {
+        self.marker = None;
+        if let Err(error) = self.bundle.clear_recording() {
+            eprintln!("debussy: {error}");
+        }
+    }
+
+    fn take_recovered(&mut self) -> Option<Recovered> {
+        match self.bundle.take_recovery()? {
+            Recovery::Takes(pass) => Some(Recovered::Takes(RecoveredPass {
+                tracks: pass.tracks,
+                frames: pass.frames,
+                info: TakeInfo {
+                    start_frame: pass.start.start_frame,
+                    latency: pass.start.plan_latency,
+                },
+                device_latency: pass.device_latency,
+            })),
+            Recovery::Discarded { reason } => {
+                eprintln!("debussy: a take interrupted by a crash was discarded: {reason}");
+                Some(Recovered::Discarded)
+            }
         }
     }
 
