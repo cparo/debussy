@@ -9,7 +9,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use project_model::{Session, TrackId};
+use project_model::{Session, TrackId, TrackKind};
 use serde::{Deserialize, Serialize};
 use wav_files::{Channels, WavReader, repair_sizes};
 
@@ -203,8 +203,11 @@ fn place(
     let mut frames = u64::MAX;
     for track in &saved.tracks {
         let id = TrackId(track.track);
-        let Some(layout) = session.state().track(id).map(|t| t.layout) else {
+        let Some(kind) = session.state().track(id).map(|t| t.kind) else {
             continue;
+        };
+        let TrackKind::Audio(layout) = kind else {
+            return Err(format!("the marker names {id}, which is a MIDI track"));
         };
         if layout.channels() != track.files.len() {
             continue;

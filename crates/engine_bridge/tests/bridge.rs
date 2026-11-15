@@ -786,3 +786,38 @@ fn test_bridge_follows_curve_edits() -> Result<(), Box<dyn Error>> {
     assert_in_step(&bridge, session.state())?;
     Ok(())
 }
+
+#[test]
+fn test_midi_track_becomes_event_source_without_renderer() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let audio = session.add_track("audio", Layout::Mono)?;
+    let midi = session.add_midi_track("keys")?;
+    let notes = vec![project_model::Note {
+        start: 0,
+        length: 10,
+        channel: 0,
+        pitch: 60,
+        velocity: 100,
+    }];
+    let sequence = Arc::new(project_model::Sequence::new(100, notes, Vec::new())?);
+    session.add_clip(midi, Clip::new(Source::Midi(sequence), 0, 100, 0))?;
+    let (bridge, _runner) = Bridge::new(session.state(), config())?;
+    assert_in_step(&bridge, session.state())?;
+
+    let node = bridge
+        .node(Endpoint::Track(midi))
+        .ok_or("MIDI track not mirrored")?;
+    let outputs = bridge.graph().outputs(node).ok_or("no outputs")?;
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].kind, signal_graph::PortType::Event);
+
+    let sources = bridge.sources();
+    assert!(sources.contains_key(&audio));
+    assert!(!sources.contains_key(&midi));
+    let (renderers, _) = track_renderers(session.state(), &sources, 48_000)?;
+    assert_eq!(
+        renderers.iter().map(|r| r.track).collect::<Vec<_>>(),
+        vec![audio]
+    );
+    Ok(())
+}

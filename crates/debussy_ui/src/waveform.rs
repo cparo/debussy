@@ -137,11 +137,11 @@ fn paint<T: Copy>(
     }
 }
 
-/// The lanes a track has: one per channel.
+/// The lanes a track has: one per channel, and one for a MIDI track, which draws no waveform.
 pub(crate) fn channels(track: &Track) -> usize {
-    match track.layout {
-        audio_buffers::Layout::Mono => 1,
-        audio_buffers::Layout::Stereo => 2,
+    match track.layout() {
+        Some(audio_buffers::Layout::Mono) | None => 1,
+        Some(audio_buffers::Layout::Stereo) => 2,
     }
 }
 

@@ -78,7 +78,9 @@ fn processor(shape: &Shape) -> Option<Box<dyn Node>> {
             .ok()
             .or_else(|| Some(Box::new(audio_effects::Silence::new(1, 1)))),
         Shape::Bus(layout) => Some(Box::new(audio_effects::Bus::new(*layout))),
-        Shape::Source(_) | Shape::Sink | Shape::Delay(_) | Shape::Curve => None,
+        Shape::Source(_) | Shape::EventSource | Shape::Sink | Shape::Delay(_) | Shape::Curve => {
+            None
+        }
     }
 }
 
@@ -86,6 +88,7 @@ fn processor(shape: &Shape) -> Option<Box<dyn Node>> {
 fn add(graph: &mut Graph, target: &NodeTarget) -> Result<GraphNodeId, MirrorError> {
     let id = match &target.shape {
         Shape::Source(layout) => graph.add_source(*layout),
+        Shape::EventSource => graph.add_event_source(),
         Shape::Sink => graph.add_sink(Layout::Stereo),
         Shape::Delay(layout) => graph.add_feedback_delay(*layout, target.seconds.unwrap_or(0.0))?,
         Shape::Curve => graph.add_curve(target.curve.clone().unwrap_or_default()),

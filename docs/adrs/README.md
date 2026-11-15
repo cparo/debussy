@@ -167,4 +167,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0141](0141-a-project-archive-is-a-plain-zip-of-the-bundle.md) | A project archive is a plain zip of the bundle without its cache, opened only under strict limits | Accepted | [Project archives](../architecture/project.md#project-archives) |
 | [ADR-0142](0142-release-notices-are-generated-in-xtask-and.md) | Release notices are generated in xtask and releases are published by a tag-triggered workflow | Accepted | [Releases](../architecture/platform.md#releases) |
 | [ADR-0143](0143-event-ports-carry-midi-1-0-channel-messages.md) | Event ports carry MIDI 1.0 channel messages stamped with frame offsets in fixed-capacity per-port buffers | Accepted | [Port types](../architecture/signal-graph.md#port-types) |
+| [ADR-0144](0144-midi-clips-are-windows-onto-shared-note-sequences.md) | MIDI clips are windows onto shared note sequences; format 7 | Accepted | [Editing model](../architecture/project.md#editing-model) |
 

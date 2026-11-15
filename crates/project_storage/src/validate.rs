@@ -1,20 +1,22 @@
 //! Converting between the saved format and `project_model`, checking everything a file from
 //! elsewhere could get wrong (`docs/architecture/project.md` "Loading", ADR-0049).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
 use project_model::{
-    AudioFile, Clip, ClipId, Connection, ConnectionId, CurveId, CurveLane, Edit, Endpoint,
-    MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId, NodeKind, Position, Side, Source, State,
-    Tempo, Track, TrackId, WireHandle, WirePoint, WireShape,
+    AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane, Edit, Endpoint,
+    MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId, NodeKind, Note, Position, Sequence, Side,
+    Source, State, Tempo, Track, TrackId, TrackKind, WireHandle, WirePoint, WireShape,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
-    SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSide,
-    SavedSource, SavedTempo, SavedTrack, SavedWireHandle, SavedWirePoint,
+    SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSequence,
+    SavedSide, SavedSource, SavedTempo, SavedTrack, SavedTrackKind, SavedWireHandle,
+    SavedWirePoint,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -50,19 +52,139 @@ pub const MAX_MIXER_CHANNELS: usize = 4096;
 pub const MAX_CURVES: usize = 10_000;
 /// The most curve points a file may hold, over all curves.
 pub const MAX_CURVE_POINTS: usize = 1_000_000;
+/// The most MIDI sequences a file may hold.
+pub const MAX_SEQUENCES: usize = 1_000_000;
+/// The most MIDI notes and control changes a file may hold, together, over all sequences.
+pub const MAX_MIDI_EVENTS: usize = 2_000_000;
 /// The longest name, effect id or parameter name, in bytes.
 pub const MAX_NAME_BYTES: usize = 1024;
 /// The longest audio file name, in bytes.
 pub const MAX_FILE_NAME_BYTES: usize = 255;
 
+/// The MIDI sequences of a state being saved, each once, in the order clips first refer to them.
+#[derive(Default)]
+struct SequenceTable {
+    /// Each saved sequence's index, by the address of the shared sequence.
+    index: HashMap<*const Sequence, u32>,
+    saved: Vec<SavedSequence>,
+}
+
+impl SequenceTable {
+    /// The index of `sequence` in the table, adding it if it is new.
+    fn index_of(&mut self, sequence: &Arc<Sequence>) -> u32 {
+        // Within one state every sequence fits a `u32`: there are at most as many as clips.
+        let next = u32::try_from(self.saved.len()).unwrap_or(u32::MAX);
+        *self.index.entry(Arc::as_ptr(sequence)).or_insert_with(|| {
+            self.saved.push(sequence_to_saved(sequence));
+            next
+        })
+    }
+}
+
+fn sequence_to_saved(sequence: &Sequence) -> SavedSequence {
+    SavedSequence {
+        frames: sequence.frames(),
+        notes: sequence
+            .notes()
+            .iter()
+            .map(|n| {
+                [
+                    n.start,
+                    n.length,
+                    n.channel.into(),
+                    n.pitch.into(),
+                    n.velocity.into(),
+                ]
+            })
+            .collect(),
+        controls: sequence
+            .controls()
+            .iter()
+            .map(|c| {
+                [
+                    c.frame,
+                    c.channel.into(),
+                    c.controller.into(),
+                    c.value.into(),
+                ]
+            })
+            .collect(),
+    }
+}
+
+/// A MIDI data byte from a saved number: refused past `u8`, and left to [`Sequence::new`] to
+/// check against its field's range.
+fn byte(value: u64) -> Result<u8, String> {
+    u8::try_from(value).map_err(|_| format!("{value} is not a MIDI value"))
+}
+
+/// The sequence a saved one describes, after [`Sequence::new`]'s checks.
+fn sequence_from_saved(index: usize, saved: SavedSequence) -> Result<Sequence, String> {
+    let notes = saved
+        .notes
+        .iter()
+        .map(|&[start, length, channel, pitch, velocity]| {
+            Ok(Note {
+                start,
+                length,
+                channel: byte(channel)?,
+                pitch: byte(pitch)?,
+                velocity: byte(velocity)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>();
+    let controls = saved
+        .controls
+        .iter()
+        .map(|&[frame, channel, controller, value]| {
+            Ok(Control {
+                frame,
+                channel: byte(channel)?,
+                controller: byte(controller)?,
+                value: byte(value)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>();
+    notes
+        .and_then(|notes| Ok((notes, controls?)))
+        .and_then(|(notes, controls)| {
+            Sequence::new(saved.frames, notes, controls).map_err(|e| e.to_string())
+        })
+        .map_err(|reason| format!("sequence {index}: {reason}"))
+}
+
+/// Checks the MIDI counts against `max_sequences` and `max_events` before any sequence is built.
+fn check_midi_counts(
+    sequences: &[SavedSequence],
+    max_sequences: usize,
+    max_events: usize,
+) -> Result<(), String> {
+    ensure(sequences.len() <= max_sequences, || {
+        format!("more than {max_sequences} MIDI sequences")
+    })?;
+    let events: usize = sequences
+        .iter()
+        .map(|s| s.notes.len() + s.controls.len())
+        .sum();
+    ensure(events <= max_events, || {
+        format!("more than {max_events} MIDI notes and control changes")
+    })
+}
+
 /// The saved form of `state` at `sample_rate`, as `project.json` (no name or stamp).
 pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
+    let mut sequences = SequenceTable::default();
+    let tracks = state
+        .tracks
+        .iter()
+        .map(|track| track_to_saved(track, &mut sequences))
+        .collect();
     SavedProject {
         format_version: FORMAT_VERSION,
         name: None,
         saved_at: None,
         sample_rate,
-        tracks: state.tracks.iter().map(track_to_saved).collect(),
+        tracks,
         nodes: state
             .nodes
             .iter()
@@ -107,6 +229,7 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
             beat_unit: state.tempo.beat_unit,
         },
         curves: state.curves.iter().map(curve_to_saved).collect(),
+        sequences: sequences.saved,
     }
 }
 
@@ -225,11 +348,16 @@ fn file_to_saved(file: &AudioFile) -> SavedFile {
     }
 }
 
-fn track_to_saved(track: &Track) -> SavedTrack {
+fn track_to_saved(track: &Track, sequences: &mut SequenceTable) -> SavedTrack {
     SavedTrack {
         id: track.id.0,
         name: track.name.clone(),
-        layout: layout_to_saved(track.layout),
+        kind: match track.kind {
+            TrackKind::Audio(layout) => SavedTrackKind::Audio {
+                layout: layout_to_saved(layout),
+            },
+            TrackKind::Midi => SavedTrackKind::Midi {},
+        },
         clips: track
             .clips
             .iter()
@@ -242,6 +370,9 @@ fn track_to_saved(track: &Track) -> SavedTrack {
                     Source::Stereo { left, right } => SavedSource::Stereo {
                         left: file_to_saved(left),
                         right: file_to_saved(right),
+                    },
+                    Source::Midi(sequence) => SavedSource::Midi {
+                        sequence: sequences.index_of(sequence),
                     },
                 },
                 offset: clip.offset,
@@ -416,6 +547,16 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
     ensure(points <= MAX_CURVE_POINTS, || {
         format!("more than {MAX_CURVE_POINTS} curve points")
     })?;
+    check_midi_counts(&saved.sequences, MAX_SEQUENCES, MAX_MIDI_EVENTS)?;
+
+    // Each sequence is built once, so the clips that refer to it share it.
+    let sequences = saved
+        .sequences
+        .into_iter()
+        .enumerate()
+        .map(|(index, s)| sequence_from_saved(index, s).map(Arc::new))
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut referenced = vec![false; sequences.len()];
 
     // Tracks and clips share one id space (`project_model::Session`).
     let mut item_ids = BTreeSet::new();
@@ -425,11 +566,11 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
         ensure(item_ids.insert(saved_track.id), || {
             format!("id {} is used twice", saved_track.id)
         })?;
-        let mut track = Track::new(
-            TrackId(saved_track.id),
-            &saved_track.name,
-            layout_from_saved(saved_track.layout),
-        );
+        let kind = match saved_track.kind {
+            SavedTrackKind::Audio { layout } => TrackKind::Audio(layout_from_saved(layout)),
+            SavedTrackKind::Midi {} => TrackKind::Midi,
+        };
+        let mut track = Track::of_kind(TrackId(saved_track.id), &saved_track.name, kind);
         for saved_clip in saved_track.clips {
             ensure(item_ids.insert(saved_clip.id), || {
                 format!("id {} is used twice", saved_clip.id)
@@ -440,6 +581,14 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
                     left: file_from_saved(left)?,
                     right: file_from_saved(right)?,
                 },
+                SavedSource::Midi { sequence } => {
+                    let index = usize::try_from(sequence).unwrap_or(usize::MAX);
+                    let shared = sequences.get(index).ok_or_else(|| {
+                        format!("clip {} refers to no sequence {sequence}", saved_clip.id)
+                    })?;
+                    referenced[index] = true;
+                    Source::Midi(Arc::clone(shared))
+                }
             };
             let clip = Clip {
                 source,
@@ -450,11 +599,14 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
                 fade_in: saved_clip.fade_in,
                 fade_out: saved_clip.fade_out,
             };
-            clip.check(track.layout)
+            clip.check(track.kind)
                 .map_err(|e| format!("clip {}: {e}", saved_clip.id))?;
             track.clips.push((ClipId(saved_clip.id), clip));
         }
         tracks.push(track);
+    }
+    if let Some(unused) = referenced.iter().position(|used| !used) {
+        return Err(format!("no clip refers to sequence {unused}"));
     }
 
     let mut nodes = Vec::with_capacity(saved.nodes.len());
@@ -576,4 +728,52 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
         .apply(&mut probe)
         .map_err(|e| format!("the routing is invalid: {e}"))?;
     Ok(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sequence(notes: usize, controls: usize) -> SavedSequence {
+        SavedSequence {
+            frames: 100,
+            notes: vec![[0, 1, 0, 60, 100]; notes],
+            controls: vec![[0, 0, 7, 0]; controls],
+        }
+    }
+
+    #[test]
+    fn test_check_midi_counts_refuses_over_limits() {
+        let sequences = [sequence(2, 1), sequence(1, 0)];
+        assert!(check_midi_counts(&sequences, 2, 4).is_ok());
+        assert!(check_midi_counts(&sequences, 1, 4).is_err());
+        assert!(check_midi_counts(&sequences, 2, 3).is_err());
+    }
+
+    #[test]
+    fn test_to_saved_writes_a_shared_sequence_once() -> Result<(), project_model::Error> {
+        let shared = Arc::new(Sequence::new(100, Vec::new(), Vec::new())?);
+        let other = Arc::new(Sequence::new(100, Vec::new(), Vec::new())?);
+        let mut track = Track::new_midi(TrackId(1), "T");
+        for (id, sequence) in [(2, &shared), (3, &other), (4, &shared)] {
+            let clip = Clip::new(Source::Midi(Arc::clone(sequence)), 0, 100, 0);
+            track.clips.push((ClipId(id), clip));
+        }
+        let state = State {
+            tracks: vec![track],
+            ..State::default()
+        };
+        let saved = to_saved(&state, 48_000);
+        assert_eq!(saved.sequences.len(), 2);
+        let indices: Vec<_> = saved.tracks[0]
+            .clips
+            .iter()
+            .map(|c| c.source.clone())
+            .collect();
+        assert_eq!(
+            indices,
+            [0, 1, 0].map(|sequence| SavedSource::Midi { sequence })
+        );
+        Ok(())
+    }
 }

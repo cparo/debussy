@@ -5,12 +5,12 @@ use audio_buffers::Layout;
 use crate::error::Error;
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::tempo::Tempo;
-use crate::types::{ClipId, CurveId, Source, TrackId};
+use crate::types::{ClipId, CurveId, Source, TrackId, TrackKind};
 
 /// A stretch of a source placed on the timeline. All times are frames at the project rate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clip {
-    /// The audio it plays.
+    /// What it plays.
     pub source: Source,
     /// Where in the source it starts.
     pub offset: u64,
@@ -18,11 +18,11 @@ pub struct Clip {
     pub length: u64,
     /// Where on the timeline it starts.
     pub position: u64,
-    /// Its gain, in decibels.
+    /// Its gain, in decibels; always 0 for a MIDI clip.
     pub gain_db: f32,
-    /// Its fade-in length.
+    /// Its fade-in length; always 0 for a MIDI clip.
     pub fade_in: u64,
-    /// Its fade-out length.
+    /// Its fade-out length; always 0 for a MIDI clip.
     pub fade_out: u64,
 }
 
@@ -46,15 +46,16 @@ impl Clip {
         self.position.saturating_add(self.length)
     }
 
-    /// Checks the clip is playable on a track of `layout`.
+    /// Checks the clip is playable on a track of `kind`.
     ///
     /// # Errors
     ///
-    /// [`Error::LayoutMismatch`], [`Error::EmptyClip`], [`Error::ClipOutsideSource`],
-    /// [`Error::ClipOutsideTimeline`], [`Error::FadesTooLong`] or [`Error::InvalidGain`].
-    pub fn check(&self, layout: Layout) -> Result<(), Error> {
-        if self.source.layout() != layout {
-            return Err(Error::LayoutMismatch);
+    /// [`Error::KindMismatch`], [`Error::EmptyClip`], [`Error::ClipOutsideSource`],
+    /// [`Error::ClipOutsideTimeline`], [`Error::FadesTooLong`], [`Error::InvalidGain`] or
+    /// [`Error::MidiClipGainOrFade`].
+    pub fn check(&self, kind: TrackKind) -> Result<(), Error> {
+        if self.source.kind() != kind {
+            return Err(Error::KindMismatch);
         }
         if self.length == 0 {
             return Err(Error::EmptyClip);
@@ -82,31 +83,52 @@ impl Clip {
         if !self.gain_db.is_finite() {
             return Err(Error::InvalidGain);
         }
+        if kind == TrackKind::Midi && (self.gain_db != 0.0 || fades != 0) {
+            return Err(Error::MidiClipGainOrFade);
+        }
         Ok(())
     }
 }
 
-/// A track: a name, a channel layout fixed at creation, and clips.
+/// A track: a name, a kind fixed at creation, and clips.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     /// The track's id.
     pub id: TrackId,
     /// A name for display.
     pub name: String,
-    /// Whether its clips are mono or stereo.
-    pub layout: Layout,
+    /// Whether its clips are mono audio, stereo audio or MIDI.
+    pub kind: TrackKind,
     /// Its clips from the bottom layer up. Where clips overlap, the higher one plays.
     pub clips: Vec<(ClipId, Clip)>,
 }
 
 impl Track {
-    /// An empty track.
+    /// An empty audio track.
     pub fn new(id: TrackId, name: &str, layout: Layout) -> Self {
+        Track::of_kind(id, name, TrackKind::Audio(layout))
+    }
+
+    /// An empty MIDI track.
+    pub fn new_midi(id: TrackId, name: &str) -> Self {
+        Track::of_kind(id, name, TrackKind::Midi)
+    }
+
+    /// An empty track of `kind`.
+    pub fn of_kind(id: TrackId, name: &str, kind: TrackKind) -> Self {
         Track {
             id,
             name: name.to_owned(),
-            layout,
+            kind,
             clips: Vec::new(),
+        }
+    }
+
+    /// The channel layout of an audio track; `None` for a MIDI track.
+    pub fn layout(&self) -> Option<Layout> {
+        match self.kind {
+            TrackKind::Audio(layout) => Some(layout),
+            TrackKind::Midi => None,
         }
     }
 

@@ -201,3 +201,21 @@ fn test_open_skips_takes_already_in_the_project() -> Result<(), Box<dyn Error>> 
     assert!(!exists(&path, "Keys L.wav"));
     Ok(())
 }
+
+#[test]
+fn test_open_discards_a_marker_naming_a_midi_track() -> Result<(), Box<dyn Error>> {
+    let (path, mut bundle, mut session, mono, _) = bundle("midi")?;
+    let keys = session.add_midi_track("Synth")?;
+    bundle.save(&session)?;
+    crashed_takes(&bundle)?;
+    let mut marker = recording(mono, keys, Some(START));
+    marker.tracks[1].1 = vec!["Keys L.wav".into()];
+    bundle.mark_recording(&marker)?;
+    drop(bundle);
+    let (mut bundle, _) = Bundle::open(&path)?;
+    let Some(Recovery::Discarded { reason }) = bundle.take_recovery() else {
+        return Err("the marker was not discarded".into());
+    };
+    assert!(reason.contains("MIDI"), "{reason}");
+    Ok(())
+}

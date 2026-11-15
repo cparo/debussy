@@ -190,7 +190,21 @@ impl Session {
         Ok((id, clip_id))
     }
 
-    /// The edits that add a new track and route it, and its id.
+    /// Adds an empty MIDI track after the others, as one step. Its event output is left
+    /// unconnected: nothing the model knows of takes events yet.
+    ///
+    /// # Errors
+    ///
+    /// None in practice; see [`Session::apply`].
+    pub fn add_midi_track(&mut self, name: &str) -> Result<TrackId, Error> {
+        let id = self.new_track_id();
+        let index = self.state.tracks.len();
+        let track = Track::new_midi(id, name);
+        self.apply(Edit::InsertTrack { index, track })?;
+        Ok(id)
+    }
+
+    /// The edits that add a new audio track and route it, and its id.
     fn new_track_edits(&mut self, name: &str, layout: Layout) -> (TrackId, Vec<Edit>) {
         let id = self.new_track_id();
         let index = self.state.tracks.len();
@@ -609,7 +623,7 @@ impl Session {
         Ok(ids)
     }
 
-    /// Moves a clip to `position` on `track` (its own or another of the same layout), on top of
+    /// Moves a clip to `position` on `track` (its own or another of the same kind), on top of
     /// any it overlaps there.
     ///
     /// # Errors
@@ -702,7 +716,7 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`Error::UnknownTrack`], [`Error::NotEnoughTracks`], [`Error::LayoutMismatch`], or
+    /// [`Error::UnknownTrack`], [`Error::NotEnoughTracks`], [`Error::KindMismatch`], or
     /// [`Error::ClipOutsideTimeline`]; nothing is pasted then.
     pub fn paste(
         &mut self,

@@ -1146,7 +1146,7 @@ fn test_tracks_are_added_renamed_and_deleted_as_steps() -> Result<(), Box<dyn Er
     app.update(Message::AddTrack(Layout::Stereo));
     let track = app.session().state().tracks[1].clone();
     assert_eq!(track.name, "Track 2");
-    assert_eq!(track.layout, Layout::Stereo);
+    assert_eq!(track.layout(), Some(Layout::Stereo));
     app.update(Message::StartRename(Renaming::Track(track.id)));
     app.update(Message::RenameText("  Piano ".into()));
     app.update(Message::FinishRename);

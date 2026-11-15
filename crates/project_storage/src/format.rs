@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 6;
+pub const FORMAT_VERSION: u32 = 7;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,6 +38,22 @@ pub(crate) struct SavedProject {
     pub tempo: SavedTempo,
     /// Since version 5: the automation curves, in lane order.
     pub curves: Vec<SavedCurve>,
+    /// Since version 7: the MIDI sequences clips refer to by index, each saved once however many
+    /// clips share it (ADR-0144).
+    pub sequences: Vec<SavedSequence>,
+}
+
+/// Since version 7: a MIDI sequence (`docs/architecture/project.md` "Editing model").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedSequence {
+    /// Its length, in frames at the project rate.
+    pub frames: u64,
+    /// Notes as `[start, length, channel, pitch, velocity]`, times in frames from the sequence's
+    /// start, sorted by (start, channel, pitch).
+    pub notes: Vec<[u64; 5]>,
+    /// Control changes as `[frame, channel, controller, value]`, sorted by frame.
+    pub controls: Vec<[u64; 4]>,
 }
 
 /// An automation curve lane (`docs/architecture/automation.md` "Curves in the project").
@@ -86,12 +102,24 @@ pub(crate) enum SavedLayout {
     Stereo,
 }
 
+/// Since version 7: what a track holds; before, every track was audio with a `layout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SavedTrackKind {
+    Audio {
+        layout: SavedLayout,
+    },
+    /// A struct variant, not a unit one, so that unknown fields are refused.
+    Midi {},
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SavedTrack {
     pub id: u64,
     pub name: String,
-    pub layout: SavedLayout,
+    /// Since version 7, in place of `layout`.
+    pub kind: SavedTrackKind,
     /// Clips from the bottom layer up.
     pub clips: Vec<SavedClip>,
 }
@@ -107,8 +135,17 @@ pub(crate) struct SavedFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SavedSource {
-    Mono { file: SavedFile },
-    Stereo { left: SavedFile, right: SavedFile },
+    Mono {
+        file: SavedFile,
+    },
+    Stereo {
+        left: SavedFile,
+        right: SavedFile,
+    },
+    /// Since version 7: the sequence at this index in the project's `sequences`.
+    Midi {
+        sequence: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

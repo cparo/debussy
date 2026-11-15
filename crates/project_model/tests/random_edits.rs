@@ -77,7 +77,7 @@ fn some_track(rng: &mut Rng, state: &State) -> Option<(TrackId, Layout)> {
     let tracks = &state.tracks;
     (!tracks.is_empty()).then(|| {
         let track = &tracks[rng.index(tracks.len())];
-        (track.id, track.layout)
+        (track.id, track.layout().unwrap_or(Layout::Mono))
     })
 }
 
@@ -205,7 +205,8 @@ fn random_gesture(
             let layout = state
                 .find_clip(id)
                 .and_then(|(track, _)| state.track(track))
-                .map_or(Layout::Mono, |t| t.layout);
+                .and_then(|t| t.layout())
+                .unwrap_or(Layout::Mono);
             session.set_clip(id, clip(rng, layout))
         }
         (5, _, Some(id)) => session.apply(Edit::RemoveClip(id)),
