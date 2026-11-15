@@ -1,0 +1,13 @@
+[package]
+name = "midi"
+description = "MIDI 1.0 channel messages and fixed-capacity, frame-stamped event buffers for the real-time core."
+version.workspace = true
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

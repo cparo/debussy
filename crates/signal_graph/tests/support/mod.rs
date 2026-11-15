@@ -215,3 +215,31 @@ pub fn impulse(frames: usize) -> Vec<f32> {
     signal[0] = 1.0;
     signal
 }
+
+/// An event node that passes its input's events straight to its output and reports `latency`.
+pub struct EventPass {
+    latency: usize,
+}
+
+impl EventPass {
+    pub fn new(latency: usize) -> Self {
+        EventPass { latency }
+    }
+}
+
+impl Node for EventPass {
+    fn inputs(&self) -> Vec<Port> {
+        vec![Port::event("in")]
+    }
+    fn outputs(&self) -> Vec<Port> {
+        vec![Port::event("out")]
+    }
+    fn latency(&self) -> usize {
+        self.latency
+    }
+    fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
+        for event in inputs.events(0) {
+            outputs.push_event(0, event.frame, event.message);
+        }
+    }
+}

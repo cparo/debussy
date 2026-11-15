@@ -1,8 +1,11 @@
 //! The node interface: what a processor declares and how it is run
 //! (`docs/architecture/signal-graph.md` "Effect nodes").
 
-use audio_buffers::Block;
+use std::sync::atomic::AtomicU64;
 
+use midi::{Event, Message};
+
+use crate::buffers::{PortBuffer, count_overflow, frame};
 use crate::param::Parameter;
 use crate::types::Port;
 
@@ -58,24 +61,26 @@ pub trait Node: Send {
     /// "Transport"). A node that holds no past input need not implement it.
     fn reset(&mut self) {}
 
-    /// Processes [`Outputs::frames`] frames: reads `inputs` and overwrites every sample of every
-    /// output. A node may be called several times per block on consecutive stretches of it, when
+    /// Processes [`Outputs::frames`] frames: reads `inputs`, overwrites every sample of every
+    /// audio output, and sends the stretch's events from its event outputs, which start each
+    /// block empty. A node may be called several times per block on consecutive stretches of it, when
     /// it is in a feedback loop.
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>);
 }
 
-/// A node's input signals for one stretch of a block, already summed, delay-compensated and
-/// converted to each port's layout.
+/// A node's input signals for one stretch of a block, already summed (audio) or merged
+/// (events), delay-compensated and converted to each port's layout. Ports are numbered as the
+/// node declared them; a control port has no signal.
 pub struct Inputs<'a> {
-    blocks: &'a [Block],
+    buffers: &'a [PortBuffer],
     start: usize,
     frames: usize,
 }
 
 impl<'a> Inputs<'a> {
-    pub(crate) fn new(blocks: &'a [Block], start: usize, frames: usize) -> Self {
+    pub(crate) fn new(buffers: &'a [PortBuffer], start: usize, frames: usize) -> Self {
         Inputs {
-            blocks,
+            buffers,
             start,
             frames,
         }
@@ -88,32 +93,58 @@ impl<'a> Inputs<'a> {
 
     /// The number of input ports.
     pub fn ports(&self) -> usize {
-        self.blocks.len()
+        self.buffers.len()
     }
 
-    /// Channel `channel` (0 is mono or left, 1 is right) of input `port`, or `None` if there is
-    /// no such port or channel.
+    /// Channel `channel` (0 is mono or left, 1 is right) of audio input `port`, or `None` if there
+    /// is no such audio port or channel.
     pub fn channel(&self, port: usize, channel: usize) -> Option<&[f32]> {
-        self.blocks
+        self.buffers
             .get(port)?
+            .audio()?
             .channel(channel)?
             .get(self.start..self.start + self.frames)
     }
+
+    /// The events arriving at event input `port` in this stretch, in frame order, each frame
+    /// counted from the stretch's start (`0..frames()`). Empty if there is no such event port.
+    pub fn events(&self, port: usize) -> impl Iterator<Item = Event> + '_ {
+        let range = frame(self.start)..frame(self.start + self.frames);
+        let start = range.start;
+        self.buffers
+            .get(port)
+            .and_then(PortBuffer::events)
+            .map(|events| events.range(range))
+            .unwrap_or_default()
+            .iter()
+            .map(move |event| Event {
+                frame: event.frame - start,
+                message: event.message,
+            })
+    }
 }
 
-/// A node's output buffers for one stretch of a block.
+/// A node's output buffers for one stretch of a block. Ports are numbered as the node declared
+/// them.
 pub struct Outputs<'a> {
-    blocks: &'a mut [Block],
+    buffers: &'a mut [PortBuffer],
     start: usize,
     frames: usize,
+    overflows: &'a AtomicU64,
 }
 
 impl<'a> Outputs<'a> {
-    pub(crate) fn new(blocks: &'a mut [Block], start: usize, frames: usize) -> Self {
+    pub(crate) fn new(
+        buffers: &'a mut [PortBuffer],
+        start: usize,
+        frames: usize,
+        overflows: &'a AtomicU64,
+    ) -> Self {
         Outputs {
-            blocks,
+            buffers,
             start,
             frames,
+            overflows,
         }
     }
 
@@ -124,22 +155,46 @@ impl<'a> Outputs<'a> {
 
     /// The number of output ports.
     pub fn ports(&self) -> usize {
-        self.blocks.len()
+        self.buffers.len()
     }
 
-    /// Channel `channel` of output `port`, mutably, or `None` if there is no such port or channel.
+    /// Channel `channel` of audio output `port`, mutably, or `None` if there is no such audio port
+    /// or channel.
     pub fn channel_mut(&mut self, port: usize, channel: usize) -> Option<&mut [f32]> {
         let range = self.start..self.start + self.frames;
-        self.blocks
+        self.buffers
             .get_mut(port)?
+            .audio_mut()?
             .channel_mut(channel)?
             .get_mut(range)
     }
 
-    /// Both channels of stereo output `port` at once, or `None` if it is missing or mono.
+    /// Both channels of stereo audio output `port` at once, or `None` if it is missing or mono.
     pub fn stereo_mut(&mut self, port: usize) -> Option<(&mut [f32], &mut [f32])> {
         let range = self.start..self.start + self.frames;
-        let (left, right) = self.blocks.get_mut(port)?.stereo_mut()?;
+        let (left, right) = self.buffers.get_mut(port)?.audio_mut()?.stereo_mut()?;
         Some((left.get_mut(range.clone())?, right.get_mut(range)?))
+    }
+
+    /// Sends `message` from event output `port` at `frame`, counted from the stretch's start, after
+    /// any event already sent at that frame. Returns `false` if there is no such event port, if
+    /// `frame` is not below [`Outputs::frames`], or if the port's buffer is full; a full buffer
+    /// drops the message and counts it (see `Graph::event_overflows`).
+    pub fn push_event(&mut self, port: usize, frame: u32, message: Message) -> bool {
+        let Some(events) = self.buffers.get_mut(port).and_then(PortBuffer::events_mut) else {
+            return false;
+        };
+        if frame as usize >= self.frames {
+            return false;
+        }
+        let event = Event {
+            frame: crate::buffers::frame(self.start).saturating_add(frame),
+            message,
+        };
+        let pushed = events.push(event);
+        if !pushed {
+            count_overflow(self.overflows);
+        }
+        pushed
     }
 }

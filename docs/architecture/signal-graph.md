@@ -115,6 +115,14 @@ buffer; see `docs/architecture/automation.md` "Evaluation"). Connections between
 different types are refused. Track contents are typed in the same way: audio clips are the only
 kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
 
+An event port carries MIDI 1.0 channel messages, each stamped with a frame offset into the block,
+in a buffer of 512 events per block emptied at each block's start. Connections into one event input
+are merged in frame order, events at the same frame in connection-id order. An event that a full
+buffer or a full compensation queue (2048 events per compensated connection) cannot take is
+dropped and counted (`Graph::event_overflows`). Feedback delays are audio-only, so a cycle of
+event connections alone is refused. Message and buffer types are in the `midi` crate
+([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)).
+
 ## Instruments
 
 Notes are voiced by built-in instrument nodes (a synthesizer and a sampler playing the user's own
@@ -129,6 +137,7 @@ a node are time-aligned, and reports the total output latency ([ADR-0022](../adr
 Latency is compensated on every connection except one that closes a feedback loop: a connection
 into a feedback delay from inside the same cycle. Every sink is delayed to the latest arrival at any
 sink, which is the plan's reported latency. Compensation delays start silent in each new plan ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
+An event connection is compensated by adding its delay to its events' frames ([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)).
 
 A source can be marked live. A node is live-only when it is a live source, or when it has at least
 one connection in that does not close a loop and every such connection comes from a live-only
