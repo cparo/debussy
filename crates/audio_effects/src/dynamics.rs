@@ -340,6 +340,13 @@ impl Node for Dynamics {
         self.running = Some(running);
     }
 
+    fn reset(&mut self) {
+        if let Some(running) = self.running.as_mut() {
+            running.ballistics.reset();
+            running.delays.iter_mut().for_each(DelayLine::clear);
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let parameters = &self.parameters;
         let Some(running) = self.running.as_mut() else {

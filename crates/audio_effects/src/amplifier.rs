@@ -315,6 +315,13 @@ impl Node for Amplifier {
         });
     }
 
+    fn reset(&mut self) {
+        if let Some(running) = self.running.as_mut() {
+            running.oversamplers.iter_mut().for_each(Oversampler::reset);
+            running.dc.reset();
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let parameters = &self.parameters;
         let Some(running) = self.running.as_mut() else {

@@ -203,6 +203,37 @@ fn test_pause_holds_and_stop_returns_to_start() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn test_stop_and_pause_silence_the_output_at_once() -> Result<(), Box<dyn Error>> {
+    for pause in [false, true] {
+        let p = project();
+        // The mono track's latency node, and the stereo track's compensation, hold 2000 frames.
+        let g = graph(2000)?;
+        let control = Arc::new(StreamControl::default());
+        let mut streams = TestStreams(Arc::clone(&control));
+        let feeds = stream_feeds(&p, &g, &control)?;
+        let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
+        engine.set_tracks(feeds)?;
+        engine.locate(3000, &mut streams)?;
+        engine.play(&mut streams)?;
+        control.ready.store(true, Ordering::SeqCst);
+        let (left, _) = run(&mut processor, 40)?;
+        assert!(left.iter().any(|&s| s != 0.0));
+        if pause {
+            engine.pause()?;
+        } else {
+            engine.stop()?;
+        }
+        let (left, right) = run(&mut processor, 20)?;
+        assert!(
+            left.iter().chain(&right).all(|&s| s == 0.0),
+            "sound after {}",
+            if pause { "pause" } else { "stop" }
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_playhead_after_stop_is_the_start_point_before_the_real_time_side_runs()
 -> Result<(), Box<dyn Error>> {
     let g = graph(0)?;

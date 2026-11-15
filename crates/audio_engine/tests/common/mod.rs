@@ -163,6 +163,10 @@ impl Node for Latency {
         self.at = 0;
     }
 
+    fn reset(&mut self) {
+        self.line.fill(0.0);
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let frames = outputs.frames();
         let input = inputs.channel(0, 0).unwrap_or(&[]);

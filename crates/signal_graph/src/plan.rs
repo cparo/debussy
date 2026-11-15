@@ -184,6 +184,21 @@ impl Plan {
         }
     }
 
+    /// Silences everything the plan holds of past signals: every node's state, every feedback
+    /// delay, and every compensation delay. Allocation-free.
+    pub(crate) fn reset(&mut self) {
+        for slot in &mut self.slots {
+            match &mut slot.kind {
+                Kind::Node(Some(node)) => node.reset(),
+                Kind::Delay(line) => line.clear(),
+                Kind::Node(None) | Kind::Source | Kind::Sink | Kind::Curve => {}
+            }
+            for feed in &mut slot.feeds {
+                feed.line.clear();
+            }
+        }
+    }
+
     /// Sets the length of the coming block, which must fit every buffer.
     pub(crate) fn set_frames(&mut self, frames: usize) {
         self.frames = frames;

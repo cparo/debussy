@@ -160,4 +160,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0134](0134-wire-handles-are-saved-as-optional-offsets-from-a.md) | Wire handles and points are saved on a connection, in project format 6 | Accepted | [Saved format](../architecture/project.md#saved-format) |
 | [ADR-0135](0135-takes-interrupted-by-a-crash-are-recovered-from-a.md) | Takes interrupted by a crash are recovered from a marker file | Accepted | [Take recovery](../architecture/recording.md#take-recovery) |
 | [ADR-0136](0136-delay-compensation-leaves-live-sources-and-the.md) | Delay compensation leaves live sources and the nodes fed only by them undelayed | Accepted | [Delay compensation](../architecture/signal-graph.md#delay-compensation) |
+| [ADR-0137](0137-stop-and-pause-silence-the-plan-s-tails-at-once.md) | Stop and pause silence the plan's tails at once | Accepted | [Transport](../architecture/engine.md#transport) |
 

@@ -545,6 +545,19 @@ impl Node for ParametricEq {
         }
     }
 
+    fn reset(&mut self) {
+        for stage in [&mut self.high_pass, &mut self.low_pass] {
+            if let Some(state) = stage.state.as_mut() {
+                state.cascade.reset();
+            }
+        }
+        for band in &mut self.bands {
+            if let Some(state) = band.state.as_mut() {
+                state.filters = [Svf::new(); 2];
+            }
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let Some((left, right)) = outputs.stereo_mut(0) else {
             return;

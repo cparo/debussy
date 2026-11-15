@@ -383,6 +383,15 @@ impl Node for Delay {
         ));
     }
 
+    fn reset(&mut self) {
+        if let Some(running) = self.running.as_mut() {
+            running.lines.iter_mut().for_each(TapDelay::clear);
+            for channel in &mut running.channels {
+                channel.low_pass.reset();
+            }
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let parameters = &self.parameters;
         let Some(running) = self.running.as_mut() else {

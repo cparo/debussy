@@ -269,6 +269,27 @@ fn test_signal_mixed_with_playback_follows_its_compensation() -> TestResult {
 }
 
 #[test]
+fn test_reset_silences_nodes_and_delays() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let source = graph.add_source(Layout::Mono);
+    let slow = graph.add_node(Box::new(Latency::new(10)));
+    let echo = graph.add_feedback_delay(Layout::Mono, 0.001)?;
+    let sink = graph.add_sink(Layout::Mono);
+    // A node holding state, a compensated direct path, and a feedback delay.
+    graph.connect(source, 0, slow, 0)?;
+    graph.connect(slow, 0, sink, 0)?;
+    graph.connect(source, 0, sink, 0)?;
+    graph.connect(source, 0, echo, 0)?;
+    graph.connect(echo, 0, sink, 0)?;
+    graph.commit()?;
+    render(&mut runner, Some(source), sink, &impulse(5), 5)?;
+    assert_realtime(|| runner.reset());
+    let output = render(&mut runner, Some(source), sink, &[0.0; 200], 64)?;
+    assert!(output.iter().all(|&x| x == 0.0));
+    Ok(())
+}
+
+#[test]
 fn test_commit_carries_node_state_over() -> TestResult {
     let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
     let (counter, _) = Counter::new();

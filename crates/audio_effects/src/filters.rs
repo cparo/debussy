@@ -258,6 +258,12 @@ impl Node for Butterworth {
         ));
     }
 
+    fn reset(&mut self) {
+        if let Some(running) = self.running.as_mut() {
+            running.reset();
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let response = self.response;
         let Some(running) = self.running.as_mut() else {
