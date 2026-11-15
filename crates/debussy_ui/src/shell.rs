@@ -536,6 +536,9 @@ mod tests {
         fn mp3_available(&mut self) -> bool {
             false
         }
+        fn archive(&mut self, _: &Session) -> Result<Option<String>, String> {
+            Ok(None)
+        }
         fn pick_export_path(&mut self, _: &crate::ExportSettings) -> Option<PathBuf> {
             None
         }

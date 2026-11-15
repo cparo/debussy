@@ -4,7 +4,8 @@
 //!
 //! [`Bundle::create`] makes a bundle; [`Bundle::open`] reads one into a
 //! [`Session`](project_model::Session), checking it as untrusted input; [`Bundle::save`] writes
-//! the session back; [`Bundle::clean_up`] deletes audio nothing refers to.
+//! the session back; [`Bundle::clean_up`] deletes audio nothing refers to. [`write_archive`] and
+//! [`unpack_archive`] turn a bundle into one zip file and back ("Project archives").
 //!
 //! # Modules
 //!
@@ -12,12 +13,14 @@
 //! - `validate`: conversion to and from `project_model`, with every check and limit.
 //! - `migrate`: load limits on the text, the format version, and migrations.
 //! - `bundle`: [`Bundle`]: the directory, crash-safe writes, version stamps, cleanup.
+//! - `archive`: project archives, checked as untrusted input when unpacked.
 //! - `recovery`: the recording marker, and recovering takes a crash cut off.
 //! - `settings`: [`AppSettings`], the application's settings outside any project.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
+mod archive;
 mod bundle;
 mod error;
 mod format;
@@ -26,6 +29,9 @@ mod recovery;
 mod settings;
 mod validate;
 
+pub use archive::{
+    ARCHIVE_SPACE_MARGIN, ARCHIVE_SUFFIX, MAX_ARCHIVE_ENTRIES, unpack_archive, write_archive,
+};
 pub use bundle::{Bundle, MAX_FILE_BYTES, MAX_VERSIONS};
 pub use error::Error;
 pub use format::FORMAT_VERSION;

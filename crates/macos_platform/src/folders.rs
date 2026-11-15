@@ -2,7 +2,14 @@
 //! it looks for a host-installed `lame` (`docs/architecture/import-export.md` "MP3 export").
 
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use objc2_foundation::{NSArray, NSNumber, NSString, NSURL};
+
+/// The resource key for a volume's free space for important use, such as a file the user asked
+/// to save. Apple's resource key constants hold their own names, so this needs no `unsafe` read
+/// of the extern constant.
+const AVAILABLE_FOR_IMPORTANT_USAGE: &str = "NSURLVolumeAvailableCapacityForImportantUsageKey";
 
 /// The package managers' program folders searched for `lame` before `PATH`: Homebrew on Apple
 /// silicon, Homebrew on Intel, and MacPorts.
@@ -18,6 +25,19 @@ pub fn lame_candidates() -> Vec<PathBuf> {
 /// set.
 pub fn projects_dir() -> Option<PathBuf> {
     projects_dir_in(std::env::var_os("HOME")?.as_os_str())
+}
+
+/// The free space, in bytes, for important use on the volume holding `dir`; `None` if it cannot
+/// be found. Unpacking a project archive is limited by it (`docs/architecture/project.md`
+/// "Project archives").
+pub fn available_space(dir: &Path) -> Option<u64> {
+    let url = NSURL::fileURLWithPath(&NSString::from_str(dir.to_str()?));
+    let key = NSString::from_str(AVAILABLE_FOR_IMPORTANT_USAGE);
+    let values = url
+        .resourceValuesForKeys_error(&NSArray::from_slice(&[&*key]))
+        .ok()?;
+    let number = values.objectForKey(&key)?.downcast::<NSNumber>().ok()?;
+    u64::try_from(number.longLongValue()).ok()
 }
 
 /// Where the app settings live: `~/Library/Application Support/Debussy/settings.json`; `None` if
@@ -58,6 +78,16 @@ fn lame_candidates_in(path: Option<&OsStr>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_available_space_reports_temp_volume() {
+        let space = super::available_space(&std::env::temp_dir());
+        assert!(space.is_some_and(|bytes| bytes > 0), "{space:?}");
+        assert_eq!(
+            super::available_space(std::path::Path::new("/no/such/dir")),
+            None
+        );
+    }
+
     use super::*;
 
     #[test]

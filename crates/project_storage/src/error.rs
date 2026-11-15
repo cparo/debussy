@@ -49,6 +49,15 @@ pub enum Error {
         /// What is wrong.
         reason: String,
     },
+    /// A file is not a project archive, or breaks a rule for one (`docs/architecture/project.md`
+    /// "Project archives").
+    #[error("{path}: {reason}")]
+    Archive {
+        /// The archive.
+        path: PathBuf,
+        /// What is wrong.
+        reason: String,
+    },
     /// A bundle already exists where a new one was to be made.
     #[error("{0} already exists")]
     Exists(PathBuf),

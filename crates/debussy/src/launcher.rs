@@ -2,6 +2,7 @@
 //! through file dialogs (`docs/architecture/startup.md` "Application startup",
 //! `docs/architecture/project.md` "Projects folder").
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -10,9 +11,11 @@ use audio_engine::Engine;
 use debussy_ui::{App, Launcher, ProjectEntry, Start};
 use engine_bridge::Bridge;
 use import_export::Lame;
-use macos_platform::MacDevices;
+use macos_platform::{MacDevices, folders};
 use project_model::Session;
-use project_storage::{AppSettings, Bundle, Error as StorageError};
+use project_storage::{
+    ARCHIVE_SPACE_MARGIN, AppSettings, Bundle, Error as StorageError, unpack_archive,
+};
 use signal_graph::Config;
 
 use crate::{audio, project, services};
@@ -101,11 +104,41 @@ impl AppLauncher {
                 }
                 project::open_or_create(path, rate)?
             }
+            None if is_archive(path) => return self.load_archive(path),
             None => Bundle::open(path).with_context(|| format!("opening {}", path.display()))?,
         };
         let (bundle, session) = opened;
         self.ready(bundle, session)
     }
+
+    /// Unpacks the project archive at `path` into the projects folder, within its volume's free
+    /// space less [`ARCHIVE_SPACE_MARGIN`], and opens the result; a bundle that then fails to
+    /// open is deleted (`docs/architecture/project.md` "Project archives").
+    fn load_archive(&self, path: &Path) -> Result<Start> {
+        let dir = self
+            .projects_dir
+            .as_deref()
+            .context("there is no projects folder to unpack the archive into")?;
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        let free = folders::available_space(dir)
+            .with_context(|| format!("finding the free space for {}", dir.display()))?;
+        let unpacked = unpack_archive(path, dir, free.saturating_sub(ARCHIVE_SPACE_MARGIN))
+            .with_context(|| format!("unpacking {}", path.display()))?;
+        let started = Bundle::open(&unpacked)
+            .with_context(|| format!("opening {}", unpacked.display()))
+            .and_then(|(bundle, session)| self.ready(bundle, session));
+        if started.is_err() {
+            // The bundle's lock was released with it; the unpacked copy is of no use.
+            let _ = fs::remove_dir_all(&unpacked);
+        }
+        started
+    }
+}
+
+/// Whether `path` names a zip file, which Open treats as a project archive.
+fn is_archive(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
 }
 
 /// `path` with the bundle extension, added if it has another or none.
@@ -204,7 +237,7 @@ impl Launcher for AppLauncher {
         }
         // A project is a package (ADR-0131), which the open panel picks as a file.
         dialog
-            .add_filter("Debussy project", &[EXTENSION])
+            .add_filter("Debussy project or archive", &[EXTENSION, "zip"])
             .pick_file()
     }
 
@@ -224,6 +257,14 @@ impl Launcher for AppLauncher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_archive_matches_zip_extension_only() {
+        assert!(is_archive(Path::new("/a/Song.debussy.zip")));
+        assert!(is_archive(Path::new("/a/Song.ZIP")));
+        assert!(!is_archive(Path::new("/a/Song.debussy")));
+        assert!(!is_archive(Path::new("/a/zip")));
+    }
 
     #[test]
     fn test_with_extension_adds_it_only_when_missing() {

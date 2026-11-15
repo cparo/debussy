@@ -147,6 +147,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Routing](project.md#routing)
   - [Project bundle](project.md#project-bundle)
   - [Projects folder](project.md#projects-folder)
+  - [Project archives](project.md#project-archives)
   - [Saved format](project.md#saved-format)
   - [Saving](project.md#saving)
   - [Loading](project.md#loading)

@@ -342,6 +342,8 @@ pub enum Message {
     NodeText(NodeId, String),
     /// Record the typed field as one step.
     CommitNodeText,
+    /// Ask where through a save dialog, save, and write the project there as one archive file.
+    Archive,
     /// Open the Export dialog, to choose the format and its settings.
     Export,
     /// Change the Export dialog's settings to these.
@@ -1211,6 +1213,13 @@ impl App {
                 if let Some((node, text)) = self.node_text.take() {
                     self.commit_node_text(node, &text);
                 }
+            }
+            Message::Archive => {
+                self.status = match self.services.archive(&self.session) {
+                    Ok(Some(name)) => Some(format!("Archived {name}")),
+                    Ok(None) => None,
+                    Err(message) => Some(message),
+                };
             }
             Message::Export => {
                 let mp3 = self.services.mp3_available();

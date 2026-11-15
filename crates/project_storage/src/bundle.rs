@@ -22,10 +22,10 @@ pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// The most named versions a bundle may hold.
 pub const MAX_VERSIONS: usize = 10_000;
 
-const PROJECT_FILE: &str = "project.json";
-const VERSIONS_DIR: &str = "versions";
-const AUDIO_DIR: &str = "audio";
-const CACHE_DIR: &str = "cache";
+pub(crate) const PROJECT_FILE: &str = "project.json";
+pub(crate) const VERSIONS_DIR: &str = "versions";
+pub(crate) const AUDIO_DIR: &str = "audio";
+pub(crate) const CACHE_DIR: &str = "cache";
 /// An empty file a process holds an exclusive lock on while it has the bundle open.
 const LOCK_FILE: &str = "lock";
 /// The suffix of a file being written; one left by a crash is deleted on open.
@@ -328,7 +328,15 @@ impl Bundle {
 
 /// `millis` since the Unix epoch as an ISO 8601 basic UTC stamp, `YYYYMMDDTHHMMSS.mmmZ`.
 pub(crate) fn stamp(millis: u64) -> String {
-    let secs = millis / 1000;
+    let (year, month, day, hour, minute, second) = civil(millis / 1000);
+    format!(
+        "{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}.{:03}Z",
+        millis % 1000
+    )
+}
+
+/// The UTC year, month, day, hour, minute and second `secs` seconds after the Unix epoch.
+pub(crate) fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
     let days = (secs / 86_400) as i64;
     let rest = secs % 86_400;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
@@ -341,13 +349,7 @@ pub(crate) fn stamp(millis: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}.{:03}Z",
-        rest / 3600,
-        rest % 3600 / 60,
-        rest % 60,
-        millis % 1000
-    )
+    (year, month, day, rest / 3600, rest % 3600 / 60, rest % 60)
 }
 
 /// Whether `text` has the shape of a stamp from [`stamp`].

@@ -143,6 +143,28 @@ lists the projects there: each directory named `*.debussy` directly inside it th
 modification time first, at most 1000 ([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)). A project elsewhere is
 opened through a folder dialog. The app keeps no list of recent projects. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
 
+## Project archives
+
+Share/Archive… writes a project as one zip file, `<name>.debussy.zip`, holding a single top-level
+directory `<name>.debussy/` with `project.json`, `versions/*.json` and `audio/*.wav`; `cache/`,
+`lock` and `recording.json` are left out. JSON entries are deflated and audio entries stored. The
+project is saved first, and the file is written beside its destination and renamed into place.
+Only `project_storage` depends on the `zip` crate ([ADR-0140](../adrs/0140-project-archives-are-read-and-written-with-the-zip.md)).
+
+Opening an archive unpacks it into the projects folder under the first free name and then opens
+it as any project. An archive is refused, leaving nothing behind, unless:
+
+- every entry is that directory, or one of the files or subdirectories above inside it, named
+  in UTF-8 with no absolute part, `..`, backslash or repeat;
+- no entry is a symbolic link or encrypted, and each is stored or deflated;
+- it has at most 100,000 entries, each JSON entry is at most 64 MB, and the bytes unpacked, counted
+  as they are written and never taken from the headers, stay within the free space on the
+  projects folder's volume less 1 GB.
+
+Unpacking goes into a hidden directory in the projects folder, renamed into place once complete
+and deleted on any failure; the result then passes the checks in [Loading](#loading)
+([ADR-0141](../adrs/0141-a-project-archive-is-a-plain-zip-of-the-bundle.md)).
+
 ## Saved format
 
 `project.json` and version files are JSON of the format types in `project_storage`, not of the

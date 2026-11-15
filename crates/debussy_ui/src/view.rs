@@ -1080,6 +1080,7 @@ impl App {
                     Entry::Separator,
                     Entry::item("Import…", when_stopped(Message::Import)),
                     Entry::item("Export…", Some(Message::Export)),
+                    Entry::item("Share/Archive…", when_stopped(Message::Archive)),
                     Entry::Separator,
                     Entry::item("Quit", Some(Message::Quit)),
                 ]

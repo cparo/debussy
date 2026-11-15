@@ -24,7 +24,8 @@ use import_export::{Lame, import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{
-    AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart, Recovery,
+    ARCHIVE_SUFFIX, AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart,
+    Recovery, write_archive,
 };
 use signal_graph::NodeId;
 use wav_files::WavReader;
@@ -295,6 +296,27 @@ impl Services for AppServices {
 
     fn save(&mut self, session: &Session) -> Result<(), String> {
         self.bundle.save(session).map_err(|e| e.to_string())
+    }
+
+    fn archive(&mut self, session: &Session) -> Result<Option<String>, String> {
+        let stem = self.bundle.path().file_stem().map_or_else(
+            || "Untitled".to_owned(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Share/Archive project")
+            .set_file_name(format!("{stem}{ARCHIVE_SUFFIX}"))
+            .add_filter("Zip archive", &["zip"])
+            .save_file()
+        else {
+            return Ok(None);
+        };
+        self.bundle.save(session).map_err(|e| e.to_string())?;
+        write_archive(self.bundle.path(), &path).map_err(|e| format!("Archive failed: {e}"))?;
+        Ok(Some(path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )))
     }
 
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
