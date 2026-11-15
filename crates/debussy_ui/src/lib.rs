@@ -85,6 +85,7 @@ mod transport;
 mod typeface;
 mod view;
 mod waveform;
+mod wire_edit;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -112,6 +113,7 @@ pub use waveform::{
     Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, SPECTRUM_BANDS, SPECTRUM_COLUMNS,
     Spectrum, spectrum_bands,
 };
+pub use wire_edit::Grip;
 
 /// Opens the main window over `app`, the project open at its path, or the start screen without
 /// one, and runs until it closes; projects are opened and created through `launcher`, and those

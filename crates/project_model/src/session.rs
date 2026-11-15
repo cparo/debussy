@@ -8,7 +8,9 @@ use audio_buffers::Layout;
 use crate::edit::Edit;
 use crate::error::Error;
 use crate::range::{self, Excerpt, Range};
-use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side};
+use crate::routing::{
+    Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side, WireShape,
+};
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::types::{ClipId, CurveId, TrackId};
 
@@ -432,6 +434,20 @@ impl Session {
     /// beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE).
     pub fn move_node(&mut self, id: NodeId, position: Option<Position>) -> Result<(), Error> {
         self.apply(Edit::MoveNode { node: id, position })
+    }
+
+    /// Sets how connection `id`'s wires run on the patch board, as one step.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownConnection`]; [`Error::InvalidValue`] for a coordinate or offset that
+    /// is not finite or is beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE), or
+    /// more than [`MAX_WIRE_POINTS`](crate::MAX_WIRE_POINTS) points.
+    pub fn shape_wire(&mut self, id: ConnectionId, shape: WireShape) -> Result<(), Error> {
+        self.apply(Edit::ShapeWire {
+            connection: id,
+            shape,
+        })
     }
 
     /// Moves the project output's L and R on the patch board, as one step; `None` returns them

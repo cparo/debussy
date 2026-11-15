@@ -15,7 +15,13 @@ pub const MAX_DEPTH: u64 = 64;
 pub(crate) type Migration = fn(Value) -> Result<Value, String>;
 
 /// `MIGRATIONS[i]` turns a file of version `i + 1` into version `i + 2`.
-const MIGRATIONS: &[Migration] = &[one_to_two, two_to_three, three_to_four, four_to_five];
+const MIGRATIONS: &[Migration] = &[
+    one_to_two,
+    two_to_three,
+    three_to_four,
+    four_to_five,
+    five_to_six,
+];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
 /// connection is a whole-port connection, which is what their absence means.
@@ -57,6 +63,12 @@ fn four_to_five(mut value: Value) -> Result<Value, String> {
                 .insert("curve_ports".to_owned(), Value::Object(Default::default()));
         }
     }
+    Ok(value)
+}
+
+/// Version 6 added optional `out_handle`, `in_handle` and `points` to connections (ADR-0134); a
+/// version 5 file leaves every wire on the automatic curve, which is what their absence means.
+fn five_to_six(value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
@@ -185,7 +197,7 @@ mod tests {
             "nodes":[{"id":1,"kind":{"kind":"bus","layout":"mono"}}],
             "tempo":{"bpm":90.0,"beats_per_bar":3,"beat_unit":4}}"#;
         let saved = parse(Path::new("p"), v4)?;
-        assert_eq!(saved.format_version, 5);
+        assert_eq!(saved.format_version, FORMAT_VERSION);
         assert!(saved.curves.is_empty());
         assert!(saved.nodes[0].curve_ports.is_empty());
         // A version 5 file must have its curves and curve ports.
@@ -205,12 +217,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":6");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":7");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 6,
-                supported: 5,
+                found: 7,
+                supported: 6,
                 ..
             })
         ));

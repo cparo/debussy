@@ -147,6 +147,15 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
   input takes one wire; a drop on an occupied input, an output, empty board, or an input of the
   other signal kind (a curve on an audio input, audio on a curve port) does nothing.
 - Drag a node, or the L and R outputs (vertically), to move them; the move is one undo step.
+- A selected wire shows its two end handles as circles on stems from their pins, at the
+  automatic place when unset, and its points as 8-pixel squares; a selected point shows its two
+  handles. A whole-port stereo connection's second wire passes its points moved as far as its
+  pins are from the first wire's. A press on a grip selects and drags it, kept on the board, as
+  one undo step; dragging a point's handle keeps the other pointing the opposite way at its own
+  length, and ⌥ breaks that link. A press on the selected wire adds a point there without
+  changing its course, as one step, and selects it. Delete or Backspace removes the selected
+  point, or returns the selected end handle to the automatic curve
+  ([ADR-0134](../adrs/0134-wire-handles-are-saved-as-optional-offsets-from-a.md)).
 - Click a node or wire to select it; a node's dialog opens. Delete or Backspace removes a
   selected wire, except while text is being typed; a node is deleted only through its dialog
   ([ADR-0108](../adrs/0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md)). A click on empty board clears the selection and

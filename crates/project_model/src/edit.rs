@@ -111,6 +111,13 @@ pub enum Edit {
         /// The pan, −1 to 1.
         pan: f32,
     },
+    /// Sets how a connection's wires run on the patch board.
+    ShapeWire {
+        /// The connection.
+        connection: ConnectionId,
+        /// Its new shape.
+        shape: crate::routing::WireShape,
+    },
     /// Moves a node on the patch board; `None` returns it to the automatic layout.
     MoveNode {
         /// The node.
@@ -335,6 +342,15 @@ impl Edit {
                     pan: old,
                 })
             }
+            Edit::ShapeWire { connection, shape } => {
+                shape.check()?;
+                let index = connection_index(state, connection)?;
+                let old = std::mem::replace(&mut state.connections[index].shape, shape);
+                Ok(Edit::ShapeWire {
+                    connection,
+                    shape: old,
+                })
+            }
             Edit::MoveNode { node, position } => {
                 if let Some(p) = position {
                     routing::check_coordinate(p.x)?;
@@ -544,6 +560,7 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         return Err(Error::ConnectionExists(connection.id));
     }
     routing::check_pan(connection.pan)?;
+    connection.shape.check()?;
     let ends = [
         (connection.from, true, connection.output),
         (connection.to, false, connection.input),
@@ -641,7 +658,7 @@ fn check_state(state: &State) -> Result<(), Error> {
     }
     for connection in &state.connections {
         check_connection(&built, connection)?;
-        built.connections.push(*connection);
+        built.connections.push(connection.clone());
     }
     Ok(())
 }

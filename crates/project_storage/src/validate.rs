@@ -7,14 +7,14 @@ use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
 use project_model::{
     AudioFile, Clip, ClipId, Connection, ConnectionId, CurveId, CurveLane, Edit, Endpoint,
-    MAX_BOARD_COORDINATE, Node, NodeId, NodeKind, Position, Side, Source, State, Tempo, Track,
-    TrackId,
+    MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId, NodeKind, Position, Side, Source, State,
+    Tempo, Track, TrackId, WireHandle, WirePoint, WireShape,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
     SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSide,
-    SavedSource, SavedTempo, SavedTrack,
+    SavedSource, SavedTempo, SavedTrack, SavedWireHandle, SavedWirePoint,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -85,6 +85,19 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
                 pan: c.pan,
                 from_side: side_to_saved(c.from_side),
                 to_side: side_to_saved(c.to_side),
+                out_handle: c.shape.out_handle.map(wire_handle_to_saved),
+                in_handle: c.shape.in_handle.map(wire_handle_to_saved),
+                points: c
+                    .shape
+                    .points
+                    .iter()
+                    .map(|p| SavedWirePoint {
+                        x: p.at.x,
+                        y: p.at.y,
+                        in_handle: wire_handle_to_saved(p.in_handle),
+                        out_handle: wire_handle_to_saved(p.out_handle),
+                    })
+                    .collect(),
             })
             .collect(),
         output_y: state.output_y,
@@ -95,6 +108,49 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
         },
         curves: state.curves.iter().map(curve_to_saved).collect(),
     }
+}
+
+fn wire_handle_to_saved(handle: WireHandle) -> SavedWireHandle {
+    SavedWireHandle {
+        dx: handle.dx,
+        dy: handle.dy,
+    }
+}
+
+/// A saved wire handle, its offsets checked as patch-board coordinates.
+fn wire_handle_from_saved(handle: SavedWireHandle) -> Result<WireHandle, String> {
+    check_coordinate(handle.dx)?;
+    check_coordinate(handle.dy)?;
+    Ok(WireHandle {
+        dx: handle.dx,
+        dy: handle.dy,
+    })
+}
+
+/// A saved connection's wire shape: its handles and at most [`MAX_WIRE_POINTS`] points, every
+/// coordinate checked.
+fn wire_shape_from_saved(saved: &SavedConnection) -> Result<WireShape, String> {
+    ensure(saved.points.len() <= MAX_WIRE_POINTS, || {
+        format!("{} points, over {MAX_WIRE_POINTS}", saved.points.len())
+    })?;
+    let points = saved
+        .points
+        .iter()
+        .map(|p| {
+            check_coordinate(p.x)?;
+            check_coordinate(p.y)?;
+            Ok(WirePoint {
+                at: Position { x: p.x, y: p.y },
+                in_handle: wire_handle_from_saved(p.in_handle)?,
+                out_handle: wire_handle_from_saved(p.out_handle)?,
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(WireShape {
+        out_handle: saved.out_handle.map(wire_handle_from_saved).transpose()?,
+        in_handle: saved.in_handle.map(wire_handle_from_saved).transpose()?,
+        points,
+    })
 }
 
 fn handle_to_saved(handle: Handle) -> SavedHandle {
@@ -509,6 +565,8 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
             saved_connection.input,
         );
         connection.pan = saved_connection.pan;
+        connection.shape = wire_shape_from_saved(&saved_connection)
+            .map_err(|reason| format!("connection {id} has a bad wire shape: {reason}"))?;
         connections.push(connection.with_sides(from_side, to_side));
     }
     state.connections = connections;

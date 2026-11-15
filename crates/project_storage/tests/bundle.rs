@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
-use project_model::{AudioFile, Clip, Endpoint, NodeKind, Session, Source};
+use project_model::{
+    AudioFile, Clip, Endpoint, NodeKind, Position, Session, Source, WireHandle, WirePoint,
+    WireShape,
+};
 use project_storage::{Bundle, Error as StorageError, FORMAT_VERSION, MAX_FILE_BYTES};
 
 /// A fresh, empty directory for one test.
@@ -96,7 +99,32 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
         session.connect(Endpoint::Track(track), 0, Endpoint::Node(mixer), i)?;
     }
     session.connect(Endpoint::Node(mixer), 0, Endpoint::Node(effect), 0)?;
-    session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
+    let out = session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
+    let reach = random.below(400) as f32 + 0.5;
+    let wire_points = (0..random.below(3))
+        .map(|k| WirePoint {
+            at: Position {
+                x: reach + 100.0 * k as f32,
+                y: reach / 2.0,
+            },
+            in_handle: WireHandle { dx: -30.0, dy: 5.5 },
+            out_handle: WireHandle { dx: 30.0, dy: -5.5 },
+        })
+        .collect();
+    session.shape_wire(
+        out,
+        WireShape {
+            out_handle: Some(WireHandle {
+                dx: reach,
+                dy: -reach / 3.0,
+            }),
+            in_handle: (random.below(2) == 0).then_some(WireHandle {
+                dx: -reach,
+                dy: 0.0,
+            }),
+            points: wire_points,
+        },
+    )?;
     let mut points = Vec::new();
     let mut frame = random.below(1_000) as i64 - 500;
     for _ in 0..random.below(5) {
@@ -527,6 +555,66 @@ fn test_board_positions_round_trip_and_bad_ones_are_refused() -> Result<(), Box<
         project("", "").replace("\"nodes\":[]", "\"nodes\":[],\"output_y\":1e12"),
     ] {
         let error = open_with(&path, &text)?;
+        assert!(
+            matches!(
+                error,
+                StorageError::Invalid { .. } | StorageError::Json { .. }
+            ),
+            "{error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn test_wire_handles_are_checked_on_open() -> Result<(), Box<dyn Error>> {
+    let path = scratch("wire-handles")?;
+    drop(Bundle::create(&path, 48_000)?);
+    let wired = |handles: &str| {
+        project(
+            &mono_track("a.wav"),
+            &format!(
+                r#"{{"id":3,"from":{{"kind":"track","id":1}},"output":0,"to":{{"kind":"output"}},"input":0,"pan":0.0{handles}}}"#
+            ),
+        )
+    };
+    fs::write(path.join("project.json"), wired(""))?;
+    let (_, opened) = Bundle::open(&path)?;
+    assert_eq!(opened.state().connections[0].shape.out_handle, None);
+    fs::write(
+        path.join("project.json"),
+        wired(r#","out_handle":{"dx":80.0,"dy":-20.0},"in_handle":{"dx":-40.0,"dy":0.0}"#),
+    )?;
+    let (_, opened) = Bundle::open(&path)?;
+    let c = &opened.state().connections[0].shape;
+    let handle = |dx, dy| Some(WireHandle { dx, dy });
+    assert_eq!(
+        (c.out_handle, c.in_handle),
+        (handle(80.0, -20.0), handle(-40.0, 0.0))
+    );
+    let point = |x: &str| {
+        format!(
+            r#"{{"x":{x},"y":5.0,"in_handle":{{"dx":-1.0,"dy":0.0}},"out_handle":{{"dx":1.0,"dy":0.0}}}}"#
+        )
+    };
+    fs::write(
+        path.join("project.json"),
+        wired(&format!(r#","points":[{}]"#, point("40.0"))),
+    )?;
+    let (_, opened) = Bundle::open(&path)?;
+    assert_eq!(opened.state().connections[0].shape.points.len(), 1);
+    let crowded = vec![point("1.0"); project_model::MAX_WIRE_POINTS + 1].join(",");
+    let crowded = format!(r#","points":[{crowded}]"#);
+    let far = format!(r#","points":[{}]"#, point("1e9"));
+    for handles in [
+        r#","out_handle":{"dx":1e9,"dy":0.0}"#,
+        r#","in_handle":{"dx":0.0,"dy":-1e30}"#,
+        r#","in_handle":{"dx":0.0}"#,
+        r#","in_handle":{"dx":0.0,"dy":0.0,"dz":0.0}"#,
+        &crowded,
+        &far,
+    ] {
+        let error = open_with(&path, &wired(handles))?;
         assert!(
             matches!(
                 error,

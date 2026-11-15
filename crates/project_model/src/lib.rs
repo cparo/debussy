@@ -53,8 +53,8 @@ pub use edit::Edit;
 pub use error::Error;
 pub use range::{Excerpt, Lane, Range};
 pub use routing::{
-    Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, Node, NodeId, NodeKind, Position,
-    Side,
+    Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId,
+    NodeKind, Position, Side, WireHandle, WirePoint, WireShape,
 };
 pub use session::Session;
 pub use state::{Clip, CurveLane, State, Track};

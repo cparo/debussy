@@ -10,10 +10,11 @@ use std::collections::BTreeMap;
 use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
-use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State};
+use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, WireShape};
 
 use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
+use crate::wire_edit::{self, Grip, Segment};
 
 /// The distance between two port circles on a node, in logical pixels.
 pub const PORT_SPACING: f32 = 48.0;
@@ -35,6 +36,12 @@ const OUTPUT_RADIUS: f32 = 18.0;
 const OUTPUT_INSET: f32 = 36.0;
 /// The width of a wire.
 const WIRE_WIDTH: f32 = 3.0;
+/// A wire handle's radius.
+const HANDLE_RADIUS: f32 = 5.0;
+/// How close to a wire handle or point a press must be to catch it.
+const HANDLE_REACH: f32 = 6.0;
+/// The side of a wire point's square.
+const WIRE_POINT_SIZE: f32 = 8.0;
 
 /// One circle on the board: a mono port, or one side of a stereo one. Every wire joins two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -61,7 +68,7 @@ pub struct NodeBox {
 }
 
 /// A mono wire between two pins, drawn for a connection.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Wire {
     /// The connection it draws; a whole-port stereo connection draws two.
     pub connection: ConnectionId,
@@ -69,6 +76,11 @@ pub struct Wire {
     pub from: Pin,
     /// The input end.
     pub to: Pin,
+    /// How far this wire passes from the connection's points: zero for its first wire, and for
+    /// the second of a stereo pair the distance between their pins.
+    pub shift: iced::Vector,
+    /// Its course, from the output end.
+    pub segments: Vec<Segment>,
 }
 
 /// The board, laid out.
@@ -80,6 +92,8 @@ pub struct Board {
     pub pins: BTreeMap<Pin, Point>,
     /// The wires.
     pub wires: Vec<Wire>,
+    /// Each connection's shape, as drawn.
+    pub shapes: BTreeMap<ConnectionId, WireShape>,
     /// The board's size: at least the pane's, and enough to hold everything.
     pub size: Size,
 }
@@ -125,6 +139,10 @@ pub enum Hit {
     Node(NodeId),
     /// A wire.
     Wire(ConnectionId),
+    /// A grip of wire `usize` (in [`Board::wires`]) of the connection being shaped.
+    Grip(ConnectionId, usize, Grip),
+    /// Wire `usize` of the connection being shaped, at `f32` along its segment `usize`.
+    WireAt(ConnectionId, usize, usize, f32),
     /// Empty board.
     Nothing,
 }
@@ -132,20 +150,20 @@ pub enum Hit {
 /// How close to a wire a click must be to select it.
 const WIRE_REACH: f32 = 6.0;
 
-/// The point `t` (0 to 1) along a wire's curve from `a` to `b`.
-fn along(a: Point, b: Point, t: f32) -> Point {
-    let reach = ((b.x - a.x).abs() / 2.0).max(40.0);
-    let (c1, c2) = (Point::new(a.x + reach, a.y), Point::new(b.x - reach, b.y));
-    let u = 1.0 - t;
-    let mix = |p: f32, q: f32, r: f32, s: f32| {
-        u * u * u * p + 3.0 * u * u * t * q + 3.0 * u * t * t * r + t * t * t * s
-    };
-    Point::new(mix(a.x, c1.x, c2.x, b.x), mix(a.y, c1.y, c2.y, b.y))
-}
-
 impl Board {
-    /// What is at `at`: a pin first, then a node, then a wire.
-    pub fn hit(&self, at: Point) -> Hit {
+    /// What is at `at`, while the wires of connection `shaping` show `open`'s handles: one of
+    /// their grips first, then a pin, a node, and a wire.
+    pub fn hit(&self, at: Point, shaping: Option<ConnectionId>, open: Option<usize>) -> Hit {
+        for (index, wire) in self.wires.iter().enumerate() {
+            if Some(wire.connection) != shaping {
+                continue;
+            }
+            for (grip, place, _) in wire_edit::grips(&wire.segments, open) {
+                if place.distance(at) <= HANDLE_REACH {
+                    return Hit::Grip(wire.connection, index, grip);
+                }
+            }
+        }
         for (pin, centre) in &self.pins {
             let radius = match pin.endpoint {
                 Endpoint::Output => OUTPUT_RADIUS,
@@ -158,15 +176,22 @@ impl Board {
         if let Some(node) = self.nodes.iter().rev().find(|n| n.rect.contains(at)) {
             return Hit::Node(node.id);
         }
-        for wire in &self.wires {
-            let (Some(a), Some(b)) = (self.pins.get(&wire.from), self.pins.get(&wire.to)) else {
-                continue;
-            };
-            if (0..=32).any(|i| along(*a, *b, i as f32 / 32.0).distance(at) <= WIRE_REACH) {
-                return Hit::Wire(wire.connection);
+        for (index, wire) in self.wires.iter().enumerate() {
+            if let Some((segment, t)) = wire_edit::nearest(&wire.segments, at, WIRE_REACH) {
+                return if Some(wire.connection) == shaping {
+                    Hit::WireAt(wire.connection, index, segment, t)
+                } else {
+                    Hit::Wire(wire.connection)
+                };
             }
         }
         Hit::Nothing
+    }
+
+    /// The pins at wire `index`'s ends.
+    fn ends(&self, index: usize) -> Option<(Point, Point)> {
+        let wire = self.wires.get(index)?;
+        Some((*self.pins.get(&wire.from)?, *self.pins.get(&wire.to)?))
     }
 }
 
@@ -397,10 +422,21 @@ pub fn layout(
         .iter()
         .map(|n| n.rect.y + n.rect.height)
         .fold(bottom, f32::max);
+    let bottom = wires
+        .iter()
+        .flat_map(|w| w.segments.iter().flatten())
+        .map(|p| p.y)
+        .fold(bottom, f32::max);
+    let shapes = state
+        .connections
+        .iter()
+        .map(|c| (c.id, c.shape.clone()))
+        .collect();
     Board {
         nodes,
         pins,
         wires,
+        shapes,
         size: Size::new(width, min.height.max(bottom + PORT_SPACING)),
     }
 }
@@ -427,25 +463,36 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
                 .flat_map(|f| to.iter().map(move |t| (*f, *t)))
                 .collect()
         };
-        wires.extend(pairs.into_iter().map(|(from, to)| Wire {
-            connection: c.id,
-            from,
-            to,
+        // Later wires of the connection pass its points moved by half the sum of how far
+        // their pins are from the first wire's, keeping a stereo pair parallel.
+        let first = pairs
+            .first()
+            .and_then(|(f, t)| Some((*pins.get(f)?, *pins.get(t)?)));
+        wires.extend(pairs.into_iter().filter_map(|(from, to)| {
+            let (a, b) = (*pins.get(&from)?, *pins.get(&to)?);
+            let (a0, b0) = first?;
+            let shift = ((a - a0) + (b - b0)) * 0.5;
+            Some(Wire {
+                connection: c.id,
+                from,
+                to,
+                shift,
+                segments: wire_edit::segments(a, b, &c.shape, shift),
+            })
         }));
     }
     wires
 }
 
-/// A wire's curve from an output at `a` to an input at `b`.
-fn curve(a: Point, b: Point) -> Path {
-    let reach = ((b.x - a.x).abs() / 2.0).max(40.0);
+/// A wire's course as a path.
+fn curve(segments: &[Segment]) -> Path {
     Path::new(|p| {
-        p.move_to(a);
-        p.bezier_curve_to(
-            Point::new(a.x + reach, a.y),
-            Point::new(b.x - reach, b.y),
-            b,
-        );
+        if let Some(first) = segments.first() {
+            p.move_to(first[0]);
+        }
+        for [_, c1, c2, end] in segments {
+            p.bezier_curve_to(*c1, *c2, *end);
+        }
     })
 }
 
@@ -466,11 +513,33 @@ pub enum Selection {
     Node(NodeId),
     /// A connection.
     Wire(ConnectionId),
+    /// A grip on a connection's wires: an end handle, a point, or a point's handle.
+    Grip(ConnectionId, Grip),
+}
+
+impl Selection {
+    /// The connection whose wires show their handles: a selected wire's, or a selected
+    /// handle's.
+    pub fn shaping(self) -> Option<ConnectionId> {
+        match self {
+            Selection::Wire(id) | Selection::Grip(id, _) => Some(id),
+            Selection::Node(_) => None,
+        }
+    }
+
+    /// The point whose handles show: a selected point's, or that of a selected point handle.
+    pub fn open_point(self) -> Option<usize> {
+        match self {
+            Selection::Grip(_, grip) => grip.point(),
+            _ => None,
+        }
+    }
 }
 
 /// Draws a laid-out board and turns presses, drags and keys on it into messages: drag from an
-/// output to an input to connect, drag a node or the L/R outputs to move them, click to select,
-/// Delete or Backspace to remove a selected wire.
+/// output to an input to connect, drag a node, the L/R outputs, or a selected wire's handles and
+/// points to move them, press a selected wire to add a point there, click to select, Delete or
+/// Backspace to remove a selected wire, point or handle.
 pub struct BoardView {
     /// The laid-out board.
     pub board: Board,
@@ -490,13 +559,27 @@ pub enum BoardDrag {
     Node(NodeId, iced::Vector),
     /// The L/R outputs, held this far below L's centre.
     Output(f32),
+    /// A grip of wire `wire` (in [`Board::wires`]) of `connection`, held at `grab` from its
+    /// centre.
+    Grip {
+        /// The connection.
+        connection: ConnectionId,
+        /// The wire it was caught on.
+        wire: usize,
+        /// What was caught.
+        grip: Grip,
+        /// Where the press was, from the grip's centre.
+        grab: iced::Vector,
+    },
 }
 
-/// The board's own state: the drag it is following, and the pointer for a wire being drawn.
+/// The board's own state: the drag it is following, the pointer for a wire being drawn, and
+/// whether ⌥ is held.
 #[derive(Default)]
 pub struct BoardState {
     drag: BoardDrag,
     pointer: Option<Point>,
+    alt: bool,
 }
 
 /// `cursor` relative to `bounds`' top-left, inside or not.
@@ -517,10 +600,16 @@ impl Program<Message> for BoardView {
         cursor: mouse::Cursor,
     ) -> Option<canvas::Action<Message>> {
         use iced::keyboard::{self, key::Named};
+        let open = self.selection.and_then(Selection::open_point);
         match event {
+            canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.alt = modifiers.alt();
+                None
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?;
-                let message = match self.board.hit(at) {
+                let shaping = self.selection.and_then(Selection::shaping);
+                let message = match self.board.hit(at, shaping, open) {
                     Hit::Pin(pin) if pin.endpoint == Endpoint::Output => {
                         let centre = self.board.pins.get(&Pin {
                             side: Some(Side::Left),
@@ -542,6 +631,34 @@ impl Program<Message> for BoardView {
                         Message::Select(Some(Selection::Node(id)))
                     }
                     Hit::Wire(id) => Message::Select(Some(Selection::Wire(id))),
+                    Hit::Grip(connection, wire, grip) => {
+                        let place = wire_edit::grips(&self.board.wires.get(wire)?.segments, open)
+                            .into_iter()
+                            .find(|g| g.0 == grip)
+                            .map(|g| g.1)?;
+                        state.drag = BoardDrag::Grip {
+                            connection,
+                            wire,
+                            grip,
+                            grab: at - place,
+                        };
+                        Message::Select(Some(Selection::Grip(connection, grip)))
+                    }
+                    Hit::WireAt(connection, wire, segment, t) => {
+                        let (a, b) = self.board.ends(wire)?;
+                        let shift = self.board.wires.get(wire)?.shift;
+                        let shape = self.board.shapes.get(&connection)?;
+                        let (shape, index) = wire_edit::split(a, b, shape, shift, segment, t)?;
+                        let point = shape.points.get(index)?;
+                        let place = Point::new(point.at.x, point.at.y) + shift;
+                        state.drag = BoardDrag::Grip {
+                            connection,
+                            wire,
+                            grip: Grip::Point(index),
+                            grab: at - place,
+                        };
+                        Message::AddWirePoint(connection, shape, index)
+                    }
                     Hit::Nothing => Message::Select(None),
                 };
                 Some(canvas::Action::publish(message).and_capture())
@@ -562,6 +679,23 @@ impl Program<Message> for BoardView {
                     BoardDrag::Output(grab) => Some(canvas::Action::publish(Message::DragOutput(
                         (at.y - grab).max(0.0),
                     ))),
+                    BoardDrag::Grip {
+                        connection,
+                        wire,
+                        grip,
+                        grab,
+                    } => {
+                        // Kept on the board, so it can always be caught again.
+                        let to = at - grab;
+                        let to = Point::new(to.x.clamp(0.0, self.board.size.width), to.y.max(0.0));
+                        let ends = self.board.ends(wire)?;
+                        let shift = self.board.wires.get(wire)?.shift;
+                        let shape = self.board.shapes.get(&connection)?;
+                        let shape = wire_edit::drag(shape, grip, to, ends, shift, state.alt)?;
+                        Some(canvas::Action::publish(Message::DragShape(
+                            connection, shape,
+                        )))
+                    }
                     BoardDrag::Idle if self.wiring.is_some() => {
                         state.pointer = Some(at);
                         Some(canvas::Action::request_redraw())
@@ -576,7 +710,10 @@ impl Program<Message> for BoardView {
                 }
                 self.wiring?;
                 state.pointer = None;
-                let target = match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+                let target = match cursor
+                    .position_in(bounds)
+                    .map(|at| self.board.hit(at, None, None))
+                {
                     Some(Hit::Pin(pin)) if !pin.output => Some(pin),
                     _ => None,
                 };
@@ -608,18 +745,45 @@ impl Program<Message> for BoardView {
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
+        let shaping = self.selection.and_then(Selection::shaping);
         for w in &board.wires {
-            if let (Some(a), Some(b)) = (board.pins.get(&w.from), board.pins.get(&w.to)) {
-                let chosen = self.selection == Some(Selection::Wire(w.connection));
-                let colour = if chosen {
-                    tint(w.from.endpoint)
+            let chosen = shaping == Some(w.connection);
+            let colour = if chosen {
+                tint(w.from.endpoint)
+            } else {
+                signal_colour(t, w.from.endpoint)
+            };
+            let stroke = Stroke::default()
+                .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
+                .with_color(colour);
+            frame.stroke(&curve(&w.segments), stroke);
+        }
+        // The shaped connection's grips over every wire: handles as circles on stems, points
+        // as squares; the selected one filled.
+        let open = self.selection.and_then(Selection::open_point);
+        for w in board.wires.iter().filter(|w| shaping == Some(w.connection)) {
+            let colour = tint(w.from.endpoint);
+            for (grip, place, stem) in wire_edit::grips(&w.segments, open) {
+                let held = self.selection == Some(Selection::Grip(w.connection, grip));
+                let fill = if held { colour } else { t.pane };
+                let outline = Stroke::default().with_width(1.5).with_color(colour);
+                if let Some(stem) = stem {
+                    frame.stroke(
+                        &Path::line(stem, place),
+                        Stroke::default().with_width(1.0).with_color(colour),
+                    );
+                    let circle = Path::circle(place, HANDLE_RADIUS);
+                    frame.fill(&circle, fill);
+                    frame.stroke(&circle, outline);
                 } else {
-                    signal_colour(t, w.from.endpoint)
-                };
-                let stroke = Stroke::default()
-                    .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
-                    .with_color(colour);
-                frame.stroke(&curve(*a, *b), stroke);
+                    let half = WIRE_POINT_SIZE / 2.0;
+                    let square = Path::rectangle(
+                        Point::new(place.x - half, place.y - half),
+                        Size::new(WIRE_POINT_SIZE, WIRE_POINT_SIZE),
+                    );
+                    frame.fill(&square, fill);
+                    frame.stroke(&square, outline);
+                }
             }
         }
         if let (Some(from), Some(to)) = (self.wiring, state.pointer)
@@ -628,7 +792,8 @@ impl Program<Message> for BoardView {
             let stroke = Stroke::default()
                 .with_width(WIRE_WIDTH)
                 .with_color(tint(from.endpoint));
-            frame.stroke(&curve(*a, to), stroke);
+            let (c1, c2) = wire_edit::automatic(*a, to);
+            frame.stroke(&curve(&[[*a, c1, c2, to]]), stroke);
         }
         for node in &board.nodes {
             frame.fill_rectangle(node.rect.position(), node.rect.size(), t.lane);
@@ -696,15 +861,22 @@ impl Program<Message> for BoardView {
         match state.drag {
             BoardDrag::Node(..) => return mouse::Interaction::Grabbing,
             BoardDrag::Output(_) => return mouse::Interaction::ResizingVertically,
+            BoardDrag::Grip { .. } => return mouse::Interaction::Grabbing,
             BoardDrag::Idle => {}
         }
-        match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+        let shaping = self.selection.and_then(Selection::shaping);
+        match cursor.position_in(bounds).map(|at| {
+            let open = self.selection.and_then(Selection::open_point);
+            self.board.hit(at, shaping, open)
+        }) {
             Some(Hit::Pin(p)) if p.endpoint == Endpoint::Output => {
                 mouse::Interaction::ResizingVertically
             }
             Some(Hit::Pin(p)) if p.output => mouse::Interaction::Crosshair,
             Some(Hit::Node(_)) => mouse::Interaction::Grab,
             Some(Hit::Wire(_)) => mouse::Interaction::Pointer,
+            Some(Hit::Grip(..)) => mouse::Interaction::Grab,
+            Some(Hit::WireAt(..)) => mouse::Interaction::Crosshair,
             _ => mouse::Interaction::default(),
         }
     }
@@ -956,17 +1128,99 @@ mod tests {
             side: None,
         };
         let at = *board.pins.get(&input).ok_or("no input")?;
-        assert_eq!(board.hit(Point::new(at.x + 4.0, at.y)), Hit::Pin(input));
-        assert_eq!(board.hit(mixer.rect.center()), Hit::Node(mixer.id));
+        assert_eq!(
+            board.hit(Point::new(at.x + 4.0, at.y), None, None),
+            Hit::Pin(input)
+        );
+        assert_eq!(
+            board.hit(mixer.rect.center(), None, None),
+            Hit::Node(mixer.id)
+        );
         // Midway along the vocal's wire.
-        let wire = board
+        let (index, wire) = board
             .wires
             .iter()
-            .find(|w| w.to == input)
+            .enumerate()
+            .find(|(_, w)| w.to == input)
             .ok_or("no wire")?;
-        let from = *board.pins.get(&wire.from).ok_or("no from")?;
-        assert_eq!(board.hit(along(from, at, 0.5)), Hit::Wire(wire.connection));
-        assert_eq!(board.hit(Point::new(5.0, 390.0)), Hit::Nothing);
+        let midway = wire_edit::along(&wire.segments[0], 0.5);
+        assert_eq!(board.hit(midway, None, None), Hit::Wire(wire.connection));
+        assert_eq!(board.hit(Point::new(5.0, 390.0), None, None), Hit::Nothing);
+        // On the connection being shaped, a press on the wire is a place to add a point, and
+        // its handles are caught; elsewhere they are not.
+        let shaping = Some(wire.connection);
+        assert!(matches!(
+            board.hit(midway, shaping, None),
+            Hit::WireAt(c, i, 0, _) if c == wire.connection && i == index
+        ));
+        let [_, c1, c2, _] = wire.segments[0];
+        assert!(!matches!(board.hit(c1, None, None), Hit::Grip(..)));
+        assert_eq!(
+            board.hit(c1, shaping, None),
+            Hit::Grip(wire.connection, index, Grip::OutHandle)
+        );
+        assert_eq!(
+            board.hit(c2, shaping, None),
+            Hit::Grip(wire.connection, index, Grip::InHandle)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_wires_follow_their_shape_and_a_stereo_pair_runs_parallel() -> Result {
+        use project_model::{WireHandle, WirePoint, WireShape};
+        let mut session = Session::new_project();
+        session.add_track("Keys", Layout::Stereo)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        // The mixer's whole-port connection to the output, drawn as two wires.
+        let id = session
+            .state()
+            .connections
+            .iter()
+            .find(|c| c.to == Endpoint::Output)
+            .map(|c| c.id)
+            .ok_or("no output wire")?;
+        let unshaped = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        let shape = WireShape {
+            out_handle: Some(WireHandle { dx: 50.0, dy: 70.0 }),
+            in_handle: None,
+            points: vec![WirePoint {
+                at: project_model::Position { x: 400.0, y: 500.0 },
+                in_handle: WireHandle { dx: -30.0, dy: 0.0 },
+                out_handle: WireHandle { dx: 30.0, dy: 0.0 },
+            }],
+        };
+        session.shape_wire(id, shape)?;
+        let check = |board: &Board| -> Result {
+            let wires: Vec<&Wire> = board.wires.iter().filter(|w| w.connection == id).collect();
+            assert_eq!(wires.len(), 2);
+            for w in &wires {
+                let a = *board.pins.get(&w.from).ok_or("no from")?;
+                let b = *board.pins.get(&w.to).ok_or("no to")?;
+                assert_eq!(w.segments.len(), 2);
+                // Both wires share the end handle's offset; the unshaped end is automatic.
+                assert_eq!(w.segments[0][1], Point::new(a.x + 50.0, a.y + 70.0));
+                assert_eq!(
+                    w.segments[1][2],
+                    wire_edit::automatic(w.segments[1][0], b).1
+                );
+            }
+            // The second passes the point moved as far as its pins are from the first's.
+            assert_eq!(wires[0].segments[0][3], Point::new(400.0, 500.0));
+            assert_eq!(
+                wires[1].segments[0][3],
+                Point::new(400.0, 500.0 + PORT_SPACING)
+            );
+            Ok(())
+        };
+        let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        check(&board)?;
+        assert_ne!(board.wires, unshaped.wires);
+        session.move_node(mixer, Some(project_model::Position { x: 120.0, y: 300.0 }))?;
+        let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        check(&board)?;
+        // The board grows to hold the point.
+        assert!(board.size.height > 500.0 + PORT_SPACING);
         Ok(())
     }
 

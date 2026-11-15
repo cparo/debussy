@@ -467,6 +467,76 @@ fn test_moving_nodes_and_the_output_are_steps_and_checked() -> TestResult {
 }
 
 #[test]
+fn test_shape_wire_is_a_step_checked_and_kept_through_disconnect_undo() -> TestResult {
+    use project_model::{MAX_WIRE_POINTS, Position, WireHandle, WirePoint, WireShape};
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let id = session.state().connections[1].id;
+    let handle = |dx, dy| WireHandle { dx, dy };
+    let point = |x, y| WirePoint {
+        at: Position { x, y },
+        in_handle: handle(-20.0, 0.0),
+        out_handle: handle(20.0, 0.0),
+    };
+    let shape = |s: &Session| s.state().connection(id).map(|c| c.shape.clone());
+    let bent = WireShape {
+        out_handle: Some(handle(120.0, -40.0)),
+        in_handle: None,
+        points: Vec::new(),
+    };
+    let pointed = WireShape {
+        in_handle: Some(handle(-80.0, 0.0)),
+        points: vec![point(200.0, 300.0), point(260.0, 120.0)],
+        ..bent.clone()
+    };
+    session.shape_wire(id, bent.clone())?;
+    session.shape_wire(id, pointed.clone())?;
+    assert_eq!(shape(&session), Some(pointed.clone()));
+    // Removing the wire and undoing that brings its shape back with it.
+    session.disconnect(id)?;
+    assert!(session.undo());
+    assert_eq!(shape(&session), Some(pointed));
+    assert!(session.undo());
+    assert_eq!(shape(&session), Some(bent));
+    assert!(session.undo());
+    assert_eq!(shape(&session), Some(WireShape::default()));
+    let steps = session.can_undo();
+    for bad in [f32::NAN, f32::NEG_INFINITY, -2.0e6] {
+        let handled = WireShape {
+            in_handle: Some(handle(0.0, bad)),
+            ..WireShape::default()
+        };
+        assert!(matches!(
+            session.shape_wire(id, handled),
+            Err(Error::InvalidValue)
+        ));
+        let placed = WireShape {
+            points: vec![point(bad, 0.0)],
+            ..WireShape::default()
+        };
+        assert!(matches!(
+            session.shape_wire(id, placed),
+            Err(Error::InvalidValue)
+        ));
+    }
+    let crowded = WireShape {
+        points: vec![point(1.0, 1.0); MAX_WIRE_POINTS + 1],
+        ..WireShape::default()
+    };
+    assert!(matches!(
+        session.shape_wire(id, crowded),
+        Err(Error::InvalidValue)
+    ));
+    let unknown = project_model::ConnectionId(u64::MAX);
+    assert!(matches!(
+        session.shape_wire(unknown, WireShape::default()),
+        Err(Error::UnknownConnection(_))
+    ));
+    assert_eq!(session.can_undo(), steps, "refused shapes are not steps");
+    Ok(())
+}
+
+#[test]
 fn test_disconnect_is_a_step() -> TestResult {
     let mut session = Session::new_project();
     session.add_track("Vocal", Layout::Mono)?;
