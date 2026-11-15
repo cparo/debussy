@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
-use project_model::{AudioFile, Clip, Endpoint, NodeKind, Session, Source};
+use project_model::{AudioFile, Clip, Endpoint, NodeKind, Session, Source, WireHandle};
 use project_storage::{Bundle, Error as StorageError, FORMAT_VERSION, MAX_FILE_BYTES};
 
 /// A fresh, empty directory for one test.
@@ -96,7 +96,19 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
         session.connect(Endpoint::Track(track), 0, Endpoint::Node(mixer), i)?;
     }
     session.connect(Endpoint::Node(mixer), 0, Endpoint::Node(effect), 0)?;
-    session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
+    let out = session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
+    let reach = random.below(400) as f32 + 0.5;
+    session.shape_wire(
+        out,
+        Some(WireHandle {
+            dx: reach,
+            dy: -reach / 3.0,
+        }),
+        (random.below(2) == 0).then_some(WireHandle {
+            dx: -reach,
+            dy: 0.0,
+        }),
+    )?;
     let mut points = Vec::new();
     let mut frame = random.below(1_000) as i64 - 500;
     for _ in 0..random.below(5) {
@@ -527,6 +539,53 @@ fn test_board_positions_round_trip_and_bad_ones_are_refused() -> Result<(), Box<
         project("", "").replace("\"nodes\":[]", "\"nodes\":[],\"output_y\":1e12"),
     ] {
         let error = open_with(&path, &text)?;
+        assert!(
+            matches!(
+                error,
+                StorageError::Invalid { .. } | StorageError::Json { .. }
+            ),
+            "{error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn test_wire_handles_are_checked_on_open() -> Result<(), Box<dyn Error>> {
+    let path = scratch("wire-handles")?;
+    drop(Bundle::create(&path, 48_000)?);
+    let wired = |handles: &str| {
+        project(
+            &mono_track("a.wav"),
+            &format!(
+                r#"{{"id":3,"from":{{"kind":"track","id":1}},"output":0,"to":{{"kind":"output"}},"input":0,"pan":0.0{handles}}}"#
+            ),
+        )
+    };
+    fs::write(path.join("project.json"), wired(""))?;
+    let (_, opened) = Bundle::open(&path)?;
+    assert_eq!(opened.state().connections[0].out_handle, None);
+    fs::write(
+        path.join("project.json"),
+        wired(r#","out_handle":{"dx":80.0,"dy":-20.0},"in_handle":{"dx":-40.0,"dy":0.0}"#),
+    )?;
+    let (_, opened) = Bundle::open(&path)?;
+    let c = &opened.state().connections[0];
+    assert_eq!(
+        c.out_handle,
+        Some(WireHandle {
+            dx: 80.0,
+            dy: -20.0
+        })
+    );
+    assert_eq!(c.in_handle, Some(WireHandle { dx: -40.0, dy: 0.0 }));
+    for handles in [
+        r#","out_handle":{"dx":1e9,"dy":0.0}"#,
+        r#","in_handle":{"dx":0.0,"dy":-1e30}"#,
+        r#","in_handle":{"dx":0.0}"#,
+        r#","in_handle":{"dx":0.0,"dy":0.0,"dz":0.0}"#,
+    ] {
+        let error = open_with(&path, &wired(handles))?;
         assert!(
             matches!(
                 error,

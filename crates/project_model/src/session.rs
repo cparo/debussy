@@ -8,7 +8,9 @@ use audio_buffers::Layout;
 use crate::edit::Edit;
 use crate::error::Error;
 use crate::range::{self, Excerpt, Range};
-use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side};
+use crate::routing::{
+    Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side, WireHandle,
+};
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::types::{ClipId, CurveId, TrackId};
 
@@ -432,6 +434,26 @@ impl Session {
     /// beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE).
     pub fn move_node(&mut self, id: NodeId, position: Option<Position>) -> Result<(), Error> {
         self.apply(Edit::MoveNode { node: id, position })
+    }
+
+    /// Sets connection `id`'s wire handles on the patch board, as one step; `None` returns that
+    /// end of its wires to the automatic curve.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownConnection`]; [`Error::InvalidValue`] for an offset that is not finite or
+    /// is beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE).
+    pub fn shape_wire(
+        &mut self,
+        id: ConnectionId,
+        out_handle: Option<WireHandle>,
+        in_handle: Option<WireHandle>,
+    ) -> Result<(), Error> {
+        self.apply(Edit::ShapeWire {
+            connection: id,
+            out_handle,
+            in_handle,
+        })
     }
 
     /// Moves the project output's L and R on the patch board, as one step; `None` returns them

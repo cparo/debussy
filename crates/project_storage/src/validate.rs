@@ -8,13 +8,13 @@ use modulation::{Curve, Handle, Point};
 use project_model::{
     AudioFile, Clip, ClipId, Connection, ConnectionId, CurveId, CurveLane, Edit, Endpoint,
     MAX_BOARD_COORDINATE, Node, NodeId, NodeKind, Position, Side, Source, State, Tempo, Track,
-    TrackId,
+    TrackId, WireHandle,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
     SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSide,
-    SavedSource, SavedTempo, SavedTrack,
+    SavedSource, SavedTempo, SavedTrack, SavedWireHandle,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -85,6 +85,8 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
                 pan: c.pan,
                 from_side: side_to_saved(c.from_side),
                 to_side: side_to_saved(c.to_side),
+                out_handle: c.out_handle.map(wire_handle_to_saved),
+                in_handle: c.in_handle.map(wire_handle_to_saved),
             })
             .collect(),
         output_y: state.output_y,
@@ -95,6 +97,23 @@ pub(crate) fn to_saved(state: &State, sample_rate: u32) -> SavedProject {
         },
         curves: state.curves.iter().map(curve_to_saved).collect(),
     }
+}
+
+fn wire_handle_to_saved(handle: WireHandle) -> SavedWireHandle {
+    SavedWireHandle {
+        dx: handle.dx,
+        dy: handle.dy,
+    }
+}
+
+/// A saved wire handle, its offsets checked as patch-board coordinates.
+fn wire_handle_from_saved(handle: SavedWireHandle) -> Result<WireHandle, String> {
+    check_coordinate(handle.dx)?;
+    check_coordinate(handle.dy)?;
+    Ok(WireHandle {
+        dx: handle.dx,
+        dy: handle.dy,
+    })
 }
 
 fn handle_to_saved(handle: Handle) -> SavedHandle {
@@ -509,6 +528,14 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
             saved_connection.input,
         );
         connection.pan = saved_connection.pan;
+        connection.out_handle = saved_connection
+            .out_handle
+            .map(wire_handle_from_saved)
+            .transpose()?;
+        connection.in_handle = saved_connection
+            .in_handle
+            .map(wire_handle_from_saved)
+            .transpose()?;
         connections.push(connection.with_sides(from_side, to_side));
     }
     state.connections = connections;

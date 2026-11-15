@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
-use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State};
+use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, WireHandle};
 
 use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
@@ -35,6 +35,10 @@ const OUTPUT_RADIUS: f32 = 18.0;
 const OUTPUT_INSET: f32 = 36.0;
 /// The width of a wire.
 const WIRE_WIDTH: f32 = 3.0;
+/// A wire handle's radius.
+const HANDLE_RADIUS: f32 = 5.0;
+/// How close to a wire handle a press must be to catch it.
+const HANDLE_REACH: f32 = 6.0;
 
 /// One circle on the board: a mono port, or one side of a stereo one. Every wire joins two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -69,6 +73,20 @@ pub struct Wire {
     pub from: Pin,
     /// The input end.
     pub to: Pin,
+    /// Its curve's control point at the output end: the connection's handle there, or the
+    /// automatic one.
+    pub c1: Point,
+    /// Its curve's control point at the input end.
+    pub c2: Point,
+}
+
+/// One end of a wire, where a handle sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum End {
+    /// The output end.
+    Out,
+    /// The input end.
+    In,
 }
 
 /// The board, laid out.
@@ -125,6 +143,8 @@ pub enum Hit {
     Node(NodeId),
     /// A wire.
     Wire(ConnectionId),
+    /// A handle of a wire of the selected connection, with that wire's pin at its end.
+    Handle(ConnectionId, End, Point),
     /// Empty board.
     Nothing,
 }
@@ -132,10 +152,20 @@ pub enum Hit {
 /// How close to a wire a click must be to select it.
 const WIRE_REACH: f32 = 6.0;
 
-/// The point `t` (0 to 1) along a wire's curve from `a` to `b`.
-fn along(a: Point, b: Point, t: f32) -> Point {
+/// The automatic control points of a wire from an output at `a` to an input at `b`: level with
+/// each end, half the ends' horizontal distance out from it, and at least 40 pixels.
+fn automatic(a: Point, b: Point) -> (Point, Point) {
     let reach = ((b.x - a.x).abs() / 2.0).max(40.0);
-    let (c1, c2) = (Point::new(a.x + reach, a.y), Point::new(b.x - reach, b.y));
+    (Point::new(a.x + reach, a.y), Point::new(b.x - reach, b.y))
+}
+
+/// The control point a handle puts at `offset` from `pin`.
+fn offset(pin: Point, handle: WireHandle) -> Point {
+    Point::new(pin.x + handle.dx, pin.y + handle.dy)
+}
+
+/// The point `t` (0 to 1) along the cubic bezier from `a` to `b` through `c1` and `c2`.
+fn along(a: Point, c1: Point, c2: Point, b: Point, t: f32) -> Point {
     let u = 1.0 - t;
     let mix = |p: f32, q: f32, r: f32, s: f32| {
         u * u * u * p + 3.0 * u * u * t * q + 3.0 * u * t * t * r + t * t * t * s
@@ -144,8 +174,19 @@ fn along(a: Point, b: Point, t: f32) -> Point {
 }
 
 impl Board {
-    /// What is at `at`: a pin first, then a node, then a wire.
-    pub fn hit(&self, at: Point) -> Hit {
+    /// What is at `at`: a handle of connection `shaping`'s wires first, then a pin, a node, and
+    /// a wire.
+    pub fn hit(&self, at: Point, shaping: Option<ConnectionId>) -> Hit {
+        for wire in self.wires.iter().filter(|w| Some(w.connection) == shaping) {
+            let (Some(a), Some(b)) = (self.pins.get(&wire.from), self.pins.get(&wire.to)) else {
+                continue;
+            };
+            for (end, handle, pin) in [(End::Out, wire.c1, *a), (End::In, wire.c2, *b)] {
+                if handle.distance(at) <= HANDLE_REACH {
+                    return Hit::Handle(wire.connection, end, pin);
+                }
+            }
+        }
         for (pin, centre) in &self.pins {
             let radius = match pin.endpoint {
                 Endpoint::Output => OUTPUT_RADIUS,
@@ -162,7 +203,10 @@ impl Board {
             let (Some(a), Some(b)) = (self.pins.get(&wire.from), self.pins.get(&wire.to)) else {
                 continue;
             };
-            if (0..=32).any(|i| along(*a, *b, i as f32 / 32.0).distance(at) <= WIRE_REACH) {
+            let near = |i: i32| {
+                along(*a, wire.c1, wire.c2, *b, i as f32 / 32.0).distance(at) <= WIRE_REACH
+            };
+            if (0..=32).any(near) {
                 return Hit::Wire(wire.connection);
             }
         }
@@ -397,6 +441,10 @@ pub fn layout(
         .iter()
         .map(|n| n.rect.y + n.rect.height)
         .fold(bottom, f32::max);
+    let bottom = wires
+        .iter()
+        .map(|w| w.c1.y.max(w.c2.y))
+        .fold(bottom, f32::max);
     Board {
         nodes,
         pins,
@@ -427,25 +475,26 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
                 .flat_map(|f| to.iter().map(move |t| (*f, *t)))
                 .collect()
         };
-        wires.extend(pairs.into_iter().map(|(from, to)| Wire {
-            connection: c.id,
-            from,
-            to,
+        wires.extend(pairs.into_iter().filter_map(|(from, to)| {
+            let (a, b) = (*pins.get(&from)?, *pins.get(&to)?);
+            let (auto1, auto2) = automatic(a, b);
+            Some(Wire {
+                connection: c.id,
+                from,
+                to,
+                c1: c.out_handle.map_or(auto1, |h| offset(a, h)),
+                c2: c.in_handle.map_or(auto2, |h| offset(b, h)),
+            })
         }));
     }
     wires
 }
 
-/// A wire's curve from an output at `a` to an input at `b`.
-fn curve(a: Point, b: Point) -> Path {
-    let reach = ((b.x - a.x).abs() / 2.0).max(40.0);
+/// A wire's curve from an output at `a` to an input at `b` through control points `c1`, `c2`.
+fn curve(a: Point, c1: Point, c2: Point, b: Point) -> Path {
     Path::new(|p| {
         p.move_to(a);
-        p.bezier_curve_to(
-            Point::new(a.x + reach, a.y),
-            Point::new(b.x - reach, b.y),
-            b,
-        );
+        p.bezier_curve_to(c1, c2, b);
     })
 }
 
@@ -466,11 +515,24 @@ pub enum Selection {
     Node(NodeId),
     /// A connection.
     Wire(ConnectionId),
+    /// One end's handle of a connection's wires.
+    Handle(ConnectionId, End),
+}
+
+impl Selection {
+    /// The connection whose wires show their handles: a selected wire's, or a selected
+    /// handle's.
+    pub fn shaping(self) -> Option<ConnectionId> {
+        match self {
+            Selection::Wire(id) | Selection::Handle(id, _) => Some(id),
+            Selection::Node(_) => None,
+        }
+    }
 }
 
 /// Draws a laid-out board and turns presses, drags and keys on it into messages: drag from an
-/// output to an input to connect, drag a node or the L/R outputs to move them, click to select,
-/// Delete or Backspace to remove a selected wire.
+/// output to an input to connect, drag a node, the L/R outputs or a selected wire's handle to
+/// move them, click to select, Delete or Backspace to remove a selected wire or handle.
 pub struct BoardView {
     /// The laid-out board.
     pub board: Board,
@@ -490,6 +552,18 @@ pub enum BoardDrag {
     Node(NodeId, iced::Vector),
     /// The L/R outputs, held this far below L's centre.
     Output(f32),
+    /// A connection's handle at `end`, offset from the pin at `pin`, held at `grab` from the
+    /// handle's centre.
+    Handle {
+        /// The connection.
+        connection: ConnectionId,
+        /// Which end's handle.
+        end: End,
+        /// The pin the handle's offset is measured from.
+        pin: Point,
+        /// Where the press was, from the handle's centre.
+        grab: iced::Vector,
+    },
 }
 
 /// The board's own state: the drag it is following, and the pointer for a wire being drawn.
@@ -520,7 +594,8 @@ impl Program<Message> for BoardView {
         match event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?;
-                let message = match self.board.hit(at) {
+                let shaping = self.selection.and_then(Selection::shaping);
+                let message = match self.board.hit(at, shaping) {
                     Hit::Pin(pin) if pin.endpoint == Endpoint::Output => {
                         let centre = self.board.pins.get(&Pin {
                             side: Some(Side::Left),
@@ -542,6 +617,21 @@ impl Program<Message> for BoardView {
                         Message::Select(Some(Selection::Node(id)))
                     }
                     Hit::Wire(id) => Message::Select(Some(Selection::Wire(id))),
+                    Hit::Handle(connection, end, pin) => {
+                        let handle = self
+                            .board
+                            .wires
+                            .iter()
+                            .find(|w| w.connection == connection)
+                            .map(|w| if end == End::Out { w.c1 } else { w.c2 })?;
+                        state.drag = BoardDrag::Handle {
+                            connection,
+                            end,
+                            pin,
+                            grab: at - handle,
+                        };
+                        Message::Select(Some(Selection::Handle(connection, end)))
+                    }
                     Hit::Nothing => Message::Select(None),
                 };
                 Some(canvas::Action::publish(message).and_capture())
@@ -562,6 +652,27 @@ impl Program<Message> for BoardView {
                     BoardDrag::Output(grab) => Some(canvas::Action::publish(Message::DragOutput(
                         (at.y - grab).max(0.0),
                     ))),
+                    BoardDrag::Handle {
+                        connection,
+                        end,
+                        pin,
+                        grab,
+                    } => {
+                        // Kept on the board, so it can always be caught again.
+                        let handle = at - grab;
+                        let handle = Point::new(
+                            handle.x.clamp(0.0, self.board.size.width),
+                            handle.y.max(0.0),
+                        );
+                        Some(canvas::Action::publish(Message::DragHandle(
+                            connection,
+                            end,
+                            WireHandle {
+                                dx: handle.x - pin.x,
+                                dy: handle.y - pin.y,
+                            },
+                        )))
+                    }
                     BoardDrag::Idle if self.wiring.is_some() => {
                         state.pointer = Some(at);
                         Some(canvas::Action::request_redraw())
@@ -576,7 +687,10 @@ impl Program<Message> for BoardView {
                 }
                 self.wiring?;
                 state.pointer = None;
-                let target = match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+                let target = match cursor
+                    .position_in(bounds)
+                    .map(|at| self.board.hit(at, None))
+                {
                     Some(Hit::Pin(pin)) if !pin.output => Some(pin),
                     _ => None,
                 };
@@ -608,9 +722,10 @@ impl Program<Message> for BoardView {
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
+        let shaping = self.selection.and_then(Selection::shaping);
         for w in &board.wires {
             if let (Some(a), Some(b)) = (board.pins.get(&w.from), board.pins.get(&w.to)) {
-                let chosen = self.selection == Some(Selection::Wire(w.connection));
+                let chosen = shaping == Some(w.connection);
                 let colour = if chosen {
                     tint(w.from.endpoint)
                 } else {
@@ -619,7 +734,28 @@ impl Program<Message> for BoardView {
                 let stroke = Stroke::default()
                     .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
                     .with_color(colour);
-                frame.stroke(&curve(*a, *b), stroke);
+                frame.stroke(&curve(*a, w.c1, w.c2, *b), stroke);
+            }
+        }
+        // The shaped connection's handles, on stems from their pins, over every wire.
+        for w in board.wires.iter().filter(|w| shaping == Some(w.connection)) {
+            let colour = tint(w.from.endpoint);
+            for (end, pin_at, handle) in [
+                (End::Out, board.pins.get(&w.from), w.c1),
+                (End::In, board.pins.get(&w.to), w.c2),
+            ] {
+                let Some(pin_at) = pin_at else { continue };
+                frame.stroke(
+                    &Path::line(*pin_at, handle),
+                    Stroke::default().with_width(1.0).with_color(colour),
+                );
+                let circle = Path::circle(handle, HANDLE_RADIUS);
+                let held = self.selection == Some(Selection::Handle(w.connection, end));
+                frame.fill(&circle, if held { colour } else { t.pane });
+                frame.stroke(
+                    &circle,
+                    Stroke::default().with_width(1.5).with_color(colour),
+                );
             }
         }
         if let (Some(from), Some(to)) = (self.wiring, state.pointer)
@@ -628,7 +764,8 @@ impl Program<Message> for BoardView {
             let stroke = Stroke::default()
                 .with_width(WIRE_WIDTH)
                 .with_color(tint(from.endpoint));
-            frame.stroke(&curve(*a, to), stroke);
+            let (c1, c2) = automatic(*a, to);
+            frame.stroke(&curve(*a, c1, c2, to), stroke);
         }
         for node in &board.nodes {
             frame.fill_rectangle(node.rect.position(), node.rect.size(), t.lane);
@@ -696,15 +833,21 @@ impl Program<Message> for BoardView {
         match state.drag {
             BoardDrag::Node(..) => return mouse::Interaction::Grabbing,
             BoardDrag::Output(_) => return mouse::Interaction::ResizingVertically,
+            BoardDrag::Handle { .. } => return mouse::Interaction::Grabbing,
             BoardDrag::Idle => {}
         }
-        match cursor.position_in(bounds).map(|at| self.board.hit(at)) {
+        let shaping = self.selection.and_then(Selection::shaping);
+        match cursor
+            .position_in(bounds)
+            .map(|at| self.board.hit(at, shaping))
+        {
             Some(Hit::Pin(p)) if p.endpoint == Endpoint::Output => {
                 mouse::Interaction::ResizingVertically
             }
             Some(Hit::Pin(p)) if p.output => mouse::Interaction::Crosshair,
             Some(Hit::Node(_)) => mouse::Interaction::Grab,
             Some(Hit::Wire(_)) => mouse::Interaction::Pointer,
+            Some(Hit::Handle(..)) => mouse::Interaction::Grab,
             _ => mouse::Interaction::default(),
         }
     }
@@ -956,8 +1099,11 @@ mod tests {
             side: None,
         };
         let at = *board.pins.get(&input).ok_or("no input")?;
-        assert_eq!(board.hit(Point::new(at.x + 4.0, at.y)), Hit::Pin(input));
-        assert_eq!(board.hit(mixer.rect.center()), Hit::Node(mixer.id));
+        assert_eq!(
+            board.hit(Point::new(at.x + 4.0, at.y), None),
+            Hit::Pin(input)
+        );
+        assert_eq!(board.hit(mixer.rect.center(), None), Hit::Node(mixer.id));
         // Midway along the vocal's wire.
         let wire = board
             .wires
@@ -965,8 +1111,59 @@ mod tests {
             .find(|w| w.to == input)
             .ok_or("no wire")?;
         let from = *board.pins.get(&wire.from).ok_or("no from")?;
-        assert_eq!(board.hit(along(from, at, 0.5)), Hit::Wire(wire.connection));
-        assert_eq!(board.hit(Point::new(5.0, 390.0)), Hit::Nothing);
+        let midway = along(from, wire.c1, wire.c2, at, 0.5);
+        assert_eq!(board.hit(midway, None), Hit::Wire(wire.connection));
+        assert_eq!(board.hit(Point::new(5.0, 390.0), None), Hit::Nothing);
+        // Handles are caught only on the connection being shaped.
+        assert!(!matches!(board.hit(wire.c1, None), Hit::Handle(..)));
+        assert_eq!(
+            board.hit(wire.c1, Some(wire.connection)),
+            Hit::Handle(wire.connection, End::Out, from)
+        );
+        assert_eq!(
+            board.hit(wire.c2, Some(wire.connection)),
+            Hit::Handle(wire.connection, End::In, at)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_wires_follow_their_handles_and_keep_them_when_ends_move() -> Result {
+        let mut session = Session::new_project();
+        session.add_track("Keys", Layout::Stereo)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        // The mixer's whole-port connection to the output, drawn as two wires.
+        let id = session
+            .state()
+            .connections
+            .iter()
+            .find(|c| c.to == Endpoint::Output)
+            .map(|c| c.id)
+            .ok_or("no output wire")?;
+        let unshaped = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        let out = WireHandle { dx: 50.0, dy: 70.0 };
+        session.shape_wire(id, Some(out), None)?;
+        let check = |board: &Board| -> Result {
+            let wires: Vec<&Wire> = board.wires.iter().filter(|w| w.connection == id).collect();
+            assert_eq!(wires.len(), 2);
+            for w in wires {
+                let a = *board.pins.get(&w.from).ok_or("no from")?;
+                let b = *board.pins.get(&w.to).ok_or("no to")?;
+                // Both wires share the offset; the unshaped end keeps the automatic curve.
+                assert_eq!(w.c1, Point::new(a.x + 50.0, a.y + 70.0));
+                assert_eq!(w.c2, automatic(a, b).1);
+            }
+            Ok(())
+        };
+        let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        check(&board)?;
+        assert_ne!(board.wires, unshaped.wires);
+        session.move_node(mixer, Some(project_model::Position { x: 120.0, y: 300.0 }))?;
+        check(&layout(session.state(), &[], &[], Size::new(800.0, 400.0)))?;
+        // The board grows to hold a handle dragged low.
+        session.shape_wire(id, Some(WireHandle { dx: 0.0, dy: 900.0 }), None)?;
+        let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
+        assert!(board.size.height > 300.0 + 900.0);
         Ok(())
     }
 

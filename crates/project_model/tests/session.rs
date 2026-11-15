@@ -467,6 +467,48 @@ fn test_moving_nodes_and_the_output_are_steps_and_checked() -> TestResult {
 }
 
 #[test]
+fn test_shape_wire_is_a_step_checked_and_kept_through_disconnect_undo() -> TestResult {
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let id = session.state().connections[1].id;
+    let handle = |dx, dy| project_model::WireHandle { dx, dy };
+    let handles = |s: &Session| {
+        s.state()
+            .connection(id)
+            .map(|c| (c.out_handle, c.in_handle))
+    };
+    session.shape_wire(id, Some(handle(120.0, -40.0)), None)?;
+    session.shape_wire(id, Some(handle(120.0, -40.0)), Some(handle(-80.0, 0.0)))?;
+    assert_eq!(
+        handles(&session),
+        Some((Some(handle(120.0, -40.0)), Some(handle(-80.0, 0.0))))
+    );
+    // Removing the wire and undoing that brings its shape back with it.
+    session.disconnect(id)?;
+    assert!(session.undo());
+    assert_eq!(
+        handles(&session),
+        Some((Some(handle(120.0, -40.0)), Some(handle(-80.0, 0.0))))
+    );
+    assert!(session.undo());
+    assert_eq!(handles(&session), Some((Some(handle(120.0, -40.0)), None)));
+    assert!(session.undo());
+    assert_eq!(handles(&session), Some((None, None)));
+    let steps = session.can_undo();
+    for bad in [f32::NAN, f32::NEG_INFINITY, -2.0e6] {
+        let shaped = session.shape_wire(id, None, Some(handle(0.0, bad)));
+        assert!(matches!(shaped, Err(Error::InvalidValue)));
+    }
+    let unknown = project_model::ConnectionId(u64::MAX);
+    assert!(matches!(
+        session.shape_wire(unknown, None, None),
+        Err(Error::UnknownConnection(_))
+    ));
+    assert_eq!(session.can_undo(), steps, "refused shapes are not steps");
+    Ok(())
+}
+
+#[test]
 fn test_disconnect_is_a_step() -> TestResult {
     let mut session = Session::new_project();
     session.add_track("Vocal", Layout::Mono)?;

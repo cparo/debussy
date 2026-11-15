@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -210,4 +210,20 @@ pub(crate) struct SavedConnection {
     /// Since version 2: the side of a stereo input fed; absent for the whole port.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to_side: Option<SavedSide>,
+    /// Since version 6: the wire's bezier handle at its output end; absent for the automatic
+    /// curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<SavedWireHandle>,
+    /// Since version 6: the wire's bezier handle at its input end; absent for the automatic
+    /// curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<SavedWireHandle>,
+}
+
+/// A wire handle's offset from the pin at its end of the wire, in patch-board pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedWireHandle {
+    pub dx: f32,
+    pub dy: f32,
 }

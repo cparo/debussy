@@ -111,6 +111,16 @@ pub enum Edit {
         /// The pan, −1 to 1.
         pan: f32,
     },
+    /// Sets a connection's wire handles on the patch board; `None` returns that end to the
+    /// automatic curve.
+    ShapeWire {
+        /// The connection.
+        connection: ConnectionId,
+        /// The handle at the output end.
+        out_handle: Option<crate::routing::WireHandle>,
+        /// The handle at the input end.
+        in_handle: Option<crate::routing::WireHandle>,
+    },
     /// Moves a node on the patch board; `None` returns it to the automatic layout.
     MoveNode {
         /// The node.
@@ -335,6 +345,23 @@ impl Edit {
                     pan: old,
                 })
             }
+            Edit::ShapeWire {
+                connection,
+                out_handle,
+                in_handle,
+            } => {
+                for handle in [out_handle, in_handle].into_iter().flatten() {
+                    handle.check()?;
+                }
+                let index = connection_index(state, connection)?;
+                let c = &mut state.connections[index];
+                let old = Edit::ShapeWire {
+                    connection,
+                    out_handle: std::mem::replace(&mut c.out_handle, out_handle),
+                    in_handle: std::mem::replace(&mut c.in_handle, in_handle),
+                };
+                Ok(old)
+            }
             Edit::MoveNode { node, position } => {
                 if let Some(p) = position {
                     routing::check_coordinate(p.x)?;
@@ -544,6 +571,12 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         return Err(Error::ConnectionExists(connection.id));
     }
     routing::check_pan(connection.pan)?;
+    for handle in [connection.out_handle, connection.in_handle]
+        .into_iter()
+        .flatten()
+    {
+        handle.check()?;
+    }
     let ends = [
         (connection.from, true, connection.output),
         (connection.to, false, connection.input),

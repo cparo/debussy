@@ -116,6 +116,24 @@ pub struct Position {
     pub y: f32,
 }
 
+/// Where one of a wire's bezier handles sits, as an offset in logical pixels from the pin at its
+/// end of the wire. The interface's to interpret; it plays no part in the sound.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WireHandle {
+    /// Rightwards from the pin.
+    pub dx: f32,
+    /// Downwards from the pin.
+    pub dy: f32,
+}
+
+impl WireHandle {
+    /// Checks both offsets as board coordinates: finite and within [`MAX_BOARD_COORDINATE`].
+    pub(crate) fn check(self) -> Result<(), Error> {
+        check_coordinate(self.dx)?;
+        check_coordinate(self.dy)
+    }
+}
+
 /// The furthest a saved board position may be from the origin, either way.
 pub const MAX_BOARD_COORDINATE: f32 = 1_000_000.0;
 
@@ -186,10 +204,15 @@ pub struct Connection {
     pub from_side: Option<Side>,
     /// The side of a stereo input it feeds, or `None` for the whole port.
     pub to_side: Option<Side>,
+    /// The bezier handle at the output end of its wires on the patch board; `None` leaves it
+    /// to the automatic curve.
+    pub out_handle: Option<WireHandle>,
+    /// The bezier handle at the input end; `None` leaves it to the automatic curve.
+    pub in_handle: Option<WireHandle>,
 }
 
 impl Connection {
-    /// A connection panned centre.
+    /// A connection panned centre, its wires on the automatic curve.
     pub fn new(
         id: ConnectionId,
         from: Endpoint,
@@ -206,6 +229,8 @@ impl Connection {
             pan: 0.0,
             from_side: None,
             to_side: None,
+            out_handle: None,
+            in_handle: None,
         }
     }
 

@@ -93,6 +93,9 @@ channel ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
 A node's position on the patch board and the height of the output's L are optional model state,
 moved as one undo step per drag and kept in named versions; without them the interface lays the
 board out automatically ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved-as.md)).
+A connection may carry a bezier handle at each end of its wires, an offset from the pin at that
+end; without one that end's curve is automatic. A handle is one undo step per drag or removal
+([ADR-0134](../adrs/0134-wire-handles-are-saved-as-optional-offsets-from-a.md)).
 
 A connection end at a stereo port may name its left or right side, carrying that channel as a
 mono signal; the model refuses a side of a port it knows to be mono. In the running graph a sided
@@ -150,7 +153,8 @@ files migrate unchanged ([ADR-0058](../adrs/0058-stereo-ports-are-connected-by-s
 version 4 the project carries a required `tempo` (`bpm`, `beats_per_bar`, `beat_unit`; see
 [Musical time](#musical-time)); version 3 files migrate to 120 BPM in 4/4 ([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)). Version 5
 adds automation curves and curve ports (see `docs/architecture/automation.md` "Curves in the
-project"). Times are
+project"). Since version 6 a connection may carry an `out_handle` and an `in_handle` (`dx`, `dy`),
+offsets within ±1,000,000; version 5 files migrate unchanged ([ADR-0134](../adrs/0134-wire-handles-are-saved-as-optional-offsets-from-a.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving
