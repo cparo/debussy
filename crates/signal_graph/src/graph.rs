@@ -26,7 +26,11 @@ pub(crate) enum EntryKind {
         seconds: f64,
     },
     /// A signal the engine supplies, such as a track's playback.
-    Source,
+    Source {
+        /// Whether the signal is live input, which delay compensation leaves undelayed
+        /// (`docs/architecture/signal-graph.md` "Delay compensation").
+        live: bool,
+    },
     /// A signal the engine takes, such as the project output.
     Sink,
     /// An automation curve, with one control output. Replaced whole on a change.
@@ -275,13 +279,30 @@ impl Graph {
     /// [`Runner::source_mut`].
     pub fn add_source(&mut self, layout: Layout) -> NodeId {
         self.insert(Entry {
-            kind: EntryKind::Source,
+            kind: EntryKind::Source { live: false },
             inputs: Vec::new(),
             outputs: vec![Port::audio("out", layout)],
             latency: 0,
             parameters: Vec::new(),
             uses_tempo: false,
         })
+    }
+
+    /// Marks source `id` as live input, or not, from the next commit. Delay compensation does not
+    /// delay a live source, nor nodes fed only by live sources
+    /// (`docs/architecture/signal-graph.md` "Delay compensation").
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`] or [`Error::NotASource`].
+    pub fn set_live(&mut self, id: NodeId, live: bool) -> Result<(), Error> {
+        match &mut self.entry_mut(id)?.kind {
+            EntryKind::Source { live: current } => {
+                *current = live;
+                Ok(())
+            }
+            _ => Err(Error::NotASource(id)),
+        }
     }
 
     /// Adds a sink: a signal of `layout` the engine reads each block with [`Runner::sink`].

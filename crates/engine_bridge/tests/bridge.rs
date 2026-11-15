@@ -1,7 +1,7 @@
 //! The bridge keeps the running graph in step with the model through random edit sequences,
 //! undo and redo; refused edits leave both unchanged; clips become the engine's renderers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::sync::Arc;
 
@@ -342,6 +342,48 @@ fn test_lookahead_change_replaces_the_node_and_its_latency() -> Result<(), Box<d
     settle(&mut bridge)?;
     assert_eq!(bridge.latency(), 0);
     assert_in_step(&bridge, session.state())?;
+    Ok(())
+}
+
+#[test]
+fn test_set_monitored_leaves_monitored_track_out_of_latency() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
+        runner.begin_block(256).map_err(|_| "block refused")?;
+        runner.process();
+        bridge.commit()?;
+        assert!(!bridge.is_pending());
+        Ok(())
+    };
+    let track = bridge.edit(&mut session, |s| s.add_track("vocal", Layout::Stereo))?;
+    let limiter = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Effect {
+            kind: "dynamics".to_owned(),
+            parameters: BTreeMap::from([("lookahead".to_owned(), 5.0)]),
+        })
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Track(track), 0, Endpoint::Node(limiter), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(limiter), 0, Endpoint::Output, 0)
+    })?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 240);
+    bridge.set_monitored(BTreeSet::from([track]))?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 0);
+    // Removing the track and undoing it rebuilds its source, which is marked again.
+    let source = bridge.sources().get(&track).copied();
+    bridge.edit(&mut session, |s| s.remove_track(track))?;
+    assert!(bridge.undo(&mut session)?);
+    settle(&mut bridge)?;
+    assert_ne!(bridge.sources().get(&track).copied(), source);
+    assert_eq!(bridge.latency(), 0);
+    bridge.set_monitored(BTreeSet::new())?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 240);
     Ok(())
 }
 

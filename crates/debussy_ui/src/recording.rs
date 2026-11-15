@@ -202,6 +202,16 @@ impl App {
                 self.status = Some(message);
             }
         }
+        // Monitored input is left out of delay compensation (ADR-0136).
+        let monitored = self
+            .arming
+            .iter()
+            .filter(|(_, arming)| arming.monitor)
+            .map(|(&id, _)| id)
+            .collect();
+        if let Err(error) = self.bridge.set_monitored(monitored) {
+            self.status = Some(error.to_string());
+        }
         let armed = self.armed_tracks(None);
         if let Err(error) = self.engine.arm(armed) {
             self.status = Some(error.to_string());

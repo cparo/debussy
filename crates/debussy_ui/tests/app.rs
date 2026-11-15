@@ -19,7 +19,7 @@ use debussy_ui::{
     Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
-use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
+use project_model::{AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId};
 use signal_graph::{Config, NodeId as GraphNodeId};
 
 /// What the fake services saw.
@@ -393,6 +393,11 @@ fn app_with(gain_db: f32, recovered: Option<Recovered>) -> Result<Fixture, Box<d
     let mut clip = Clip::new(Source::Mono(file), 0, 65_536, 4096);
     clip.gain_db = gain_db;
     session.add_clip(track, clip)?;
+    app_over(&session, recovered)
+}
+
+/// The app over `session`'s state, as [`app_with`] makes it.
+fn app_over(session: &Session, recovered: Option<Recovered>) -> Result<Fixture, Box<dyn Error>> {
     let mixer = session.state().project_mixer().ok_or("no project mixer")?;
     let session = Session::open(session.state().clone(), BTreeMap::new());
     let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512))?;
@@ -2195,6 +2200,35 @@ fn test_monitor_and_input_follow_the_track_layout() -> Result<(), Box<dyn Error>
     app.update(Message::Arm(keys));
     app.update(Message::DeleteTrack(keys));
     assert!(app.arming(keys).is_none());
+    Ok(())
+}
+
+#[test]
+fn test_monitoring_leaves_the_track_out_of_delay_compensation() -> Result<(), Box<dyn Error>> {
+    // A mono track routed to the output through a limiter with 5 ms of lookahead.
+    let mut session = Session::new_project();
+    let track = session.add_track("Vocal", Layout::Mono)?;
+    let limiter = session.add_node(NodeKind::Effect {
+        kind: "dynamics".to_owned(),
+        parameters: BTreeMap::from([("lookahead".to_owned(), 5.0)]),
+    })?;
+    session.connect(Endpoint::Track(track), 0, Endpoint::Node(limiter), 0)?;
+    session.connect(Endpoint::Node(limiter), 0, Endpoint::Output, 0)?;
+    let (mut app, mut processor, _, _) = app_over(&session, None)?;
+    let settle = |app: &mut App, processor: &mut Processor| -> Result<(), Box<dyn Error>> {
+        block(processor)?;
+        app.update(Message::Tick);
+        Ok(())
+    };
+    settle(&mut app, &mut processor)?;
+    assert_eq!(app.bridge().latency(), 240);
+    app.update(Message::Arm(track));
+    app.update(Message::Monitor(track));
+    settle(&mut app, &mut processor)?;
+    assert_eq!(app.bridge().latency(), 0);
+    app.update(Message::Monitor(track));
+    settle(&mut app, &mut processor)?;
+    assert_eq!(app.bridge().latency(), 240);
     Ok(())
 }
 

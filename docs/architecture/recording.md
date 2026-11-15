@@ -8,7 +8,9 @@ It does so whenever the track is armed, whether the transport is stopped, playin
 the input channels replace the track's clip playback in its graph source. An armed track without
 monitor plays silence while recording and its clips otherwise ([ADR-0078](../adrs/0078-recording-captures-armed-inputs-on-the-real-time.md)).
 
-Monitored input is not delayed for delay compensation; its latency is the device round trip alone ([ADR-0032](../adrs/0032-monitored-input-is-not-delayed-for-delay.md)).
+Monitored input is not delayed for delay compensation; its latency is the device round trip alone ([ADR-0032](../adrs/0032-monitored-input-is-not-delayed-for-delay.md)). The engine bridge marks
+the graph sources of armed, monitored tracks live (see [Delay compensation](signal-graph.md#delay-compensation)),
+which leaves them undelayed up to the first node that mixes them with playback ([ADR-0136](../adrs/0136-delay-compensation-leaves-live-sources-and-the.md)).
 
 ## Click track
 

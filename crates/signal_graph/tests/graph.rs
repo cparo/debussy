@@ -172,6 +172,40 @@ fn test_commit_reports_latency() -> TestResult {
 }
 
 #[test]
+fn test_set_live_refuses_non_source() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let sink = graph.add_sink(Layout::Mono);
+    let gain = graph.add_node(Box::new(Gain::new(1.0)?));
+    let delay = graph.add_feedback_delay(Layout::Mono, 0.01)?;
+    for id in [sink, gain, delay] {
+        assert_eq!(graph.set_live(id, true), Err(Error::NotASource(id)));
+    }
+    graph.remove_node(sink)?;
+    assert_eq!(graph.set_live(sink, true), Err(Error::UnknownNode(sink)));
+    Ok(())
+}
+
+#[test]
+fn test_set_live_changes_latency_at_commit() -> TestResult {
+    let (mut graph, _runner) = graph()?;
+    let source = graph.add_source(Layout::Mono);
+    let slow = graph.add_node(Box::new(Latency::new(10)));
+    let sink = graph.add_sink(Layout::Mono);
+    graph.connect(source, 0, slow, 0)?;
+    graph.connect(slow, 0, sink, 0)?;
+    graph.commit()?;
+    assert_eq!(graph.latency(), 10);
+    graph.set_live(source, true)?;
+    assert_eq!(graph.latency(), 10);
+    graph.commit()?;
+    assert_eq!(graph.latency(), 0);
+    graph.set_live(source, false)?;
+    graph.commit()?;
+    assert_eq!(graph.latency(), 10);
+    Ok(())
+}
+
+#[test]
 fn test_commit_when_busy_keeps_the_graph() -> TestResult {
     let config = Config {
         plan_queue: 1,

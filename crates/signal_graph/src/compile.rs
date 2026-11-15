@@ -2,14 +2,17 @@
 //! (`docs/architecture/signal-graph.md` "Processing graph" and "Delay compensation").
 //!
 //! Latency is worked out over the connections that do not close a loop, which form an acyclic
-//! graph: a node's signals *arrive* at the latest time any of its inputs do, and leave after its
-//! own latency. Each connection is delayed by the difference between its source's departure and
-//! its target's arrival, so every node sees its inputs aligned. Sinks are all aligned to the
-//! latest arrival at any sink, which is the plan's latency. A loop-closing connection is not
-//! compensated.
+//! graph. A node is *live-only* when it is a live source, or when it has such inputs and every
+//! one comes from a live-only node. A node's signals *arrive* at the latest time any of its
+//! inputs from nodes that are not live-only do, and leave after its own latency. Each connection
+//! from a node that is not live-only is delayed by the difference between its source's departure
+//! and its target's arrival, so every node sees its playback inputs aligned. Sinks are all aligned
+//! to the latest arrival at any sink, which is the plan's latency. A loop-closing connection, or
+//! one from a live-only node, is not compensated.
 //!
 //! Each curve-to-parameter connection becomes a binding that evaluates its curve at the timeline
-//! frame minus the node's arrival time (`docs/architecture/automation.md` "Evaluation").
+//! frame minus the node's arrival time (`docs/architecture/automation.md` "Evaluation"). For a
+//! live-only node that is the arrival of its own live signals.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -76,23 +79,45 @@ pub(crate) fn compile(
     };
 
     // Arrival times, visiting groups in order and each cycle's delays before its members.
+    // `arrival` counts only playback inputs; `live_arrival` is a live-only node's own.
     let mut arrival = vec![0_usize; entries.len()];
+    let mut live_arrival = vec![0_usize; entries.len()];
+    let mut live_only = vec![false; entries.len()];
     let order = analysis.groups.iter().flat_map(|group| match group {
         Group::Single(node) => vec![*node],
         Group::Cycle { delays, members } => delays.iter().chain(members).copied().collect(),
     });
     for node in order {
-        arrival[node] = edges
+        let inputs: Vec<usize> = edges
             .iter()
             .zip(&analysis.closes_loop)
             .filter(|&(&(_, to), &closes)| to == node && !closes)
-            .map(|(&(from, _), _)| arrival[from] + entries[from].latency)
+            .map(|(&(from, _), _)| from)
+            .collect();
+        live_only[node] = match entries[node].kind {
+            EntryKind::Source { live } => live,
+            _ => !inputs.is_empty() && inputs.iter().all(|&from| live_only[from]),
+        };
+        let departure = |times: &[usize], from: usize| times[from] + entries[from].latency;
+        arrival[node] = inputs
+            .iter()
+            .filter(|&&from| !live_only[from])
+            .map(|&from| departure(&arrival, from))
             .max()
             .unwrap_or(0);
+        live_arrival[node] = if live_only[node] {
+            inputs
+                .iter()
+                .map(|&from| departure(&live_arrival, from))
+                .max()
+                .unwrap_or(0)
+        } else {
+            arrival[node]
+        };
     }
     let is_sink = |node: usize| matches!(entries[node].kind, EntryKind::Sink);
     let latency = (0..entries.len())
-        .filter(|&n| is_sink(n))
+        .filter(|&n| is_sink(n) && !live_only[n])
         .map(|n| arrival[n])
         .max()
         .unwrap_or(0);
@@ -112,7 +137,7 @@ pub(crate) fn compile(
                 entry.outputs[0].layout.channels(),
                 delay_frames(entry),
             )),
-            EntryKind::Source => Kind::Source,
+            EntryKind::Source { .. } => Kind::Source,
             EntryKind::Sink => Kind::Sink,
             EntryKind::Curve(_) => Kind::Curve,
             EntryKind::Processor(_) => Kind::Node(None),
@@ -133,7 +158,11 @@ pub(crate) fn compile(
     {
         let target = if is_sink(to) { latency } else { arrival[to] };
         let departure = arrival[from] + entries[from].latency;
-        let compensation = if closes { 0 } else { target - departure };
+        let compensation = if closes || live_only[from] {
+            0
+        } else {
+            target - departure
+        };
         let channels = entries[from].outputs[connection.output].layout.channels();
         slots[to].feeds.push(Feed {
             from,
@@ -177,7 +206,7 @@ pub(crate) fn compile(
             Some(Binding::new(
                 Arc::clone(curve),
                 parameter.clone(),
-                arrival[node],
+                live_arrival[node],
             ))
         })
         .collect();
