@@ -11,8 +11,8 @@ Before either, it looks once for a host-installed [`lame`](import-export.md#mp3-
 project opened in that run uses for MP3 export; `--bitrate` sets an `.mp3` export's bit rate
 ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
 Opening, including a run with `--import` or `--export`, is refused when another process has the
-project open (see [Loading](project.md#loading)); the window shows the refusal as any other failed
-open, and the command line exits with it as an error
+project open (see [Loading](project.md#loading)); the window's status line says "Cannot open
+<name> because it is open in another process.", and the command line exits with an error
 ([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
 With no arguments, the window opens on a start screen: a sample rate picker (44.1, 48, 88.2 or

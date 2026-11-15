@@ -218,6 +218,16 @@ impl Bundle {
         Ok(removed)
     }
 
+    /// Whether a process (this one included) has the bundle at `path` open, judged by trying a
+    /// shared lock on its `lock` file and releasing it at once. A bundle without a `lock` file,
+    /// or whose lock cannot be checked, counts as not open; [`Bundle::open`] reports the latter.
+    pub fn is_open(path: &Path) -> bool {
+        let Ok(file) = File::open(path.join(LOCK_FILE)) else {
+            return false;
+        };
+        matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
+    }
+
     /// The bundle's directory.
     pub fn path(&self) -> &Path {
         &self.path

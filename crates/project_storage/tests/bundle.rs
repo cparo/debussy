@@ -465,6 +465,22 @@ fn test_create_holds_the_lock() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn test_is_open_follows_the_lock() -> Result<(), Box<dyn Error>> {
+    let path = scratch("is-open")?;
+    assert!(!Bundle::is_open(&path), "no bundle");
+    let created = Bundle::create(&path, 48_000)?;
+    assert!(Bundle::is_open(&path));
+    drop(created);
+    assert!(!Bundle::is_open(&path));
+    // Checking takes no lock that outlives it.
+    let (_held, _) = Bundle::open(&path)?;
+    assert!(Bundle::is_open(&path));
+    fs::remove_file(path.join("lock"))?;
+    assert!(!Bundle::is_open(&path), "no lock file");
+    Ok(())
+}
+
+#[test]
 fn test_open_creates_a_missing_lock_file() -> Result<(), Box<dyn Error>> {
     let path = scratch("no-lock")?;
     drop(Bundle::create(&path, 48_000)?);
