@@ -1,7 +1,7 @@
 [package]
 name = "project_storage"
 description = "The project bundle: project.json, named versions, migrations, crash-safe saving and cleanup."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

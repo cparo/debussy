@@ -1,7 +1,7 @@
 [package]
 name = "engine_bridge"
 description = "The project as the engine runs it: routing synced to the processing graph, and clips as track renderers."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

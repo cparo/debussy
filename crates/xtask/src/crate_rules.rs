@@ -102,13 +102,17 @@ fn kind_of(name: &str) -> Option<Kind> {
 /// Reports every breach of the crate rules in the workspace at `root`.
 pub fn check(root: &Path, files: &[String]) -> Result<Vec<Problem>> {
     let packages = metadata::read(root)?;
-    check_packages(&packages, files, &|rel| crate::repo::read(root, rel))
+    let version = crate::bundle::version(root)?;
+    check_packages(&packages, &version, files, &|rel| {
+        crate::repo::read(root, rel)
+    })
 }
 
-/// Reports every breach of the crate rules by `packages`. `files` lists the repository's files
-/// and `read` returns one of them.
+/// Reports every breach of the crate rules by `packages`. `version` is the workspace version,
+/// `files` lists the repository's files and `read` returns one of them.
 fn check_packages(
     packages: &[Package],
+    version: &str,
     files: &[String],
     read: &dyn Fn(&str) -> Result<String>,
 ) -> Result<Vec<Problem>> {
@@ -126,6 +130,14 @@ fn check_packages(
             ));
             continue;
         };
+
+        if package.version != version {
+            report(format!(
+                "version {} differs from the workspace version {version}: set \
+                 `version.workspace = true` (docs/architecture/platform.md \"Releases\")",
+                package.version
+            ));
+        }
 
         if kind == Kind::RealtimeCore {
             let clippy = format!("{}/clippy.toml", package.dir());
@@ -259,9 +271,13 @@ mod tests {
         dep(name, DependencyKind::Normal, true)
     }
 
+    /// The workspace version in these tests.
+    const VERSION: &str = "0.1.0";
+
     fn package(name: &str, dependencies: Vec<Dependency>) -> Package {
         Package {
             name: name.into(),
+            version: VERSION.into(),
             manifest: format!("crates/{name}/Cargo.toml"),
             root_source: Some(format!("crates/{name}/src/lib.rs")),
             dependencies,
@@ -276,7 +292,7 @@ mod tests {
             .map(|p| format!("{}/clippy.toml", p.dir()))
             .collect();
         let read = |_: &str| Ok(format!("//! Docs.\n\n{FORBID_UNSAFE}\n"));
-        Ok(check_packages(packages, &files, &read)?
+        Ok(check_packages(packages, VERSION, &files, &read)?
             .into_iter()
             .map(|p| p.message)
             .collect())
@@ -432,10 +448,20 @@ mod tests {
     }
 
     #[test]
+    fn test_check_packages_reports_version_drift() -> Result<(), Box<dyn Error>> {
+        let mut drifted = package("wav_files", vec![]);
+        drifted.version = "0.0.0".into();
+        assert_one(
+            &[drifted],
+            "version 0.0.0 differs from the workspace version 0.1.0",
+        )
+    }
+
+    #[test]
     fn test_check_packages_reports_missing_clippy_toml() -> Result<(), Box<dyn Error>> {
         let packages = [package("dsp", vec![]), package("wav_files", vec![])];
         let read = |_: &str| Ok(FORBID_UNSAFE.to_string());
-        let found = check_packages(&packages, &[], &read)?;
+        let found = check_packages(&packages, VERSION, &[], &read)?;
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].message.contains("crates/dsp/clippy.toml"));
         Ok(())
@@ -451,7 +477,7 @@ mod tests {
         let read = |_: &str| {
             Ok("#![deny(unsafe_code)]\n// #![forbid(unsafe_code)] in a comment\n".to_string())
         };
-        let found = check_packages(&packages, &[], &read)?;
+        let found = check_packages(&packages, VERSION, &[], &read)?;
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].path, "crates/wav_files/Cargo.toml");
         Ok(())
@@ -462,12 +488,12 @@ mod tests {
         let packages = [package("audio_buffers", vec![])];
         let files = vec!["crates/audio_buffers/clippy.toml".to_string()];
         let neither = |_: &str| Ok("//! No attribute.\n".to_string());
-        let found = check_packages(&packages, &files, &neither)?;
+        let found = check_packages(&packages, VERSION, &files, &neither)?;
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].message.contains(DENY_UNSAFE));
         for attribute in [DENY_UNSAFE, FORBID_UNSAFE] {
             let read = |_: &str| Ok(attribute.to_string());
-            assert_eq!(check_packages(&packages, &files, &read)?, vec![]);
+            assert_eq!(check_packages(&packages, VERSION, &files, &read)?, vec![]);
         }
         Ok(())
     }
@@ -485,7 +511,7 @@ mod tests {
                 _ => format!("//! A module.\n{ALLOW_UNSAFE}\n"),
             })
         };
-        let found = check_packages(&packages, &files, &read)?;
+        let found = check_packages(&packages, VERSION, &files, &read)?;
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].path, "crates/audio_buffers/src/pool.rs");
         Ok(())

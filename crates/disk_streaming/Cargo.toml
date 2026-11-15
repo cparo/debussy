@@ -1,7 +1,7 @@
 [package]
 name = "disk_streaming"
 description = "Read-ahead of project audio from disk for the real-time engine, and writing recorded takes to disk."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

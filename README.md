@@ -8,6 +8,7 @@
 * [Product Brief](docs/product/README.md)
 * [Architectural Overview](docs/architecture/README.md)
 * [Architectural Decision Records](docs/adrs/README.md)
+* [Release Notes](docs/releases/)
 
 ## Building and Running
 

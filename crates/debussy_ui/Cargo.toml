@@ -1,7 +1,7 @@
 [package]
 name = "debussy_ui"
 description = "The iced user interface: transport, track list with waveforms, and the mixer."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

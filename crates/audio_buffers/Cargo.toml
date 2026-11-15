@@ -1,7 +1,7 @@
 [package]
 name = "audio_buffers"
 description = "Sample blocks, preallocated block pools, and lock-free single-producer/single-consumer queues."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

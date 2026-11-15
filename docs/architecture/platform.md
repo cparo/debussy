@@ -32,7 +32,8 @@ includes the frames waiting in the ring ([ADR-0052](../adrs/0052-a-duplex-stream
 ## App bundle
 
 Debussy ships as `Debussy.app`, assembled by `cargo xtask bundle` from the release `debussy`
-binary and `crates/macos_platform/bundle/Info.plist`, and signed ad hoc. Its bundle identifier is
+binary and `crates/macos_platform/bundle/Info.plist`, with the licence notices in
+`Contents/Resources` (see [Releases](#releases)), and signed ad hoc. Its bundle identifier is
 `io.github.cparo.debussy`. The `Info.plist` exports the type `io.github.cparo.debussy.project`, the
 [project bundle](project.md#project-bundle) with extension `debussy`, conforming to
 `com.apple.package` and `public.composite-content`, and claims it as the type's owner and editor
@@ -44,6 +45,25 @@ A release is a `vX.Y.Z` git tag and a GitHub Release carrying the [app bundle](#
 as `Debussy-<version>-macos-arm64.zip`, with the third-party licence notices inside the bundle.
 Release builds are signed ad hoc only: not with a Developer ID and not notarized
 ([ADR-0138](../adrs/0138-the-first-release-is-an-unsigned-github-build.md)).
+
+- **Version:** the release version is `version` in the root `Cargo.toml`'s `[workspace.package]`;
+  every crate sets `version.workspace = true`, and `cargo xtask check` reports a crate whose
+  version differs.
+- **Notices:** `Contents/Resources/THIRD-PARTY-NOTICES.txt` covers every crate reached from
+  `debussy` along normal (not build or dev) dependency edges for `aarch64-apple-darwin`, sorted
+  by name and version. Each entry is a header (name, version, licence expression) followed by the
+  verbatim contents of the crate's files named `LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*` or
+  `COPYRIGHT*` and its `license-file`. A crate with none gets the standard text of a licence its
+  expression offers: MIT with its authors as copyright holders, else Apache-2.0. A crate with
+  neither fails the bundle unless `OVERRIDES` in `crates/xtask/src/notices.rs` gives the reason
+  it needs no text. Debussy's `LICENSE-MIT` and `LICENSE-APACHE` sit beside it.
+- **Zip:** `cargo xtask bundle --zip` writes `target/release/Debussy-<version>-macos-arm64.zip`
+  with `ditto -c -k --sequesterRsrc --keepParent`, and fails on a host that is not Apple silicon.
+- **Publishing:** `.github/workflows/release.yml` runs on a pushed `v*` tag. It fails unless the
+  tag is `v` followed by the workspace version and `docs/releases/<tag>.md` exists, then runs the
+  workspace tests, builds the zip, and creates the GitHub Release titled `Debussy <tag>` with the
+  zip attached and that file as its notes. Only that job has `contents: write`
+  ([ADR-0142](../adrs/0142-release-notices-are-generated-in-xtask-and.md)).
 
 ## Documents opened from the Finder
 

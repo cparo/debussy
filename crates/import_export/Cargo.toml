@@ -1,7 +1,7 @@
 [package]
 name = "import_export"
 description = "Import (decode, resample, split into mono files) and export (render, dither, encode)."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

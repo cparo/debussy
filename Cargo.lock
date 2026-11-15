@@ -99,7 +99,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audio_analysis"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dsp",
  "realtime_guard",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "audio_buffers"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "realtime_guard",
  "thiserror 2.0.21",
@@ -116,7 +116,7 @@ dependencies = [
 
 [[package]]
 name = "audio_effects"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "dsp",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "audio_engine"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "dsp",
@@ -533,7 +533,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "debussy"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio_analysis",
@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "debussy_ui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_analysis",
  "audio_buffers",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "disk_streaming"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_engine",
@@ -623,7 +623,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "dsp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "realtime_guard",
  "thiserror 2.0.21",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "engine_bridge"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_effects",
@@ -1294,7 +1294,7 @@ checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
 
 [[package]]
 name = "import_export"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_engine",
@@ -1596,7 +1596,7 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "macos_platform"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "block2 0.6.2",
  "cpal",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "modulation"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "dsp",
  "realtime_guard",
@@ -2255,7 +2255,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "platform_interfaces"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "realtime_guard",
  "thiserror 2.0.21",
@@ -2335,7 +2335,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
 name = "project_model"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_effects",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "project_storage"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "modulation",
@@ -2427,7 +2427,7 @@ dependencies = [
 
 [[package]]
 name = "realtime_guard"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "redox_syscall"
@@ -2666,7 +2666,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "signal_graph"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "dsp",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "wav_files"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -3756,7 +3756,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
 ]

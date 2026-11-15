@@ -1,0 +1,45 @@
+# Publishes a GitHub Release for a `vX.Y.Z` tag: tests, builds and zips Debussy.app, and attaches
+# it with the notes from docs/releases/<tag>.md. See docs/architecture/platform.md "Releases".
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-latest
+    permissions:
+      # Creating the release and uploading its asset.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the tag matches the workspace version
+        run: |
+          version="$(cargo xtask version)"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the workspace version $version" >&2
+            exit 1
+          fi
+          test -f "docs/releases/$GITHUB_REF_NAME.md" || {
+            echo "docs/releases/$GITHUB_REF_NAME.md is missing" >&2
+            exit 1
+          }
+      - run: cargo test --workspace
+      - run: cargo xtask bundle --zip
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          target/release/Debussy-*-macos-arm64.zip
+          --title "Debussy $GITHUB_REF_NAME"
+          --notes-file "docs/releases/$GITHUB_REF_NAME.md"
+          --verify-tag
