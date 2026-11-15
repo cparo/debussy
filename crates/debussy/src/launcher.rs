@@ -12,7 +12,7 @@ use engine_bridge::Bridge;
 use import_export::Lame;
 use macos_platform::MacDevices;
 use project_model::Session;
-use project_storage::{AppSettings, Bundle};
+use project_storage::{AppSettings, Bundle, Error as StorageError};
 use signal_graph::Config;
 
 use crate::{audio, project, services};
@@ -135,7 +135,8 @@ fn scan(dir: &Path) -> Vec<ProjectEntry> {
                 return None;
             }
             let project = std::fs::metadata(path.join(PROJECT_FILE)).ok()?;
-            if !project.is_file() {
+            // A project open here or in another process cannot be opened again.
+            if !project.is_file() || Bundle::is_open(&path) {
                 return None;
             }
             let modified = project.modified().ok();
@@ -149,6 +150,21 @@ fn scan(dir: &Path) -> Vec<ProjectEntry> {
     found.sort_by(|(a, x), (b, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
     found.truncate(MAX_LISTED);
     found.into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// What the status line says when `path` could not be opened or created.
+fn refusal(path: &Path, error: &anyhow::Error) -> String {
+    let locked = error
+        .chain()
+        .any(|cause| matches!(cause.downcast_ref(), Some(StorageError::Locked(_))));
+    if locked {
+        let name = path.file_stem().map_or_else(
+            || path.display().to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
+        return format!("Cannot open {name} because it is open in another process.");
+    }
+    format!("{error:#}")
 }
 
 /// The first of `Untitled.debussy`, `Untitled 2.debussy`, `Untitled 3.debussy` and so on not
@@ -201,7 +217,7 @@ impl Launcher for AppLauncher {
     }
 
     fn prepare(&mut self, path: &Path, create: Option<u32>) -> Result<Start, String> {
-        self.load(path, create).map_err(|e| format!("{e:#}"))
+        self.load(path, create).map_err(|e| refusal(path, &e))
     }
 }
 
@@ -245,6 +261,37 @@ mod tests {
         let missing = std::env::temp_dir().join("debussy-launcher-missing.debussy");
         assert!(launcher.prepare(&missing, None).is_err());
         assert!(!missing.exists(), "opening never creates");
+    }
+
+    #[test]
+    fn test_prepare_refuses_a_project_open_elsewhere() -> Result<()> {
+        let dir = temp_dir("launcher-locked")?;
+        let path = dir.join("Song.debussy");
+        let _held = Bundle::create(&path, 48_000)?;
+        let mut launcher = AppLauncher::new(dir.join("settings.json"), None, None);
+        let result = launcher.prepare(&path, None);
+        let Err(message) = result else {
+            bail!("opened a project another holder has locked");
+        };
+        assert_eq!(
+            message,
+            "Cannot open Song because it is open in another process."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_leaves_out_open_projects() -> Result<()> {
+        let dir = temp_dir("scan-open")?;
+        let held = Bundle::create(&dir.join("Open.debussy"), 48_000)?;
+        drop(Bundle::create(&dir.join("Closed.debussy"), 48_000)?);
+        let names = |dir: &Path| scan(dir).into_iter().map(|e| e.name).collect::<Vec<_>>();
+        assert_eq!(names(&dir), ["Closed"]);
+        drop(held);
+        let mut all = names(&dir);
+        all.sort();
+        assert_eq!(all, ["Closed", "Open"]);
+        Ok(())
     }
 
     /// A fresh, empty directory for one test, named `name`.

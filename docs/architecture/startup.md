@@ -10,6 +10,10 @@ interface offers them ([ADR-0057](../adrs/0057-the-first-binary-imports-and-expo
 Before either, it looks once for a host-installed [`lame`](import-export.md#mp3-export), which every
 project opened in that run uses for MP3 export; `--bitrate` sets an `.mp3` export's bit rate
 ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md)).
+Opening, including a run with `--import` or `--export`, is refused when another process has the
+project open (see [Loading](project.md#loading)); the window's status line says "Cannot open
+<name> because it is open in another process.", and the command line exits with an error
+([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
 With no arguments, the window opens on a start screen: a sample rate picker (44.1, 48, 88.2 or
 96 kHz, 48 kHz by default) and New project, with the Open browser's list beneath. With a project
@@ -24,11 +28,14 @@ The Open browser lists the projects folder's projects by name and age ("just now
 bundle anywhere through an open dialog filtered to projects; as a modal it also has Cancel, and Escape or a press
 outside it cancels. Opening never creates a project
 ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md)).
+Asking for the project already open, through the Open browser, Browse… or the Finder, does
+nothing but close the browser
+([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
 A project opened from the Finder ([Documents opened from the Finder](platform.md#documents-opened-from-the-finder)),
 at launch or later, is opened as if chosen in the Open browser, from the start screen or over an
 open project, under the same conditions; one asked for before the window starts opens once it
-does, and asking for the project already open does nothing. This holds only in a `Debussy.app`
+does. This holds only in a `Debussy.app`
 process; beside a process started from the bare binary, the Finder opens the project in a new
 process instead (see [Documents opened from the Finder](platform.md#documents-opened-from-the-finder)).
 The command line ignores the `-psn_`

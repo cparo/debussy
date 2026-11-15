@@ -52,6 +52,9 @@ pub enum Error {
     /// A bundle already exists where a new one was to be made.
     #[error("{0} already exists")]
     Exists(PathBuf),
+    /// Another process has the bundle open (`docs/architecture/project.md` "Project bundle").
+    #[error("{0} is open in another Debussy process")]
+    Locked(PathBuf),
     /// A sample rate other than 44.1, 48, 88.2 or 96 kHz (`docs/architecture/engine.md` "Sample
     /// rate").
     #[error("{0} Hz is not a project sample rate")]

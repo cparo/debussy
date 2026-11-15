@@ -2,7 +2,7 @@
 //! "Project bundle", "Saving", "Loading", ADR-0013, ADR-0049).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +24,8 @@ const PROJECT_FILE: &str = "project.json";
 const VERSIONS_DIR: &str = "versions";
 const AUDIO_DIR: &str = "audio";
 const CACHE_DIR: &str = "cache";
+/// An empty file a process holds an exclusive lock on while it has the bundle open.
+const LOCK_FILE: &str = "lock";
 /// The suffix of a file being written; one left by a crash is deleted on open.
 const TEMP_SUFFIX: &str = ".tmp";
 
@@ -35,22 +37,25 @@ struct SavedVersion {
 }
 
 /// An open project bundle. It remembers which versions are on disk, so a save writes only what
-/// changed.
+/// changed, and holds the bundle's lock for its lifetime: no other process can open the bundle
+/// until it is dropped.
 #[derive(Debug)]
 pub struct Bundle {
     path: PathBuf,
     sample_rate: u32,
     versions: BTreeMap<String, SavedVersion>,
+    /// The locked `lock` file; dropping it releases the lock.
+    _lock: File,
 }
 
 impl Bundle {
     /// Makes a new bundle at `path` (normally `<name>.debussy`) for a new project at
     /// `sample_rate` (no tracks and a project mixer, ADR-0058), with its `audio/`, `versions/`
-    /// and `cache/` directories and a `project.json`.
+    /// and `cache/` directories, a `project.json`, and a `lock` the bundle holds locked.
     ///
     /// # Errors
     ///
-    /// [`Error::SampleRate`], [`Error::Exists`], [`Error::Io`].
+    /// [`Error::SampleRate`], [`Error::Exists`], [`Error::Locked`], [`Error::Io`].
     pub fn create(path: &Path, sample_rate: u32) -> Result<Bundle, Error> {
         if !SAMPLE_RATES.contains(&sample_rate) {
             return Err(Error::SampleRate(sample_rate));
@@ -62,24 +67,29 @@ impl Bundle {
             let dir = path.join(dir);
             fs::create_dir_all(&dir).map_err(io(&dir))?;
         }
+        let lock = lock(path)?;
         let mut bundle = Bundle {
             path: path.to_owned(),
             sample_rate,
             versions: BTreeMap::new(),
+            _lock: lock,
         };
         bundle.save(&Session::new_project())?;
         Ok(bundle)
     }
 
-    /// Opens the bundle at `path`: deletes files left half-written by a crash, reads and checks
-    /// `project.json` and every version (a file from elsewhere is untrusted), then deletes audio
-    /// files that neither the state nor any version uses.
+    /// Opens the bundle at `path`: locks it (creating `lock` if missing), deletes files left
+    /// half-written by a crash, reads and checks `project.json` and every version (a file from
+    /// elsewhere is untrusted), then deletes audio files that neither the state nor any version
+    /// uses. The returned [`Bundle`] holds the lock until it is dropped.
     ///
     /// # Errors
     ///
-    /// [`Error::Io`], [`Error::Json`], [`Error::NewerFormat`], [`Error::TooLarge`],
+    /// [`Error::Locked`] when another process has the bundle open, [`Error::Io`] (including a file
+    /// system that cannot lock), [`Error::Json`], [`Error::NewerFormat`], [`Error::TooLarge`],
     /// [`Error::Invalid`].
     pub fn open(path: &Path) -> Result<(Bundle, Session), Error> {
+        let lock = lock(path)?;
         let versions_dir = path.join(VERSIONS_DIR);
         remove_temp_files(path)?;
         if versions_dir.is_dir() {
@@ -120,6 +130,7 @@ impl Bundle {
             path: path.to_owned(),
             sample_rate,
             versions,
+            _lock: lock,
         };
         bundle.clean_up(&session)?;
         Ok((bundle, session))
@@ -207,6 +218,16 @@ impl Bundle {
         Ok(removed)
     }
 
+    /// Whether a process (this one included) has the bundle at `path` open, judged by trying a
+    /// shared lock on its `lock` file and releasing it at once. A bundle without a `lock` file,
+    /// or whose lock cannot be checked, counts as not open; [`Bundle::open`] reports the latter.
+    pub fn is_open(path: &Path) -> bool {
+        let Ok(file) = File::open(path.join(LOCK_FILE)) else {
+            return false;
+        };
+        matches!(file.try_lock_shared(), Err(TryLockError::WouldBlock))
+    }
+
     /// The bundle's directory.
     pub fn path(&self) -> &Path {
         &self.path
@@ -290,6 +311,24 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> Error + '_ {
     move |source| Error::Io {
         path: path.to_owned(),
         source,
+    }
+}
+
+/// Opens (creating if missing) the bundle's `lock` file and takes an exclusive lock on it without
+/// waiting. The lock is released when the returned file is closed, or by the OS if the process
+/// dies.
+fn lock(bundle: &Path) -> Result<File, Error> {
+    let path = bundle.join(LOCK_FILE);
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(io(&path))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => Err(Error::Locked(bundle.to_owned())),
+        Err(TryLockError::Error(source)) => Err(Error::Io { path, source }),
     }
 }
 
