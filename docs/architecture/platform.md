@@ -38,6 +38,13 @@ binary and `crates/macos_platform/bundle/Info.plist`, and signed ad hoc. Its bun
 `com.apple.package` and `public.composite-content`, and claims it as the type's owner and editor
 ([ADR-0131](../adrs/0131-debussy-ships-as-a-debussy-app-bundle-that.md)).
 
+## Releases
+
+A release is a `vX.Y.Z` git tag and a GitHub Release carrying the [app bundle](#app-bundle), zipped
+as `Debussy-<version>-macos-arm64.zip`, with the third-party licence notices inside the bundle.
+Release builds are signed ad hoc only: not with a Developer ID and not notarized
+([ADR-0138](../adrs/0138-the-first-release-is-an-unsigned-github-build.md)).
+
 ## Documents opened from the Finder
 
 Projects opened from the Finder arrive as an `odoc` Apple Event, read in `macos_platform` by a

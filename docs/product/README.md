@@ -79,6 +79,11 @@ These features will add greatly to the flexibility of this application's use, bu
 our initial user's workflow than the recording and processing of audio from microphones and line
 outputs driven by physical instruments.
 
+MIDI first serves players capturing performances (a keyboardist or e-drummer playing live), voiced
+by built-in instruments or external hardware. Composing parts note by note may come later; hosting
+third-party plug-ins is not planned
+([ADR-0139](../adrs/0139-midi-starts-with-performance-capture-voiced-by-a.md)).
+
 ## What will they run it on?
 
 This software will be designed to run on MacOS devices with Apple Silicon and access to Apple's
