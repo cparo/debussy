@@ -14,7 +14,7 @@ use audio_engine::Engine;
 use engine_bridge::Bridge;
 use project_model::{
     ConnectionId, CurveId, Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session,
-    Track, TrackId, WireHandle,
+    Track, TrackId, WireShape,
 };
 
 use crate::click::Click;
@@ -25,7 +25,7 @@ use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
 use crate::node_parameters::{NodeParameters, ParameterCatalog};
-use crate::patch_board::{End, Pin, Selection, can_connect};
+use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
 use crate::recording::{Arming, InputChoice, Pass};
 use crate::services::Services;
@@ -34,6 +34,7 @@ use crate::transport::{
     DEFAULT_ZOOM, MAX_SAMPLES_PER_COLUMN, MAX_ZOOM, level_below, samples_per_column, zoomed_start,
 };
 use crate::waveform::{Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, channels, lanes};
+use crate::wire_edit::Grip;
 
 /// The track pane's share of the window's width at launch.
 const DEFAULT_SPLIT: f32 = 0.6;
@@ -81,14 +82,14 @@ impl NewNode {
 }
 
 /// A move on the board not yet recorded.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Moving {
     /// A node, now here.
     Node(NodeId, Position),
     /// The L/R outputs, L now at this height.
     Output(f32),
-    /// A connection's handle at one end, now at this offset from its pin.
-    Handle(ConnectionId, End, WireHandle),
+    /// A connection's wires, now shaped like this.
+    Shape(ConnectionId, WireShape),
 }
 
 /// What is being renamed in the track pane.
@@ -315,11 +316,16 @@ pub enum Message {
     DragNode(NodeId, Position),
     /// The L/R outputs are being dragged: L's height, shown, not yet recorded.
     DragOutput(f32),
-    /// A wire's handle is being dragged to this offset from its pin: shown, not yet recorded.
-    DragHandle(ConnectionId, End, WireHandle),
-    /// The node, outputs or handle being dragged were dropped: record the move as one step.
+    /// A wire's handle or point is being dragged, giving it this shape: shown, not yet
+    /// recorded.
+    DragShape(ConnectionId, WireShape),
+    /// A point was added to a wire, giving it this shape: record it as one step and select
+    /// point `usize`.
+    AddWirePoint(ConnectionId, WireShape, usize),
+    /// The node, outputs, handle or point being dragged were dropped: record the move as one
+    /// step.
     Drop,
-    /// Delete the selected wire, or return the selected handle's end of its wires to the
+    /// Delete the selected wire or wire point, or return the selected end handle to the
     /// automatic curve; a selected node is left alone, deleted only through its dialog's
     /// confirmation.
     DeleteSelection,
@@ -680,24 +686,21 @@ impl App {
     pub fn board(&self, min: iced::Size) -> crate::patch_board::Board {
         let state = self.session.state();
         let (lanes, curves) = (self.lane_centres(), self.curve_centres());
-        let Some(moving) = self.moving else {
+        let Some(moving) = &self.moving else {
             return crate::patch_board::layout(state, &lanes, &curves, min);
         };
         // Show the move under way without recording it.
         let mut shown = state.clone();
         match moving {
             Moving::Node(id, position) => {
-                if let Some(node) = shown.nodes.iter_mut().find(|n| n.id == id) {
-                    node.position = Some(position);
+                if let Some(node) = shown.nodes.iter_mut().find(|n| n.id == *id) {
+                    node.position = Some(*position);
                 }
             }
-            Moving::Output(y) => shown.output_y = Some(y),
-            Moving::Handle(id, end, handle) => {
-                if let Some(c) = shown.connections.iter_mut().find(|c| c.id == id) {
-                    match end {
-                        End::Out => c.out_handle = Some(handle),
-                        End::In => c.in_handle = Some(handle),
-                    }
+            Moving::Output(y) => shown.output_y = Some(*y),
+            Moving::Shape(id, shape) => {
+                if let Some(c) = shown.connections.iter_mut().find(|c| c.id == *id) {
+                    c.shape = shape.clone();
                 }
             }
         }
@@ -845,7 +848,7 @@ impl App {
                     | Message::RefreshDevices
                     | Message::DragNode(..)
                     | Message::DragOutput(_)
-                    | Message::DragHandle(..)
+                    | Message::DragShape(..)
                     | Message::NodeText(..)
                     | Message::LaneDrag { .. }
                     | Message::CurveMove { .. }
@@ -1109,8 +1112,15 @@ impl App {
                 self.moving = Some(Moving::Node(node, position));
             }
             Message::DragOutput(y) => self.moving = Some(Moving::Output(y)),
-            Message::DragHandle(connection, end, handle) => {
-                self.moving = Some(Moving::Handle(connection, end, handle));
+            Message::DragShape(connection, shape) => {
+                self.moving = Some(Moving::Shape(connection, shape));
+            }
+            Message::AddWirePoint(connection, shape, index) => {
+                self.selection = Some(Selection::Grip(connection, Grip::Point(index)));
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.shape_wire(connection, shape));
+                self.report(result.map_err(|e| e.to_string()));
             }
             Message::Drop => {
                 let result = match self.moving.take() {
@@ -1120,7 +1130,9 @@ impl App {
                     Some(Moving::Output(y)) => self
                         .bridge
                         .edit(&mut self.session, |s| s.move_output(Some(y))),
-                    Some(Moving::Handle(id, end, handle)) => self.set_handle(id, end, Some(handle)),
+                    Some(Moving::Shape(id, shape)) => self
+                        .bridge
+                        .edit(&mut self.session, |s| s.shape_wire(id, shape)),
                     None => Ok(()),
                 };
                 self.report(result.map_err(|e| e.to_string()));
@@ -1137,10 +1149,19 @@ impl App {
                         let result = self.bridge.edit(&mut self.session, |s| s.disconnect(id));
                         self.report(result.map_err(|e| e.to_string()));
                     }
-                    Some(Selection::Handle(id, end)) => {
+                    Some(Selection::Grip(id, grip)) => {
                         self.selection = Some(Selection::Wire(id));
-                        let result = self.set_handle(id, end, None);
-                        self.report(result.map_err(|e| e.to_string()));
+                        let shape = self
+                            .session
+                            .state()
+                            .connection(id)
+                            .and_then(|c| crate::wire_edit::remove(&c.shape, grip));
+                        if let Some(shape) = shape {
+                            let result = self
+                                .bridge
+                                .edit(&mut self.session, |s| s.shape_wire(id, shape));
+                            self.report(result.map_err(|e| e.to_string()));
+                        }
                     }
                     Some(Selection::Node(_)) | None => {}
                 }
@@ -1661,26 +1682,6 @@ impl App {
         self.report(result.map_err(|e| e.to_string()));
     }
 
-    /// Sets connection `id`'s handle at `end`, keeping the other, as one step; `None` returns
-    /// that end of its wires to the automatic curve.
-    fn set_handle(
-        &mut self,
-        id: ConnectionId,
-        end: End,
-        handle: Option<WireHandle>,
-    ) -> Result<(), engine_bridge::Error> {
-        let Some(c) = self.session.state().connection(id) else {
-            return Ok(());
-        };
-        let (out_handle, in_handle) = match end {
-            End::Out => (handle, c.in_handle),
-            End::In => (c.out_handle, handle),
-        };
-        self.bridge.edit(&mut self.session, |s| {
-            s.shape_wire(id, out_handle, in_handle)
-        })
-    }
-
     /// A press on curve lane `curve` at `at` (a frame and a value), `width` pixels wide: selects
     /// and starts dragging the point or handle it `hit`; or, within [`CURVE_REACH`] of the curve,
     /// adds a point there as one step and selects it; or, further away, seeks there. While
@@ -1690,7 +1691,7 @@ impl App {
         // Delete then removes the curve point, not a wire selected earlier.
         if matches!(
             self.selection,
-            Some(Selection::Wire(_) | Selection::Handle(..))
+            Some(Selection::Wire(_) | Selection::Grip(..))
         ) {
             self.selection = None;
         }

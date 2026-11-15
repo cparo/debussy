@@ -2701,3 +2701,49 @@ fn test_curve_wires_only_to_a_curve_port_and_drives_the_slider() -> Result<(), B
     assert_eq!(app.session().state().curve_into(mixer, 1), Some(curve));
     Ok(())
 }
+
+#[test]
+fn test_wire_points_are_added_dragged_and_deleted_as_steps() -> Result<(), Box<dyn Error>> {
+    use debussy_ui::{Grip, Selection};
+    use project_model::{Position, WireHandle, WirePoint, WireShape};
+    let (mut app, _processor, _, _) = app()?;
+    let wire = app
+        .session()
+        .state()
+        .connections
+        .first()
+        .ok_or("no connection")?
+        .id;
+    let point = |x: f32| WirePoint {
+        at: Position { x, y: 200.0 },
+        in_handle: WireHandle { dx: -20.0, dy: 0.0 },
+        out_handle: WireHandle { dx: 20.0, dy: 0.0 },
+    };
+    let shape = |points| WireShape {
+        points,
+        ..WireShape::default()
+    };
+    let shape_of = |app: &App| {
+        app.session()
+            .state()
+            .connection(wire)
+            .map(|c| c.shape.clone())
+    };
+    // Adding is one step and selects the new point.
+    app.update(Message::AddWirePoint(wire, shape(vec![point(100.0)]), 0));
+    assert_eq!(shape_of(&app), Some(shape(vec![point(100.0)])));
+    assert_eq!(app.selection(), Some(Selection::Grip(wire, Grip::Point(0))));
+    // A drag shows live and records one step on drop.
+    app.update(Message::DragShape(wire, shape(vec![point(150.0)])));
+    assert_eq!(shape_of(&app), Some(shape(vec![point(100.0)])));
+    app.update(Message::Drop);
+    assert_eq!(shape_of(&app), Some(shape(vec![point(150.0)])));
+    // Delete removes the selected point and leaves the wire selected.
+    app.update(Message::DeleteSelection);
+    assert_eq!(shape_of(&app), Some(WireShape::default()));
+    assert_eq!(app.selection(), Some(Selection::Wire(wire)));
+    app.update(Message::Undo);
+    app.update(Message::Undo);
+    assert_eq!(shape_of(&app), Some(shape(vec![point(100.0)])));
+    Ok(())
+}

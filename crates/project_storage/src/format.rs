@@ -218,6 +218,20 @@ pub(crate) struct SavedConnection {
     /// curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_handle: Option<SavedWireHandle>,
+    /// Since version 6: the points the wire passes through between its ends, from the output
+    /// end; absent for none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<SavedWirePoint>,
+}
+
+/// A point a wire passes through, in patch-board pixels, with its handles as offsets from it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedWirePoint {
+    pub x: f32,
+    pub y: f32,
+    pub in_handle: SavedWireHandle,
+    pub out_handle: SavedWireHandle,
 }
 
 /// A wire handle's offset from the pin at its end of the wire, in patch-board pixels.

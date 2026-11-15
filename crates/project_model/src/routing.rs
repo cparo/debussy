@@ -134,6 +134,53 @@ impl WireHandle {
     }
 }
 
+/// A point a connection's wires pass through on the patch board, between their ends, with a
+/// bezier handle each way as an offset from it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WirePoint {
+    /// Where it is, in logical pixels, as [`Position`] measures.
+    pub at: Position,
+    /// The handle towards the output end.
+    pub in_handle: WireHandle,
+    /// The handle towards the input end.
+    pub out_handle: WireHandle,
+}
+
+/// The most intermediate points a connection's wires may have.
+pub const MAX_WIRE_POINTS: usize = 256;
+
+/// How a connection's wires run across the patch board: a bezier handle at each end and the
+/// points between, from the output end. The interface's to interpret; it plays no part in the
+/// sound.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WireShape {
+    /// The handle at the output end, as an offset from its pin; `None` is the automatic one.
+    pub out_handle: Option<WireHandle>,
+    /// The handle at the input end, as an offset from its pin; `None` is the automatic one.
+    pub in_handle: Option<WireHandle>,
+    /// The points between, from the output end.
+    pub points: Vec<WirePoint>,
+}
+
+impl WireShape {
+    /// Checks every coordinate and offset, and the number of points.
+    pub(crate) fn check(&self) -> Result<(), Error> {
+        if self.points.len() > MAX_WIRE_POINTS {
+            return Err(Error::InvalidValue);
+        }
+        for handle in [self.out_handle, self.in_handle].into_iter().flatten() {
+            handle.check()?;
+        }
+        for point in &self.points {
+            check_coordinate(point.at.x)?;
+            check_coordinate(point.at.y)?;
+            point.in_handle.check()?;
+            point.out_handle.check()?;
+        }
+        Ok(())
+    }
+}
+
 /// The furthest a saved board position may be from the origin, either way.
 pub const MAX_BOARD_COORDINATE: f32 = 1_000_000.0;
 
@@ -186,7 +233,7 @@ impl Node {
 }
 
 /// A connection from an output port of one endpoint to an input port of another.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Connection {
     /// The connection's id.
     pub id: ConnectionId,
@@ -204,11 +251,8 @@ pub struct Connection {
     pub from_side: Option<Side>,
     /// The side of a stereo input it feeds, or `None` for the whole port.
     pub to_side: Option<Side>,
-    /// The bezier handle at the output end of its wires on the patch board; `None` leaves it
-    /// to the automatic curve.
-    pub out_handle: Option<WireHandle>,
-    /// The bezier handle at the input end; `None` leaves it to the automatic curve.
-    pub in_handle: Option<WireHandle>,
+    /// How its wires run on the patch board.
+    pub shape: WireShape,
 }
 
 impl Connection {
@@ -229,8 +273,7 @@ impl Connection {
             pan: 0.0,
             from_side: None,
             to_side: None,
-            out_handle: None,
-            in_handle: None,
+            shape: WireShape::default(),
         }
     }
 

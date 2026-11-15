@@ -66,8 +66,8 @@ fn four_to_five(mut value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
-/// Version 6 added optional `out_handle` and `in_handle` to connections (ADR-0134); a version 5
-/// file leaves every wire on the automatic curve, which is what their absence means.
+/// Version 6 added optional `out_handle`, `in_handle` and `points` to connections (ADR-0134); a
+/// version 5 file leaves every wire on the automatic curve, which is what their absence means.
 fn five_to_six(value: Value) -> Result<Value, String> {
     Ok(value)
 }
