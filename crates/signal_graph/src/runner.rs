@@ -73,6 +73,13 @@ impl Runner {
         self.plan.set_transport(position, playing);
     }
 
+    /// Silences the current plan's tails: node state, feedback delays and compensation delays,
+    /// so its sinks carry only what the sources give from the next block. Allocation-free; for
+    /// when the transport stops or pauses (`docs/architecture/engine.md` "Transport").
+    pub fn reset(&mut self) {
+        self.plan.reset();
+    }
+
     /// Runs the current plan over the block.
     pub fn process(&mut self) {
         self.plan.process();

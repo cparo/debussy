@@ -742,6 +742,14 @@ impl Node for Reverb {
         }));
     }
 
+    fn reset(&mut self) {
+        if let Some(running) = self.running.as_mut() {
+            running.pre_delay.iter_mut().for_each(TapDelay::clear);
+            running.room.clear();
+            running.plate.clear();
+        }
+    }
+
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let parameters = &self.parameters;
         let Some(running) = self.running.as_mut() else {

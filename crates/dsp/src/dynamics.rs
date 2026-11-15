@@ -57,6 +57,12 @@ impl Ballistics {
         }
     }
 
+    /// Returns the level to 0 and ends any hold, keeping the times. Real-time safe.
+    pub fn reset(&mut self) {
+        self.level = 0.0;
+        self.held = 0;
+    }
+
     /// Sets the attack and release time constants and the hold time, in seconds, at
     /// `sample_rate`. The level is kept; a hold in progress keeps what it has left, up to the
     /// new hold.
@@ -191,6 +197,11 @@ impl DelayLine {
     /// The delay, in samples.
     pub fn frames(&self) -> usize {
         self.buffer.len()
+    }
+
+    /// Fills the line with silence. Real-time safe.
+    pub fn clear(&mut self) {
+        self.buffer.fill(0.0);
     }
 
     /// Takes one sample and returns the one taken `frames` samples ago.

@@ -80,6 +80,10 @@ captures the armed tracks' inputs, after an optional count-in during which the t
 counting in and the playhead holds; the playhead cannot be moved while recording (see
 `docs/architecture/recording.md` "Capture" and "Count-in").
 
+Stop and pause silence the plan at once: the engine resets it, so every node's state and every
+feedback and compensation delay is cleared, and from the next block the output carries only
+what the sources give, such as monitored input ([ADR-0137](../adrs/0137-stop-and-pause-silence-the-plan-s-tails-at-once.md)).
+
 A mono listening switch in the engine's output stage, after the plan, sends `(L + R) × 0.7071`
 to both output channels. It is a monitoring setting and is not saved in the project ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).
 

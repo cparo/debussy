@@ -80,6 +80,9 @@ impl Node for Latency {
     fn latency(&self) -> usize {
         self.ring.len()
     }
+    fn reset(&mut self) {
+        self.ring.fill(0.0);
+    }
     fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
         let (Some(input), Some(output)) = (inputs.channel(0, 0), outputs.channel_mut(0, 0)) else {
             return;

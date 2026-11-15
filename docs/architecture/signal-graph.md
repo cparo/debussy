@@ -80,6 +80,9 @@ Effects are built-in nodes. The effect node interface must not assume an effect 
 reports its latency, declares its ports, and exposes its parameters through the same interface a
 third-party plugin wrapper would implement. Third-party plugins are not hosted ([ADR-0019](../adrs/0019-only-built-in-effects-for-now-behind-a-plugin.md)).
 
+A node can be reset: it clears what it holds of past input and keeps its parameters, on the
+real-time thread ([ADR-0137](../adrs/0137-stop-and-pause-silence-the-plan-s-tails-at-once.md)).
+
 Each parameter declares, besides its name, range and default, a unit (possibly empty), a scale
 (linear, logarithmic, integer, choice of named options by index, or toggle) and a group (possibly
 empty). A stepped scale (integer, choice, toggle) holds only whole numbers. A parameter may be marked

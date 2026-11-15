@@ -274,11 +274,14 @@ impl Processor {
                         self.state = TransportState::Paused;
                     }
                     self.end_recording();
+                    // Effect tails and compensation delays stop with the transport.
+                    self.runner.reset();
                 }
                 Command::Stop { to } => {
                     self.playhead = to;
                     self.state = TransportState::Stopped;
                     self.end_recording();
+                    self.runner.reset();
                 }
                 Command::Locate { frame } => self.playhead = frame,
             }

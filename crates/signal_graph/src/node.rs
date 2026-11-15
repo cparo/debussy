@@ -14,8 +14,9 @@ use crate::types::Port;
 /// [`Node::outputs`] and [`Node::latency`], once each, off the real-time thread, when the node is
 /// added; between the first two it may set parameter values (see `Graph::replace_node`). The
 /// answers are fixed for as long as the node is in the graph. A node whose ports, latency or
-/// parameters must change is replaced with `Graph::replace_node`. Only [`Node::process`] runs on the real-time thread, and it must not
-/// allocate, free, lock, block or do I/O (`docs/architecture/engine.md` "Real-time thread").
+/// parameters must change is replaced with `Graph::replace_node`. Only [`Node::process`] and
+/// [`Node::reset`] run on the real-time thread, and they must not allocate, free, lock, block or
+/// do I/O (`docs/architecture/engine.md` "Real-time thread").
 pub trait Node: Send {
     /// The input ports, in order.
     fn inputs(&self) -> Vec<Port>;
@@ -50,6 +51,12 @@ pub trait Node: Send {
     fn prepare(&mut self, sample_rate: u32, max_frames: usize) {
         let _ = (sample_rate, max_frames);
     }
+
+    /// Clears what the node holds of past input, such as delay lines, filter memory and envelope
+    /// levels, so it falls silent at once; parameters and their settings stay. Called on the
+    /// real-time thread when the transport stops or pauses (`docs/architecture/engine.md`
+    /// "Transport"). A node that holds no past input need not implement it.
+    fn reset(&mut self) {}
 
     /// Processes [`Outputs::frames`] frames: reads `inputs` and overwrites every sample of every
     /// output. A node may be called several times per block on consecutive stretches of it, when

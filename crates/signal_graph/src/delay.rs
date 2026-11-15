@@ -93,6 +93,11 @@ impl DelayLine {
         self.position = (self.position + frames) % self.length;
     }
 
+    /// Fills the line with silence. Allocation-free.
+    pub(crate) fn clear(&mut self) {
+        self.ring.fill(0.0);
+    }
+
     /// Takes `other`'s contents if it has the same shape, leaving this line's in `other`.
     pub(crate) fn take_state(&mut self, other: &mut DelayLine) {
         if self.length == other.length && self.ring.len() == other.ring.len() {
