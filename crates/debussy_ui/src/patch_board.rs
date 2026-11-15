@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
-use project_model::{ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, WireShape};
+use project_model::{
+    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, TrackKind, WireShape,
+};
 
 use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
@@ -206,13 +208,25 @@ pub fn occupied(state: &State, pin: Pin) -> bool {
 }
 
 /// Whether a wire may run from output `from` to input `to`: an output to a free input of
-/// another endpoint carrying the same kind of signal, audio to audio or control to control.
+/// another endpoint carrying the same kind of signal, audio to audio or control to control. A
+/// MIDI track's event output connects to nothing yet: no input takes events.
 pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
     from.output
         && !to.output
         && from.endpoint != to.endpoint
         && from.endpoint.is_control() == to.endpoint.is_control()
+        && !is_event(state, from)
         && !occupied(state, to)
+}
+
+/// Whether `pin` carries events: a MIDI track's output.
+fn is_event(state: &State, pin: Pin) -> bool {
+    match pin.endpoint {
+        Endpoint::Track(id) => {
+            pin.output && state.track(id).is_some_and(|t| t.kind == TrackKind::Midi)
+        }
+        _ => false,
+    }
 }
 
 /// The colour of a signal from `endpoint`: lavender for control, the tone's audio colour
@@ -315,10 +329,9 @@ pub fn layout(
             continue;
         };
         let endpoint = Endpoint::Track(*track);
-        for (pin, y) in pins_of(endpoint, true, &[t.layout])
-            .into_iter()
-            .zip(centres)
-        {
+        // A MIDI track's event output is one pin, like a mono port's.
+        let layout = t.layout().unwrap_or(Layout::Mono);
+        for (pin, y) in pins_of(endpoint, true, &[layout]).into_iter().zip(centres) {
             pins.insert(pin, Point::new(0.0, *y));
         }
     }
@@ -1221,6 +1234,36 @@ mod tests {
         check(&board)?;
         // The board grows to hold the point.
         assert!(board.size.height > 500.0 + PORT_SPACING);
+        Ok(())
+    }
+
+    #[test]
+    fn test_midi_track_pin_is_laid_out_but_connects_to_nothing() -> Result {
+        let mut session = Session::new_project();
+        let keys = session.add_midi_track("Keys")?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        let out = Pin {
+            endpoint: Endpoint::Track(keys),
+            output: true,
+            port: 0,
+            side: None,
+        };
+        let board = layout(
+            session.state(),
+            &[(keys, vec![50.0])],
+            &[],
+            Size::new(500.0, 400.0),
+        );
+        assert!(board.pins.contains_key(&out));
+        for to in [Endpoint::Node(mixer), Endpoint::Output] {
+            let input = Pin {
+                endpoint: to,
+                output: false,
+                port: 0,
+                side: None,
+            };
+            assert!(!can_connect(session.state(), out, input));
+        }
         Ok(())
     }
 

@@ -12,7 +12,7 @@ use crate::error::Error;
 use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Tempo;
-use crate::types::{ClipId, CurveId, TrackId};
+use crate::types::{ClipId, CurveId, TrackId, TrackKind};
 
 /// One reversible change to the project state. A gesture made of several changes is a
 /// [`Edit::Batch`], undone as one.
@@ -224,7 +224,7 @@ impl Edit {
                 }
                 let target = state.track_mut(track)?;
                 check_index(layer, target.clips.len() + 1)?;
-                clip.check(target.layout)?;
+                clip.check(target.kind)?;
                 target.clips.insert(layer, (id, clip));
                 Ok(Edit::RemoveClip(id))
             }
@@ -241,7 +241,7 @@ impl Edit {
             Edit::ReplaceClip { id, clip } => {
                 let (track, layer) = state.find_clip(id).ok_or(Error::UnknownClip(id))?;
                 let target = state.track_mut(track)?;
-                clip.check(target.layout)?;
+                clip.check(target.kind)?;
                 let old = std::mem::replace(&mut target.clips[layer].1, clip);
                 Ok(Edit::ReplaceClip { id, clip: old })
             }
@@ -488,7 +488,7 @@ fn check_track(track: &Track, taken: &BTreeSet<ClipId>) -> Result<(), Error> {
         if taken.contains(id) || !seen.insert(*id) {
             return Err(Error::ClipExists(*id));
         }
-        clip.check(track.layout)?;
+        clip.check(track.kind)?;
     }
     Ok(())
 }
@@ -518,7 +518,8 @@ fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
 
 /// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
 /// not known to the model and are checked by `signal_graph`; a mixer has an input per channel and
-/// one output. A curve has one output and a curve port one input, each port 0.
+/// one output. A curve has one output and a curve port one input, each port 0. A track, audio or
+/// MIDI, has one output, port 0.
 fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
         Endpoint::Curve(_) => output && port == 0,
@@ -537,10 +538,11 @@ fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> boo
     }
 }
 
-/// The layout of a port, where the model knows it; effects' ports are `signal_graph`'s.
+/// The layout of an audio or control port, where the model knows it; effects' ports are
+/// `signal_graph`'s. A MIDI track's event output has none.
 fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout> {
     match endpoint {
-        Endpoint::Track(id) => state.track(id).map(|t| t.layout),
+        Endpoint::Track(id) => state.track(id).and_then(|t| t.layout()),
         Endpoint::Output => Some(Layout::Stereo),
         Endpoint::Node(id) => match state.node(id).map(|node| &node.kind) {
             Some(NodeKind::Mixer { .. }) => {
@@ -550,6 +552,15 @@ fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout
             Some(NodeKind::Effect { .. }) | None => None,
         },
         Endpoint::Curve(_) | Endpoint::CurvePort(..) => Some(Layout::Mono),
+    }
+}
+
+/// Whether a port carries events: a MIDI track's output. No input the model knows of takes events
+/// yet, so a MIDI track cannot be connected.
+fn is_event(state: &State, endpoint: Endpoint, output: bool) -> bool {
+    match endpoint {
+        Endpoint::Track(id) => output && state.track(id).is_some_and(|t| t.kind == TrackKind::Midi),
+        _ => false,
     }
 }
 
@@ -565,7 +576,9 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         (connection.from, true, connection.output),
         (connection.to, false, connection.input),
     ];
-    if connection.from.is_control() != connection.to.is_control() {
+    if connection.from.is_control() != connection.to.is_control()
+        || is_event(state, connection.from, true) != is_event(state, connection.to, false)
+    {
         return Err(Error::WrongPortType);
     }
     for (endpoint, output, port) in ends {

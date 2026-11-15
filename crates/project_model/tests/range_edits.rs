@@ -4,7 +4,7 @@
 use std::error::Error as StdError;
 
 use audio_buffers::Layout;
-use project_model::{AudioFile, Clip, ClipId, Error, Range, Session, Source, TrackId};
+use project_model::{AudioFile, Clip, ClipId, Error, Range, Session, Source, TrackId, TrackKind};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -71,7 +71,7 @@ fn test_cut_range_splits_a_clip_in_two() -> TestResult {
 
     assert_eq!(excerpt.length(), 300);
     let lane = &excerpt.lanes()[0];
-    assert_eq!(lane.layout(), Layout::Mono);
+    assert_eq!(lane.kind(), TrackKind::Audio(Layout::Mono));
     let middle = Clip {
         offset: 200,
         length: 300,
@@ -172,7 +172,7 @@ fn test_paste_refuses_mismatched_layout_and_missing_tracks() -> TestResult {
         })
     );
     let mono_only = session.copy_range(&[a], Range::new(100, 200)?)?;
-    assert_eq!(session.paste(&mono_only, b, 0), Err(Error::LayoutMismatch));
+    assert_eq!(session.paste(&mono_only, b, 0), Err(Error::KindMismatch));
     assert_eq!(
         session.paste(&mono_only, a, u64::MAX),
         Err(Error::ClipOutsideTimeline)

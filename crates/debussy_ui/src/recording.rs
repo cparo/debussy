@@ -145,11 +145,12 @@ impl App {
 
     /// Arms the track, defaulting to input 1 (1–2 for stereo) without monitoring, or disarms
     /// it. Opens the device's inputs with the first armed track and closes them with the last.
+    /// A MIDI track is never armed: MIDI recording is not built yet.
     pub(crate) fn toggle_arm(&mut self, track: TrackId) {
         if self.refuse_while_playing("arm a track") {
             return;
         }
-        if self.arming.remove(&track).is_none() {
+        if self.arming.remove(&track).is_none() && self.track_layout(track).is_some() {
             self.arming.insert(
                 track,
                 Arming {
@@ -247,7 +248,7 @@ impl App {
             .keys()
             .filter_map(|id| {
                 let track = self.session.state().track(*id)?;
-                Some((*id, track.name.clone(), track.layout))
+                Some((*id, track.name.clone(), track.layout()?))
             })
             .collect();
         let requests: Vec<(String, usize)> = tracks
@@ -438,7 +439,8 @@ impl App {
             .filter(|(id, names)| {
                 state
                     .track(*id)
-                    .is_some_and(|t| t.layout.channels() == names.len())
+                    .and_then(|t| t.layout())
+                    .is_some_and(|layout| layout.channels() == names.len())
             })
             .filter_map(|(id, names)| {
                 let file = |name: &String| AudioFile {
@@ -514,8 +516,9 @@ impl App {
             .collect()
     }
 
+    /// An audio track's layout; `None` for a MIDI track or one that is gone.
     fn track_layout(&self, track: TrackId) -> Option<Layout> {
-        self.session.state().track(track).map(|t| t.layout)
+        self.session.state().track(track).and_then(|t| t.layout())
     }
 }
 

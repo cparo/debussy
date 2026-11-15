@@ -36,8 +36,10 @@ impl Key {
 /// The parts of a node that fix its graph declaration; a change to any of them replaces it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Shape {
-    /// A track's source.
+    /// An audio track's source.
     Source(Layout),
+    /// A MIDI track's source, with one event output.
+    EventSource,
     /// The stereo project output.
     Sink,
     /// A built-in effect by kind id.
@@ -59,7 +61,7 @@ impl Shape {
     pub(crate) fn is_processor(&self) -> bool {
         !matches!(
             self,
-            Shape::Source(_) | Shape::Sink | Shape::Delay(_) | Shape::Curve
+            Shape::Source(_) | Shape::EventSource | Shape::Sink | Shape::Delay(_) | Shape::Curve
         )
     }
 }
@@ -164,7 +166,10 @@ impl Target {
             nodes.insert(
                 Key::Track(track.id),
                 NodeTarget {
-                    shape: Shape::Source(track.layout),
+                    shape: match track.layout() {
+                        Some(layout) => Shape::Source(layout),
+                        None => Shape::EventSource,
+                    },
                     parameters: BTreeMap::new(),
                     seconds: None,
                     curve: None,

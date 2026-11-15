@@ -112,8 +112,8 @@ it in place, keeping its graph id, connections and values, with one prepared at 
 
 Every port and connection has a type: audio, or control (an automation curve's value, with no
 buffer; see `docs/architecture/automation.md` "Evaluation"). Connections between ports of
-different types are refused. Track contents are typed in the same way: audio clips are the only
-kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
+different types are refused. Track contents are typed in the same way: audio or MIDI clips
+([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
 
 An event port carries MIDI 1.0 channel messages, each stamped with a frame offset into the block,
 in a buffer of 512 events per block emptied at each block's start. Connections into one event input
@@ -121,7 +121,8 @@ are merged in frame order, events at the same frame in connection-id order. An e
 buffer or a full compensation queue (2048 events per compensated connection) cannot take is
 dropped and counted (`Graph::event_overflows`). Feedback delays are audio-only, so a cycle of
 event connections alone is refused. Message and buffer types are in the `midi` crate
-([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)).
+([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)). A MIDI track is an event source: a node with one event output
+([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)).
 
 ## Instruments
 

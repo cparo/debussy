@@ -26,9 +26,16 @@ pub enum Error {
         /// The index must be below this.
         limit: usize,
     },
-    /// A clip's source is mono on a stereo track, or the reverse.
-    #[error("the clip's channel layout does not match the track's")]
-    LayoutMismatch,
+    /// A clip's source does not fit its track: mono on a stereo track or the reverse, or audio
+    /// on a MIDI track or the reverse.
+    #[error("the clip does not match the track's kind")]
+    KindMismatch,
+    /// A MIDI clip with a gain other than 0 dB or with fades.
+    #[error("a MIDI clip has no gain or fades")]
+    MidiClipGainOrFade,
+    /// MIDI notes or control changes that do not make a valid sequence.
+    #[error("not a valid MIDI sequence: {0}")]
+    InvalidSequence(String),
     /// A range of no frames: its start is not below its end.
     #[error("a range must be at least one frame long")]
     EmptyRange,
@@ -130,8 +137,9 @@ pub enum Error {
     /// Fewer mixer channels would remove a parameter that has a curve port.
     #[error("parameter {1:?} of {0} has a curve port")]
     StillAssigned(NodeId, String),
-    /// A connection joining a control end to an audio end: a curve connects only to a curve port.
-    #[error("a curve connects only to a curve port")]
+    /// A connection joining ports of different types: a curve connects only to a curve port,
+    /// and an event output only to an event input.
+    #[error("those ports carry different kinds of signal")]
     WrongPortType,
     /// A curve port that already has a connection.
     #[error("{0:?} already has a connection")]

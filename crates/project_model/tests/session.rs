@@ -43,7 +43,7 @@ fn test_add_clip_checks_the_clip() -> TestResult {
     );
     assert_eq!(
         session.add_clip(track, Clip::new(stereo(1_000), 0, 10, 0)),
-        Err(Error::LayoutMismatch)
+        Err(Error::KindMismatch)
     );
     let faded = Clip {
         fade_in: 6,
@@ -630,7 +630,7 @@ fn test_add_clips_puts_each_on_top_as_one_step() -> TestResult {
             (vocals, Clip::new(mono("take.wav", 500), 0, 500, 200)),
             (keys, Clip::new(mono("x.wav", 500), 0, 500, 0)),
         ]),
-        Err(Error::LayoutMismatch)
+        Err(Error::KindMismatch)
     );
     assert_eq!(session.state(), &before);
     Ok(())

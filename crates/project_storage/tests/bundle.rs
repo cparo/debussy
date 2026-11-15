@@ -8,9 +8,11 @@ use std::path::{Path, PathBuf};
 
 use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
+use std::sync::Arc;
+
 use project_model::{
-    AudioFile, Clip, Endpoint, NodeKind, Position, Session, Source, WireHandle, WirePoint,
-    WireShape,
+    AudioFile, Clip, Control, Endpoint, NodeKind, Note, Position, Range, Sequence, Session, Source,
+    State, WireHandle, WirePoint, WireShape,
 };
 use project_storage::{Bundle, Error as StorageError, FORMAT_VERSION, MAX_FILE_BYTES};
 
@@ -44,8 +46,76 @@ fn file(name: String, frames: u64) -> AudioFile {
     AudioFile { name, frames }
 }
 
-/// A random session: tracks of both layouts with clips, nodes of every kind with parameters,
-/// connections, and some named versions taken along the way.
+/// A random valid MIDI sequence: notes on a few keys, never overlapping on one, and controls.
+fn random_sequence(random: &mut Random) -> Result<Arc<Sequence>, Box<dyn Error>> {
+    let frames = 10_000 + random.below(100_000);
+    let mut notes = Vec::new();
+    for key in 0..random.below(4) {
+        let (channel, pitch) = (random.below(16) as u8, (36 + key * 7) as u8);
+        let mut start = random.below(1_000);
+        while start + 10 < frames && notes.len() < 200 {
+            let length = 1 + random.below((frames - start).min(5_000));
+            notes.push(Note {
+                start,
+                length,
+                channel,
+                pitch,
+                velocity: 1 + random.below(127) as u8,
+            });
+            start += length + random.below(3_000);
+        }
+    }
+    notes.sort_by_key(|n| (n.start, n.channel, n.pitch));
+    let mut controls: Vec<Control> = (0..random.below(20))
+        .map(|_| Control {
+            frame: random.below(frames),
+            channel: random.below(16) as u8,
+            controller: random.below(128) as u8,
+            value: random.below(128) as u8,
+        })
+        .collect();
+    controls.sort_by_key(|c| c.frame);
+    Ok(Arc::new(Sequence::new(frames, notes, controls)?))
+}
+
+/// Whether every pair of MIDI clips in `a` that shares a sequence also shares it in `b`, the same
+/// state reloaded, and no others do.
+fn same_sharing(a: &State, b: &State) -> bool {
+    let sequences = |state: &State| -> Vec<Arc<Sequence>> {
+        state
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter_map(|(_, clip)| match &clip.source {
+                Source::Midi(sequence) => Some(Arc::clone(sequence)),
+                _ => None,
+            })
+            .collect()
+    };
+    let (a, b) = (sequences(a), sequences(b));
+    a.len() == b.len()
+        && (0..a.len())
+            .all(|i| (0..a.len()).all(|j| Arc::ptr_eq(&a[i], &a[j]) == Arc::ptr_eq(&b[i], &b[j])))
+}
+
+/// Whether two MIDI clips in `state` share a sequence.
+fn has_shared_sequence(state: &State) -> bool {
+    let clips: Vec<&Clip> = state
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.iter().map(|(_, c)| c))
+        .collect();
+    clips.iter().enumerate().any(|(i, a)| {
+        clips[i + 1..].iter().any(|b| match (&a.source, &b.source) {
+            (Source::Midi(x), Source::Midi(y)) => Arc::ptr_eq(x, y),
+            _ => false,
+        })
+    })
+}
+
+/// A random session: audio tracks of both layouts and MIDI tracks with clips (some split, so
+/// sharing a sequence), nodes of every kind with parameters, connections, and some named versions
+/// taken along the way.
 fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
     let mut session = Session::new();
     let mut tracks = Vec::new();
@@ -76,6 +146,20 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
         }
         if random.below(3) == 0 {
             session.save_version(&format!("Take {t} / ✓ {}", random.next()))?;
+        }
+    }
+    for t in 0..random.below(3) {
+        let id = session.add_midi_track(&format!("Keys {t}"))?;
+        for _ in 0..random.below(3) {
+            let sequence = random_sequence(random)?;
+            let frames = sequence.frames();
+            let position = random.below(1_000_000);
+            session.add_clip(id, Clip::new(Source::Midi(sequence), 0, frames, position))?;
+            if random.below(2) == 0 {
+                // A cut through the middle leaves two clips sharing the sequence.
+                let start = position + 1 + random.below(frames / 2);
+                session.delete_range(&[id], Range::new(start, start + 1 + random.below(100))?)?;
+            }
         }
     }
     let mut parameters = BTreeMap::new();
@@ -149,8 +233,10 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
 fn test_save_then_open_round_trips_random_sessions() -> Result<(), Box<dyn Error>> {
     let path = scratch("round-trip")?;
     let mut random = Random(0x5EED_1234_ABCD_0001);
+    let mut split_midi = 0;
     for _ in 0..50 {
         let session = random_session(&mut random)?;
+        split_midi += usize::from(has_shared_sequence(session.state()));
         if path.exists() {
             fs::remove_dir_all(&path)?;
         }
@@ -160,8 +246,10 @@ fn test_save_then_open_round_trips_random_sessions() -> Result<(), Box<dyn Error
         let (bundle, loaded) = Bundle::open(&path)?;
         assert_eq!(bundle.sample_rate(), 48_000);
         assert_eq!(loaded.state(), session.state());
+        assert!(same_sharing(loaded.state(), session.state()));
         assert_eq!(loaded.versions(), session.versions());
     }
+    assert!(split_midi > 0, "no session split a MIDI clip");
     Ok(())
 }
 

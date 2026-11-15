@@ -21,6 +21,7 @@ const MIGRATIONS: &[Migration] = &[
     three_to_four,
     four_to_five,
     five_to_six,
+    six_to_seven,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -69,6 +70,28 @@ fn four_to_five(mut value: Value) -> Result<Value, String> {
 /// Version 6 added optional `out_handle`, `in_handle` and `points` to connections (ADR-0134); a
 /// version 5 file leaves every wire on the automatic curve, which is what their absence means.
 fn five_to_six(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
+
+/// Version 7 replaced each track's `layout` with a `kind` and added the project's MIDI
+/// `sequences` (ADR-0144); every version 6 track is audio, and the file has no sequences.
+fn six_to_seven(mut value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("the file is not a JSON object")?;
+    object.insert("sequences".to_owned(), Value::Array(Vec::new()));
+    if let Some(tracks) = object.get_mut("tracks").and_then(Value::as_array_mut) {
+        for track in tracks {
+            let track = track
+                .as_object_mut()
+                .ok_or("a track is not a JSON object")?;
+            let layout = track.remove("layout").ok_or("a track has no layout")?;
+            track.insert(
+                "kind".to_owned(),
+                serde_json::json!({"kind": "audio", "layout": layout}),
+            );
+        }
+    }
     Ok(value)
 }
 
@@ -156,6 +179,7 @@ fn depth(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::{SavedLayout, SavedTrackKind};
     use std::error::Error as StdError;
 
     const V1: &str =
@@ -210,6 +234,36 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_six_tracks_to_audio_kind() -> Result<(), Box<dyn StdError>> {
+        let v6 = r#"{"format_version":6,"sample_rate":48000,"connections":[],"nodes":[],
+            "tracks":[{"id":1,"name":"a","layout":"stereo","clips":[]},
+                      {"id":2,"name":"b","layout":"mono","clips":[]}],
+            "tempo":{"bpm":90.0,"beats_per_bar":3,"beat_unit":4},"curves":[]}"#;
+        let saved = parse(Path::new("p"), v6)?;
+        assert_eq!(saved.format_version, FORMAT_VERSION);
+        assert!(saved.sequences.is_empty());
+        let kinds: Vec<_> = saved.tracks.iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                SavedTrackKind::Audio {
+                    layout: SavedLayout::Stereo
+                },
+                SavedTrackKind::Audio {
+                    layout: SavedLayout::Mono
+                },
+            ]
+        );
+        // A version 7 file must have its kinds and sequences.
+        let v7 = v6.replace("\"format_version\":6", "\"format_version\":7");
+        assert!(matches!(
+            parse(Path::new("p"), &v7),
+            Err(Error::Json { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -217,12 +271,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":7");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":8");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 7,
-                supported: 6,
+                found: 8,
+                supported: 7,
                 ..
             })
         ));
@@ -255,7 +309,7 @@ mod tests {
         fn two_to_three(mut v: Value) -> Result<Value, String> {
             let object = v.as_object_mut().ok_or("not an object")?;
             object.insert("nodes".into(), Value::Array(Vec::new()));
-            four_to_five(three_to_four(v)?)
+            six_to_seven(four_to_five(three_to_four(v)?)?)
         }
         let old = r#"{"format_version":1,"rate":44100,"tracks":[],"nodes":[],"connections":[]}"#;
         let saved = parse_with(Path::new("p"), old, 3, &[one_to_two, two_to_three])?;

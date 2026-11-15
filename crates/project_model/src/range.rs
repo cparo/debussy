@@ -6,12 +6,10 @@
 
 use std::collections::BTreeSet;
 
-use audio_buffers::Layout;
-
 use crate::edit::Edit;
 use crate::error::Error;
 use crate::state::{Clip, State};
-use crate::types::{ClipId, TrackId};
+use crate::types::{ClipId, TrackId, TrackKind};
 
 /// A half-open span of timeline frames, `start..end`, never empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,14 +69,14 @@ impl Excerpt {
 /// One track's part of an [`Excerpt`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lane {
-    layout: Layout,
+    kind: TrackKind,
     clips: Vec<Clip>,
 }
 
 impl Lane {
-    /// The layout of the track it came from.
-    pub fn layout(&self) -> Layout {
-        self.layout
+    /// The kind of the track it came from.
+    pub fn kind(&self) -> TrackKind {
+        self.kind
     }
 
     /// The clip parts inside the range, bottom layer first, positioned relative to the range
@@ -139,7 +137,7 @@ pub(crate) fn excerpt(state: &State, tracks: &[TrackId], range: Range) -> Result
                 })
                 .collect();
             Lane {
-                layout: track.layout,
+                kind: track.kind,
                 clips,
             }
         })
@@ -213,9 +211,9 @@ pub(crate) fn paste_edits(
         .lanes
         .iter()
         .zip(targets)
-        .any(|(lane, target)| lane.layout != target.layout)
+        .any(|(lane, target)| lane.kind != target.kind)
     {
-        return Err(Error::LayoutMismatch);
+        return Err(Error::KindMismatch);
     }
     let mut edits = Vec::new();
     let mut ids = Vec::new();
@@ -244,6 +242,8 @@ pub(crate) fn paste_edits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audio_buffers::Layout;
+
     use crate::types::{AudioFile, Source};
 
     fn clip(position: u64, length: u64, fade_in: u64, fade_out: u64) -> Clip {
@@ -292,7 +292,7 @@ mod tests {
                 .into_iter()
                 .flatten()
             {
-                piece.check(Layout::Mono)?;
+                piece.check(TrackKind::Audio(Layout::Mono))?;
                 assert!(piece.fade_in + piece.fade_out <= piece.length);
             }
         }

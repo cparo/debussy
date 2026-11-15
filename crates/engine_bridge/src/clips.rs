@@ -47,24 +47,27 @@ pub struct TrackRenderers {
     pub channels: Vec<TrackRenderer>,
 }
 
-/// Each channel's clips of `track`, bottom layer first.
+/// Each channel's clips of `track`, bottom layer first; none for a MIDI track.
 fn channel_clips(track: &Track, files: &mut FileTable) -> Vec<Vec<ChannelClip>> {
-    let channels = match track.layout {
-        audio_buffers::Layout::Mono => 1,
-        audio_buffers::Layout::Stereo => 2,
+    let channels = match track.layout() {
+        Some(audio_buffers::Layout::Mono) => 1,
+        Some(audio_buffers::Layout::Stereo) => 2,
+        None => 0,
     };
     (0..channels)
         .map(|channel| {
             track
                 .clips
                 .iter()
-                .map(|(_, clip)| {
+                .filter_map(|(_, clip)| {
                     let file = match (&clip.source, channel) {
                         (Source::Mono(file), _) => file,
                         (Source::Stereo { left, .. }, 0) => left,
                         (Source::Stereo { right, .. }, _) => right,
+                        // The model keeps MIDI clips off audio tracks.
+                        (Source::Midi(_), _) => return None,
                     };
-                    ChannelClip {
+                    Some(ChannelClip {
                         file: files.number(&file.name),
                         offset: clip.offset,
                         length: clip.length,
@@ -72,14 +75,14 @@ fn channel_clips(track: &Track, files: &mut FileTable) -> Vec<Vec<ChannelClip>> 
                         gain: db_to_gain(clip.gain_db),
                         fade_in: clip.fade_in,
                         fade_out: clip.fade_out,
-                    }
+                    })
                 })
                 .collect()
         })
         .collect()
 }
 
-/// Renderers for every track of `state` that has a source in `sources`, at `sample_rate`, and
+/// Renderers for every audio track of `state` that has a source in `sources`, at `sample_rate`, and
 /// the files they read. Feed them to disk streams for playback, or to `audio_engine`'s
 /// `RenderFeed`s for export.
 ///
@@ -94,7 +97,7 @@ pub fn track_renderers(
     let mut files = FileTable::default();
     let mut tracks = Vec::with_capacity(state.tracks.len());
     for track in &state.tracks {
-        let Some(&source) = sources.get(&track.id) else {
+        let (Some(&source), Some(_)) = (sources.get(&track.id), track.layout()) else {
             continue;
         };
         let channels = channel_clips(track, &mut files)

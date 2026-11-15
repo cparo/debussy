@@ -21,6 +21,17 @@ length. A track keeps its clips in layer order: a clip that is added, moved, or 
 position goes to the top layer, and a trim, gain or fade change keeps its layer. A clip keeps its
 id when it moves between tracks ([ADR-0042](../adrs/0042-tracks-have-a-fixed-layout-with-paired-mono-files.md)).
 
+A track is audio (mono or stereo) or MIDI, fixed when it is created. A MIDI clip is a window onto
+a shared, immutable note sequence: notes (start, length, channel, pitch, velocity) and control
+changes (frame, channel, controller, value), timed in frames from the sequence's start. Its offset
+and length window the sequence as an audio clip's window a file, so every clip operation and range
+edit applies to it, and a split leaves both pieces sharing one sequence. A note plays if it starts
+inside the window and is cut off at the window's end. In a sequence, channels are 0–15, pitches,
+controllers and values 0–127, velocities 1–127; every note is at least one frame long and ends
+within the sequence; notes are sorted by (start, channel, pitch) and controls by frame; no two
+notes on the same channel and pitch overlap. A MIDI clip has no gain and no fades, and a clip's
+source must match its track's kind ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)).
+
 ## Musical time
 
 A project has one tempo and meter for its whole length: `bpm` beats per minute (20 to 300, to
@@ -74,9 +85,12 @@ or into a new project, which copies the audio files it references ([ADR-0012](..
 ## Routing
 
 The project's routing is part of its editable state, in the same undo history and named versions as
-its tracks. Each track is a source with one output of the track's layout. Every project has one
+its tracks. Each audio track is a source with one output of the track's layout. Every project has one
 stereo output, which cannot be removed. Other nodes are effects, mixers, buses and feedback delays joined
 by connections ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
+
+A MIDI track's output is one event port; it is not routed when the track is created, and it
+connects only to an event input ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)).
 
 A new track is connected to the output, panned centre, in the same undo step, and removing a track
 removes its connections. An effect node is saved as a stable kind id with its non-default parameter
@@ -180,7 +194,12 @@ version 4 the project carries a required `tempo` (`bpm`, `beats_per_bar`, `beat_
 adds automation curves and curve ports (see `docs/architecture/automation.md` "Curves in the
 project"). Since version 6 a connection may carry an `out_handle` and an `in_handle` (`dx`, `dy`) and
 `points` (each `x`, `y`, `in_handle`, `out_handle`), at most 256, every value within ±1,000,000;
-version 5 files migrate unchanged ([ADR-0134](../adrs/0134-wire-handles-are-saved-as-optional-offsets-from-a.md)). Times are
+version 5 files migrate unchanged ([ADR-0134](../adrs/0134-wire-handles-are-saved-as-optional-offsets-from-a.md)). Since version 7 a track carries a `kind`
+(`{"kind":"audio","layout":…}` or `{"kind":"midi"}`) in place of `layout`, the project carries
+`sequences`, each `frames`, `notes` as `[start, length, channel, pitch, velocity]` and `controls` as
+`[frame, channel, controller, value]`, and a clip source may be `{"kind":"midi","sequence":n}`, an
+index into `sequences`; a sequence shared by several clips is saved once. Version 6 files migrate
+to audio tracks and no sequences ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving
@@ -200,7 +219,10 @@ a sample rate outside the four project rates, names over 1024 bytes, and audio f
 not plain names inside `audio/`. Every clip is checked against its track, ids must be unique, and
 every connection must join existing endpoints, never from the output or into a track, with a pan
 from −1 to 1. The tempo and meter must be within the limits in [Musical time](#musical-time). Curves have
-their own limits (see `docs/architecture/automation.md` "Curves in the project"). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+their own limits (see `docs/architecture/automation.md` "Curves in the project"). Load refuses more
+than 1,000,000 MIDI sequences or 2,000,000 notes and control changes over all sequences, counted
+before any is built, a sequence that breaks the rules in [Editing model](#editing-model), a MIDI
+source index out of range, and a sequence no clip refers to ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)). Any failure refuses the whole bundle ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 Opening or creating a bundle first takes its lock, creating a missing `lock` file. A bundle locked
 by another process, or whose lock cannot be taken, is refused
@@ -208,7 +230,7 @@ by another process, or whose lock cannot be taken, is refused
 
 A recording marker, `recording.json`, is limited to 1 MB, 10,000 tracks, one or two files per
 track, plain `.wav` file names inside `audio/`, no file named twice, and the format version this
-build writes. A marker outside these limits is discarded, never refusing the bundle
+build writes. A marker outside these limits, or naming a MIDI track, is discarded, never refusing the bundle
 ([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
 
 ## Cleanup

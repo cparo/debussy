@@ -14,7 +14,7 @@ use signal_graph::{Config, Graph, NodeId as GraphNodeId, Parameter, Runner};
 
 use crate::error::Error;
 use crate::mirror::{Mirror, MirrorError};
-use crate::target::{Key, Target};
+use crate::target::{Key, Shape, Target};
 
 /// The running processing graph for a project, kept in step with its routing.
 pub struct Bridge {
@@ -60,13 +60,13 @@ fn build(state: &State, config: Config) -> Result<(Graph, Runner, Mirror), Error
     Ok((graph, runner, mirror))
 }
 
-/// The sources of every track in `mirror`.
+/// The sources of every audio track in `mirror`; a MIDI track's event source is left out.
 fn sources(mirror: &Mirror) -> BTreeMap<TrackId, GraphNodeId> {
     mirror
         .nodes
         .iter()
-        .filter_map(|(key, node)| match key {
-            Key::Track(track) => Some((*track, node.id)),
+        .filter_map(|(key, node)| match (key, &node.target.shape) {
+            (Key::Track(track), Shape::Source(_)) => Some((*track, node.id)),
             _ => None,
         })
         .collect()

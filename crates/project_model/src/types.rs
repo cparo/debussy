@@ -1,8 +1,11 @@
-//! Identifiers and references to stored audio.
+//! Identifiers, track kinds, and what clips play.
 
 use std::fmt;
+use std::sync::Arc;
 
 use audio_buffers::Layout;
+
+use crate::midi::Sequence;
 
 /// Identifies a track. Ids are never reused within a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -44,7 +47,17 @@ pub struct AudioFile {
     pub frames: u64,
 }
 
-/// The audio a clip plays: one mono file, or a left and a right mono file read together.
+/// What a track holds: audio clips of one channel layout, or MIDI clips (ADR-0144).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackKind {
+    /// Audio clips, mono or stereo.
+    Audio(Layout),
+    /// MIDI clips; the track's output is an event port.
+    Midi,
+}
+
+/// What a clip plays: one mono file, a left and a right mono file read together, or a shared
+/// MIDI sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     /// One channel.
@@ -56,31 +69,37 @@ pub enum Source {
         /// The right channel.
         right: AudioFile,
     },
+    /// A MIDI sequence, shared by every clip cut from the same one.
+    Midi(Arc<Sequence>),
 }
 
 impl Source {
-    /// The channel layout this source plays as.
-    pub fn layout(&self) -> Layout {
+    /// The kind of track this source plays on.
+    pub fn kind(&self) -> TrackKind {
         match self {
-            Source::Mono(_) => Layout::Mono,
-            Source::Stereo { .. } => Layout::Stereo,
+            Source::Mono(_) => TrackKind::Audio(Layout::Mono),
+            Source::Stereo { .. } => TrackKind::Audio(Layout::Stereo),
+            Source::Midi(_) => TrackKind::Midi,
         }
     }
 
-    /// The frames every channel has; for a stereo pair, the shorter file's length.
+    /// The frames every channel has; for a stereo pair, the shorter file's length; for MIDI, the
+    /// sequence's length.
     pub fn frames(&self) -> u64 {
         match self {
             Source::Mono(file) => file.frames,
             Source::Stereo { left, right } => left.frames.min(right.frames),
+            Source::Midi(sequence) => sequence.frames(),
         }
     }
 
-    /// The files the source reads.
+    /// The audio files the source reads; none for MIDI.
     pub fn files(&self) -> impl Iterator<Item = &AudioFile> {
         let (first, second) = match self {
-            Source::Mono(file) => (file, None),
-            Source::Stereo { left, right } => (left, Some(right)),
+            Source::Mono(file) => (Some(file), None),
+            Source::Stereo { left, right } => (Some(left), Some(right)),
+            Source::Midi(_) => (None, None),
         };
-        std::iter::once(first).chain(second)
+        first.into_iter().chain(second)
     }
 }
