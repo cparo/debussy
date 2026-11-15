@@ -13,6 +13,8 @@ use crate::repo;
 pub struct Package {
     /// The package name.
     pub name: String,
+    /// The package version.
+    pub version: String,
     /// The manifest, relative to the repository root.
     pub manifest: String,
     /// The library root, or the binary root if there is no library, relative to the repository
@@ -120,6 +122,7 @@ fn package(value: &Value, root: &Path) -> Result<Package> {
         .with_context(|| format!("reading the dependencies of `{name}`"))?;
     Ok(Package {
         name: name.to_string(),
+        version: string(value, "version")?.to_string(),
         manifest,
         root_source,
         dependencies,
@@ -153,7 +156,7 @@ mod tests {
     use std::error::Error;
 
     const FIXTURE: &str = r#"{"packages": [
-      {"name": "dsp", "manifest_path": "/r/crates/dsp/Cargo.toml",
+      {"name": "dsp", "version": "0.1.0", "manifest_path": "/r/crates/dsp/Cargo.toml",
        "targets": [{"kind": ["test"], "src_path": "/r/crates/dsp/tests/a.rs"},
                    {"kind": ["lib"], "src_path": "/r/crates/dsp/src/lib.rs"}],
        "dependencies": [
@@ -162,7 +165,7 @@ mod tests {
          {"name": "audio_buffers", "source": null, "kind": null, "path": "/r/crates/audio_buffers"},
          {"name": "realtime_guard", "source": null, "kind": "dev", "rename": "guard"},
          {"name": "cc", "source": "git+https://example.com/cc", "kind": "build"}]},
-      {"name": "debussy", "manifest_path": "/r/crates/debussy/Cargo.toml",
+      {"name": "debussy", "version": "0.1.0", "manifest_path": "/r/crates/debussy/Cargo.toml",
        "targets": [{"kind": ["bin"], "src_path": "/r/crates/debussy/src/main.rs"}],
        "dependencies": []}
     ], "workspace_root": "/r"}"#;
@@ -173,6 +176,7 @@ mod tests {
         assert_eq!(packages.len(), 2);
         let dsp = &packages[0];
         assert_eq!(dsp.manifest, "crates/dsp/Cargo.toml");
+        assert_eq!(dsp.version, "0.1.0");
         assert_eq!(dsp.dir(), "crates/dsp");
         assert_eq!(dsp.root_source.as_deref(), Some("crates/dsp/src/lib.rs"));
         let kinds: Vec<_> = dsp
@@ -198,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_parse_rejects_unknown_dependency_kind() {
-        let text = r#"{"packages": [{"name": "a", "manifest_path": "/r/a/Cargo.toml",
+        let text = r#"{"packages": [{"name": "a", "version": "1.0.0", "manifest_path": "/r/a/Cargo.toml",
             "targets": [], "dependencies": [{"name": "b", "kind": "weird"}]}]}"#;
         assert!(parse(text, Path::new("/r")).is_err());
         assert!(parse("{}", Path::new("/r")).is_err());

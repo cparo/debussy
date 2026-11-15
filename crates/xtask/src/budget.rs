@@ -60,6 +60,11 @@ const BUDGETS: &[Budget] = &[
         max_lines: 200,
     },
     Budget {
+        kind: "release notes",
+        matches: |p| in_dir(p, "docs/releases/"),
+        max_lines: 80,
+    },
+    Budget {
         kind: "user guide",
         matches: |p| in_dir(p, "docs/user/"),
         max_lines: 300,
@@ -127,6 +132,7 @@ mod tests {
             Some("architecture section")
         );
         assert_eq!(kind("docs/adrs/0001-x.md"), Some("ADR"));
+        assert_eq!(kind("docs/releases/v0.1.0.md"), Some("release notes"));
         assert_eq!(kind("docs/architecture/sub/x.md"), None);
         assert_eq!(kind("src/main.rs"), None);
     }

@@ -165,4 +165,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0139](0139-midi-starts-with-performance-capture-voiced-by-a.md) | MIDI starts with performance capture voiced by a built-in synth, a sampler or external hardware | Accepted | [Instruments](../architecture/signal-graph.md#instruments) |
 | [ADR-0140](0140-project-archives-are-read-and-written-with-the-zip.md) | Project archives are read and written with the zip crate, deflate only | Accepted | [Project archives](../architecture/project.md#project-archives) |
 | [ADR-0141](0141-a-project-archive-is-a-plain-zip-of-the-bundle.md) | A project archive is a plain zip of the bundle without its cache, opened only under strict limits | Accepted | [Project archives](../architecture/project.md#project-archives) |
+| [ADR-0142](0142-release-notices-are-generated-in-xtask-and.md) | Release notices are generated in xtask and releases are published by a tag-triggered workflow | Accepted | [Releases](../architecture/platform.md#releases) |
 

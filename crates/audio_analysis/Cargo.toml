@@ -1,7 +1,7 @@
 [package]
 name = "audio_analysis"
 description = "Waveform summaries and spectrogram data, and their cache files."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

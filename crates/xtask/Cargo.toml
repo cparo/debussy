@@ -1,7 +1,7 @@
 [package]
 name = "xtask"
 description = "Repository maintenance tasks: documentation checks, ADR creation, commit gate."
-version = "0.0.0"
+version.workspace = true
 publish = false
 edition.workspace = true
 rust-version.workspace = true

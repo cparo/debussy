@@ -48,6 +48,7 @@ file hits its budget, split it by topic; do not raise the limit to fit more in.
 | [Architectural Specification](docs/architecture/) | *How is this built?* Components, contracts, data flow, formats, and the rules a change must respect. `docs/architecture/README.md` is the entry point and a generated table of contents; one file per subsystem holds the content. | A structural fact changes. |
 | [Architectural Decision Records](docs/adrs/) | *Why was it built that way?* Alternatives considered, trade-offs accepted, findings that forced a choice. | A design decision is made. |
 | [Product Brief](docs/product/) | *Who is this for, and what is it not?* The product brief; requirements are not listed up front but discovered and recorded in GitHub issues and ADRs. | The intended users, problems or non-goals change. |
+| [Release Notes](docs/releases/) | *What shipped in a release?* One file per tag, `docs/releases/vX.Y.Z.md`, published as the GitHub Release's notes. | A release is cut. |
 
 Rules:
 

@@ -1,5 +1,6 @@
-//! `cargo xtask bundle`: assembles `Debussy.app` from the release `debussy` binary and the
-//! `Info.plist` template, and signs it ad hoc. See docs/architecture/platform.md "App bundle".
+//! `cargo xtask bundle`: assembles `Debussy.app` from the release `debussy` binary, the
+//! `Info.plist` template and the licence notices, signs it ad hoc, and with `--zip` zips it for a
+//! release. See docs/architecture/platform.md "App bundle" and "Releases".
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,8 +10,10 @@ use anyhow::{Context, Result, bail};
 
 /// The `Info.plist` template, relative to the repository root.
 pub const TEMPLATE: &str = "crates/macos_platform/bundle/Info.plist";
-/// The manifest whose version the bundle carries.
-const MANIFEST: &str = "crates/debussy/Cargo.toml";
+/// The manifest whose `[workspace.package]` version the bundle carries; every crate inherits it.
+const MANIFEST: &str = "Cargo.toml";
+/// The table in [`MANIFEST`] holding the version.
+const VERSION_TABLE: &str = "[workspace.package]";
 /// The placeholder in the template replaced by the version.
 const VERSION_PLACEHOLDER: &str = "@VERSION@";
 
@@ -24,7 +27,7 @@ pub fn build(root: &Path) -> Result<PathBuf> {
         "cargo build --release -p debussy",
     )?;
 
-    let version = package_version(&fs::read_to_string(root.join(MANIFEST)).context(MANIFEST)?)?;
+    let version = version(root)?;
     let template = fs::read_to_string(root.join(TEMPLATE)).context(TEMPLATE)?;
     let plist = info_plist(&template, &version)?;
 
@@ -37,6 +40,8 @@ pub fn build(root: &Path) -> Result<PathBuf> {
     fs::write(app.join("Contents/Info.plist"), plist).context("writing Info.plist")?;
     fs::copy(root.join("target/release/debussy"), macos.join("debussy"))
         .context("copying the debussy binary")?;
+    // Resources go in before signing: the signature seals them.
+    crate::notices::write(root, &app.join("Contents/Resources"))?;
 
     run(
         Command::new("codesign")
@@ -45,6 +50,36 @@ pub fn build(root: &Path) -> Result<PathBuf> {
         "codesign",
     )?;
     Ok(app)
+}
+
+/// Zips a built `app` beside it as `Debussy-<version>-macos-arm64.zip` with `ditto`, which keeps
+/// the signature and extended attributes. Returns the zip's path. Fails on a host that is not
+/// Apple silicon, since the name promises arm64.
+pub fn zip(root: &Path, app: &Path) -> Result<PathBuf> {
+    if std::env::consts::ARCH != "aarch64" {
+        bail!(
+            "the release zip is for Apple silicon; this host is {}",
+            std::env::consts::ARCH
+        );
+    }
+    let dir = app.parent().context("the app has no parent directory")?;
+    let zip = dir.join(zip_name(&version(root)?));
+    if zip.exists() {
+        fs::remove_file(&zip).with_context(|| format!("removing {}", zip.display()))?;
+    }
+    run(
+        Command::new("ditto")
+            .args(["-c", "-k", "--sequesterRsrc", "--keepParent"])
+            .arg(app)
+            .arg(&zip),
+        "ditto",
+    )?;
+    Ok(zip)
+}
+
+/// The release zip's file name for `version`.
+fn zip_name(version: &str) -> String {
+    format!("Debussy-{version}-macos-arm64.zip")
 }
 
 /// Runs a command, failing if it does not succeed.
@@ -58,13 +93,19 @@ fn run(command: &mut Command, what: &str) -> Result<()> {
     Ok(())
 }
 
-/// The `version` of the `[package]` table in a manifest's text.
-fn package_version(manifest: &str) -> Result<String> {
-    let mut in_package = false;
+/// The workspace version, which the bundle and every crate carry.
+pub fn version(root: &Path) -> Result<String> {
+    let manifest = fs::read_to_string(root.join(MANIFEST)).context(MANIFEST)?;
+    table_version(&manifest, VERSION_TABLE)
+}
+
+/// The `version` of the table headed `table` (such as `[workspace.package]`) in a manifest's text.
+fn table_version(manifest: &str, table: &str) -> Result<String> {
+    let mut in_table = false;
     for line in manifest.lines().map(str::trim) {
         if line.starts_with('[') {
-            in_package = line == "[package]";
-        } else if in_package
+            in_table = line == table;
+        } else if in_table
             && let Some(rest) = line.strip_prefix("version")
             && let Some(value) = rest.trim_start().strip_prefix('=')
         {
@@ -75,7 +116,7 @@ fn package_version(manifest: &str) -> Result<String> {
             bail!("{MANIFEST}: version `{value}` is not dotted numbers");
         }
     }
-    bail!("{MANIFEST} has no [package] version")
+    bail!("{MANIFEST} has no {table} version")
 }
 
 /// The template with its version placeholder replaced.
@@ -92,18 +133,32 @@ mod tests {
     use std::error::Error;
 
     #[test]
-    fn test_package_version_reads_the_package_table() -> Result<(), Box<dyn Error>> {
-        let manifest = "[package]\nname = \"debussy\"\nversion = \"1.2.3\"\n\n\
-                        [dependencies]\nversion = \"9\"\n";
-        assert_eq!(package_version(manifest)?, "1.2.3");
+    fn test_table_version_reads_the_named_table() -> Result<(), Box<dyn Error>> {
+        let manifest = "[workspace]\nmembers = [\"crates/*\"]\n\n\
+                        [workspace.package]\nversion = \"1.2.3\"\nedition = \"2024\"\n\n\
+                        [workspace.dependencies]\nversion = \"9\"\n";
+        assert_eq!(table_version(manifest, VERSION_TABLE)?, "1.2.3");
         Ok(())
     }
 
     #[test]
-    fn test_package_version_rejects_missing_or_odd_versions() {
-        assert!(package_version("[package]\nname = \"x\"\n").is_err());
-        assert!(package_version("[package]\nversion.workspace = true\n").is_err());
-        assert!(package_version("[package]\nversion = \"1.0<x>\"\n").is_err());
+    fn test_table_version_rejects_missing_or_odd_versions() {
+        let t = VERSION_TABLE;
+        assert!(table_version("[workspace.package]\nedition = \"2024\"\n", t).is_err());
+        assert!(table_version("[package]\nversion = \"1.0.0\"\n", t).is_err());
+        assert!(table_version("[workspace.package]\nversion = \"1.0<x>\"\n", t).is_err());
+    }
+
+    #[test]
+    fn test_version_reads_the_repository_manifest() -> Result<(), Box<dyn Error>> {
+        let version = version(&crate::repo::root())?;
+        assert_eq!(version.split('.').count(), 3, "{version}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_zip_name_carries_version_and_platform() {
+        assert_eq!(zip_name("0.1.0"), "Debussy-0.1.0-macos-arm64.zip");
     }
 
     #[test]

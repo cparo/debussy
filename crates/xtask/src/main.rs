@@ -15,6 +15,7 @@ mod hooks;
 mod json;
 mod markdown;
 mod metadata;
+mod notices;
 mod repo;
 
 use std::path::Path;
@@ -26,8 +27,10 @@ const USAGE: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
-  bundle                         Build target/release/Debussy.app (release build, Info.plist,
-                                 ad-hoc signature)
+  bundle [--zip]                 Build target/release/Debussy.app (release build, Info.plist,
+                                 licence notices, ad-hoc signature); --zip also writes
+                                 target/release/Debussy-<version>-macos-arm64.zip
+  version                        Print the workspace version
   check                          Check docs (line budgets, docs/architecture/ citations and
                                  links, the ADR index, the architecture table of contents) and
                                  the crate tier and dependency rules
@@ -59,9 +62,21 @@ fn run(args: Vec<String>) -> Result<ExitCode> {
     };
     match command.as_str() {
         "bundle" => {
-            no_arguments(rest)?;
+            let zip = match rest {
+                [] => false,
+                [flag] if flag == "--zip" => true,
+                _ => bail!("bundle takes only --zip"),
+            };
             let app = bundle::build(&root)?;
             println!("built {}", app.display());
+            if zip {
+                println!("zipped {}", bundle::zip(&root, &app)?.display());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        "version" => {
+            no_arguments(rest)?;
+            println!("{}", bundle::version(&root)?);
             Ok(ExitCode::SUCCESS)
         }
         "check" => {

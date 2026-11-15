@@ -3,7 +3,9 @@
 ## Repository tasks (xtask)
 
 Repository maintenance tasks (documentation checks, ADR creation, the commit gate, hook
-installation, assembling [`Debussy.app`](platform.md#app-bundle) with `bundle`) live in `crates/xtask` and run as `cargo xtask <command>`.
+installation, assembling [`Debussy.app`](platform.md#app-bundle) with `bundle`, zipping it for a
+[release](platform.md#releases) with `bundle --zip`, printing the workspace version with
+`version`) live in `crates/xtask` and run as `cargo xtask <command>`.
 
 `crates/xtask` must depend only on the standard library and `anyhow` ([ADR-0002](../adrs/0002-repository-tasks-are-built-in-house-on-std-and.md)).
 
