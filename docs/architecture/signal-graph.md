@@ -115,6 +115,12 @@ buffer; see `docs/architecture/automation.md` "Evaluation"). Connections between
 different types are refused. Track contents are typed in the same way: audio clips are the only
 kind ([ADR-0020](../adrs/0020-ports-and-track-contents-are-typed-so-midi-can-be.md)).
 
+## Instruments
+
+Notes are voiced by built-in instrument nodes (a synthesizer and a sampler playing the user's own
+audio files) or sent to external MIDI ports. Third-party plug-ins (Audio Units) are not hosted
+([ADR-0139](../adrs/0139-midi-starts-with-performance-capture-voiced-by-a.md)).
+
 ## Delay compensation
 
 Each node reports the latency it adds. The engine delays parallel paths so that signals meeting at
