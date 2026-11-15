@@ -133,7 +133,7 @@ macOS presents the bundle as a single document of type `io.github.cparo.debussy.
 
 New projects are created in `~/Music/Debussy` by default, the folder created when missing. Open
 lists the projects there: each directory named `*.debussy` directly inside it that holds a
-`project.json` and is not open in any process (its `lock` is held), newest `project.json`
+`project.json` and is not open in any process (no process holds its `lock`), newest `project.json`
 modification time first, at most 1000 ([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)). A project elsewhere is
 opened through a folder dialog. The app keeps no list of recent projects. ([ADR-0098](../adrs/0098-projects-live-in-music-debussy-and-open-lists-them.md))
 
