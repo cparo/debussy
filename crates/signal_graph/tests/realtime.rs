@@ -178,6 +178,97 @@ fn test_delay_compensation_aligns_parallel_paths() -> TestResult {
 }
 
 #[test]
+fn test_live_source_is_not_compensated() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let live = graph.add_source(Layout::Mono);
+    let clip = graph.add_source(Layout::Mono);
+    let slow = graph.add_node(Box::new(Latency::new(10)));
+    let mix = graph.add_node(Box::new(Gain::new(1.0)?));
+    let sink = graph.add_sink(Layout::Mono);
+    graph.connect(live, 0, mix, 0)?;
+    graph.connect(clip, 0, slow, 0)?;
+    graph.connect(slow, 0, mix, 0)?;
+    graph.connect(mix, 0, sink, 0)?;
+    graph.set_live(live, true)?;
+    graph.commit()?;
+    let mut expected = vec![0.0; 200];
+    expected[0] = 1.0;
+    assert_eq!(
+        render(&mut runner, Some(live), sink, &impulse(200), 64)?,
+        expected
+    );
+    // The playback path still arrives after its own latency.
+    let mut expected = vec![0.0; 200];
+    expected[10] = 1.0;
+    assert_eq!(
+        render(&mut runner, Some(clip), sink, &impulse(200), 64)?,
+        expected
+    );
+    assert_eq!(runner.latency(), 10);
+    Ok(())
+}
+
+#[test]
+fn test_live_path_latency_is_left_out_of_plan_latency() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let live = graph.add_source(Layout::Mono);
+    let slow = graph.add_node(Box::new(Latency::new(10)));
+    let monitor = graph.add_sink(Layout::Mono);
+    let clip = graph.add_source(Layout::Mono);
+    let output = graph.add_sink(Layout::Mono);
+    graph.connect(live, 0, slow, 0)?;
+    graph.connect(slow, 0, monitor, 0)?;
+    graph.connect(clip, 0, output, 0)?;
+    graph.set_live(live, true)?;
+    graph.commit()?;
+    assert_eq!(graph.latency(), 0);
+    // The live path keeps only its own latency; the clip is not delayed to match it.
+    let mut expected = vec![0.0; 200];
+    expected[10] = 1.0;
+    assert_eq!(
+        render(&mut runner, Some(live), monitor, &impulse(200), 64)?,
+        expected
+    );
+    let mut expected = vec![0.0; 200];
+    expected[0] = 1.0;
+    assert_eq!(
+        render(&mut runner, Some(clip), output, &impulse(200), 64)?,
+        expected
+    );
+    Ok(())
+}
+
+#[test]
+fn test_signal_mixed_with_playback_follows_its_compensation() -> TestResult {
+    let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
+    let live = graph.add_source(Layout::Mono);
+    let clip = graph.add_source(Layout::Mono);
+    let mix = graph.add_node(Box::new(Gain::new(1.0)?));
+    let other = graph.add_source(Layout::Mono);
+    let slow = graph.add_node(Box::new(Latency::new(10)));
+    let bus = graph.add_node(Box::new(Gain::new(1.0)?));
+    let sink = graph.add_sink(Layout::Mono);
+    graph.connect(live, 0, mix, 0)?;
+    graph.connect(clip, 0, mix, 0)?;
+    graph.connect(mix, 0, bus, 0)?;
+    graph.connect(other, 0, slow, 0)?;
+    graph.connect(slow, 0, bus, 0)?;
+    graph.connect(bus, 0, sink, 0)?;
+    graph.set_live(live, true)?;
+    graph.commit()?;
+    // Once summed with playback, the live signal is delayed with it to meet the slow path.
+    let mut expected = vec![0.0; 200];
+    expected[10] = 1.0;
+    for source in [live, clip, other] {
+        assert_eq!(
+            render(&mut runner, Some(source), sink, &impulse(200), 64)?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_commit_carries_node_state_over() -> TestResult {
     let (mut graph, mut runner) = Graph::new(Config::new(RATE, 64))?;
     let (counter, _) = Counter::new();

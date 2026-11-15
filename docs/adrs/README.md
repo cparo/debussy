@@ -159,4 +159,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0133](0133-one-process-at-a-time-opens-a-project-enforced-by.md) | One process at a time opens a project, enforced by an advisory lock on a lock file inside the bundle | Accepted | [Project bundle](../architecture/project.md#project-bundle) |
 | [ADR-0134](0134-wire-handles-are-saved-as-optional-offsets-from-a.md) | Wire handles and points are saved on a connection, in project format 6 | Accepted | [Saved format](../architecture/project.md#saved-format) |
 | [ADR-0135](0135-takes-interrupted-by-a-crash-are-recovered-from-a.md) | Takes interrupted by a crash are recovered from a marker file | Accepted | [Take recovery](../architecture/recording.md#take-recovery) |
+| [ADR-0136](0136-delay-compensation-leaves-live-sources-and-the.md) | Delay compensation leaves live sources and the nodes fed only by them undelayed | Accepted | [Delay compensation](../architecture/signal-graph.md#delay-compensation) |
 

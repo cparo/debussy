@@ -45,6 +45,9 @@ pub enum Error {
     /// The node is a source, sink or feedback delay, not a processor.
     #[error("{0} is not a processor")]
     NotAProcessor(NodeId),
+    /// The node is not a source.
+    #[error("{0} is not a source")]
+    NotASource(NodeId),
     /// A feedback-delay time that is not finite or is longer than the longest allowed.
     #[error("a feedback delay of {0} s is not allowed")]
     InvalidDelay(f64),

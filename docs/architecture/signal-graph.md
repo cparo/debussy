@@ -120,3 +120,10 @@ a node are time-aligned, and reports the total output latency ([ADR-0022](../adr
 Latency is compensated on every connection except one that closes a feedback loop: a connection
 into a feedback delay from inside the same cycle. Every sink is delayed to the latest arrival at any
 sink, which is the plan's reported latency. Compensation delays start silent in each new plan ([ADR-0040](../adrs/0040-sources-and-sinks-are-graph-nodes-declarations-are.md)).
+
+A source can be marked live. A node is live-only when it is a live source, or when it has at least
+one connection in that does not close a loop and every such connection comes from a live-only
+node. A connection from a live-only node is not compensated, and arrival times and the plan's
+latency count only connections from nodes that are not live-only. Downstream of a node that is not
+live-only, a live signal it mixes is compensated with the rest of its output. Automation on a
+live-only node is evaluated at the arrival of its own live signals ([ADR-0136](../adrs/0136-delay-compensation-leaves-live-sources-and-the.md)).

@@ -7,7 +7,7 @@
 //! holds, and the new plan committed. A change the scratch graph refuses leaves both the running
 //! graph and the model as they were.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use project_model::{NodeId, Session, State, TrackId};
 use signal_graph::{Config, Graph, NodeId as GraphNodeId, Parameter, Runner};
@@ -22,6 +22,8 @@ pub struct Bridge {
     mirror: Mirror,
     /// Whether the last sync's plan is still waiting to be committed.
     pending: bool,
+    /// The tracks whose sources are marked live (ADR-0136).
+    monitored: BTreeSet<TrackId>,
 }
 
 /// A graph built from a state, with nothing running it yet: for offline render.
@@ -82,6 +84,7 @@ impl Bridge {
             graph,
             mirror,
             pending: true,
+            monitored: BTreeSet::new(),
         };
         bridge.commit()?;
         Ok((bridge, runner))
@@ -154,8 +157,36 @@ impl Bridge {
         let (mut scratch, _runner) = Graph::new(*self.graph.config()).map_err(Error::Graph)?;
         Mirror::build(&mut scratch, &target).map_err(refused)?;
         self.mirror.sync(&mut self.graph, &target).map_err(failed)?;
+        // A recreated source starts unmarked.
+        self.mark_live()?;
         self.pending = true;
         self.commit()
+    }
+
+    /// Marks the sources of `tracks` as live input, and every other track's as not, so delay
+    /// compensation leaves monitored input undelayed (`docs/architecture/recording.md` "Input
+    /// monitoring", ADR-0136). The marks are kept across later syncs and committed now.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Graph`].
+    pub fn set_monitored(&mut self, tracks: BTreeSet<TrackId>) -> Result<(), Error> {
+        if tracks != self.monitored {
+            self.monitored = tracks;
+            self.mark_live()?;
+            self.pending = true;
+        }
+        self.commit()
+    }
+
+    /// Applies `monitored` to every track's source.
+    fn mark_live(&mut self) -> Result<(), Error> {
+        for (track, source) in sources(&self.mirror) {
+            self.graph
+                .set_live(source, self.monitored.contains(&track))
+                .map_err(Error::Graph)?;
+        }
+        Ok(())
     }
 
     /// Sends the synced graph to the real-time side if a plan is waiting. A full plan queue is
