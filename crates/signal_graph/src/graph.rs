@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use audio_buffers::{Consumer, Layout, Producer, queue};
 use modulation::Curve;
@@ -93,6 +94,8 @@ pub struct Graph {
     frames_per_whole_note: f64,
     plans: Producer<Box<Plan>>,
     retired: Consumer<Box<Plan>>,
+    /// Events dropped because a buffer was full, counted by every plan.
+    overflows: Arc<AtomicU64>,
 }
 
 impl Graph {
@@ -110,8 +113,15 @@ impl Graph {
         audio_buffers::Block::new(Layout::Mono, config.max_frames)?;
         let (plans, incoming) = queue::channel(config.plan_queue)?;
         let (retire, retired) = queue::channel(config.plan_queue + 1)?;
+        let overflows = Arc::new(AtomicU64::new(0));
         let runner = Runner::new(
-            Plan::new(Vec::new(), Vec::new(), Vec::new(), 0),
+            Plan::new(
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                0,
+                Arc::clone(&overflows),
+            ),
             incoming,
             retire,
             config,
@@ -127,6 +137,7 @@ impl Graph {
             frames_per_whole_note: default_whole_note(config.sample_rate),
             plans,
             retired,
+            overflows,
         };
         Ok((graph, runner))
     }
@@ -288,7 +299,33 @@ impl Graph {
         })
     }
 
-    /// Marks source `id` as live input, or not, from the next commit. Delay compensation does not
+    /// Adds an event source: one event output the engine fills each block with
+    /// [`Runner::event_source_mut`], such as a MIDI clip's playback or a MIDI input.
+    pub fn add_event_source(&mut self) -> NodeId {
+        self.insert(Entry {
+            kind: EntryKind::Source { live: false },
+            inputs: Vec::new(),
+            outputs: vec![Port::event("out")],
+            latency: 0,
+            parameters: Vec::new(),
+            uses_tempo: false,
+        })
+    }
+
+    /// Adds an event sink: one event input the engine reads each block with
+    /// [`Runner::event_sink`], such as a MIDI output port.
+    pub fn add_event_sink(&mut self) -> NodeId {
+        self.insert(Entry {
+            kind: EntryKind::Sink,
+            inputs: vec![Port::event("in")],
+            outputs: Vec::new(),
+            latency: 0,
+            parameters: Vec::new(),
+            uses_tempo: false,
+        })
+    }
+
+    /// Marks source `id`, audio or event, as live input, or not, from the next commit. Delay compensation does not
     /// delay a live source, nor nodes fed only by live sources
     /// (`docs/architecture/signal-graph.md` "Delay compensation").
     ///
@@ -542,6 +579,7 @@ impl Graph {
             &self.controls,
             &self.live,
             &self.config,
+            &self.overflows,
         )?;
         let (ids, latency) = (plan.ids(), plan.latency);
         match self.plans.try_push(Box::new(plan)) {
@@ -575,6 +613,12 @@ impl Graph {
     /// The latency from sources to sinks of the last committed plan, in frames.
     pub fn latency(&self) -> usize {
         self.latency
+    }
+
+    /// How many events have been dropped since the graph was made because an event buffer was
+    /// full: a node's output, a merged input, or a compensated connection's queue.
+    pub fn event_overflows(&self) -> u64 {
+        self.overflows.load(Ordering::Relaxed)
     }
 
     /// Takes back the nodes of a plan that was never sent.

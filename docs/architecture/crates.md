@@ -10,6 +10,7 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
 | `audio_buffers` | real-time core | Sample blocks, preallocated block pools, lock-free single-producer/single-consumer queues |
 | `dsp` | real-time core | Resampling, FFT, dither, filter and oscillator primitives |
 | `modulation` | real-time core | Modulation sources as plain DSP primitives: the LFO and tempo-sync arithmetic ([ADR-0118](../adrs/0118-modulation-sources-live-in-a-new-real-time-core.md)) |
+| `midi` | real-time core | MIDI 1.0 channel messages and fixed-capacity, frame-stamped event buffers ([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)) |
 | `audio_effects` | real-time core | The built-in effect nodes, built from `dsp` and `modulation`: mixer, filters, equaliser, dynamics, amplifier, delay, reverb, chorus, flanger, and the registry by kind id |
 | `signal_graph` | real-time core | The processing graph: nodes, typed ports, cycle rules, processing plans, delay compensation, panning and summing |
 | `audio_engine` | real-time core | Running a processing plan each block: transport, clip playback from streamed buffers, recording capture, input monitoring, offline rendering |

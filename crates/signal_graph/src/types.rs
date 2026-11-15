@@ -33,6 +33,9 @@ pub enum PortType {
     /// An automation curve's value, driving a parameter (`docs/architecture/automation.md`
     /// "Evaluation"). Has no buffer; its layout is unused.
     Control,
+    /// Time-stamped MIDI 1.0 channel messages, in a fixed-capacity buffer per block
+    /// (`midi::EventBuffer`). Its layout is unused.
+    Event,
 }
 
 /// One input or output of a node: its name, its type and, for audio, its fixed channel layout.
@@ -61,6 +64,15 @@ impl Port {
         Port {
             name: name.to_owned(),
             kind: PortType::Control,
+            layout: Layout::Mono,
+        }
+    }
+
+    /// An event port.
+    pub fn event(name: &str) -> Self {
+        Port {
+            name: name.to_owned(),
+            kind: PortType::Event,
             layout: Layout::Mono,
         }
     }

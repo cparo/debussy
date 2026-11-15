@@ -2,18 +2,27 @@
 //! (`docs/architecture/signal-graph.md` "Processing graph").
 //!
 //! A plan is built off the real-time thread by `compile`, with every buffer and delay line it
-//! needs. Running it allocates nothing: buffers are only cleared, summed into and handed to nodes.
+//! needs. Running it allocates nothing: buffers are only cleared, summed or merged into and
+//! handed to nodes.
+//!
+//! Event buffers are emptied at the start of each block and filled stretch by stretch. An event
+//! connection's events in a stretch are delayed by its compensation and merged into the input in
+//! frame order; events at the same frame keep the order of the connections' ids. An event a full
+//! buffer cannot take is dropped and counted in the plan's overflow counter.
 //!
 //! A plan with curve bindings runs in sub-blocks split at timeline frames that are multiples of
 //! [`CONTROL_PERIOD`], setting each bound parameter's target at every split
 //! (`docs/architecture/automation.md` "Evaluation").
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use audio_buffers::{Block, Layout};
 use dsp::FOLD_DOWN_GAIN;
+use midi::EventBuffer;
 use modulation::{Cursor, Curve};
 
+use crate::buffers::{EventDelay, PortBuffer};
 use crate::delay::DelayLine;
 use crate::node::{Inputs, Node, Outputs};
 use crate::param::{Parameter, map_to_parameter};
@@ -76,20 +85,31 @@ pub(crate) struct Feed {
     pub(crate) output: usize,
     /// The input port it goes to.
     pub(crate) input: usize,
-    /// Its compensation delay.
-    pub(crate) line: DelayLine,
-    /// The left and right gains when a mono signal enters a stereo input.
-    pub(crate) pan: (f32, f32),
+    /// What it carries, with its compensation delay.
+    pub(crate) signal: Signal,
+}
+
+/// What a feed carries, with the compensation delay of its type.
+pub(crate) enum Signal {
+    /// Audio.
+    Audio {
+        /// Its compensation delay.
+        line: DelayLine,
+        /// The left and right gains when a mono signal enters a stereo input.
+        pan: (f32, f32),
+    },
+    /// Events.
+    Events(EventDelay),
 }
 
 /// One node of a plan with its buffers.
 pub(crate) struct Slot {
     pub(crate) id: NodeId,
     pub(crate) kind: Kind,
-    /// One buffer per input port, holding the summed signal arriving there.
-    pub(crate) inputs: Vec<Block>,
-    /// One buffer per output port.
-    pub(crate) outputs: Vec<Block>,
+    /// One buffer per input port, by port index, holding the signal arriving there.
+    pub(crate) inputs: Vec<PortBuffer>,
+    /// One buffer per output port, by port index.
+    pub(crate) outputs: Vec<PortBuffer>,
     pub(crate) feeds: Vec<Feed>,
     /// The slot in the previous plan whose node or delay state this one takes over.
     pub(crate) carry_from: Option<usize>,
@@ -121,6 +141,8 @@ pub(crate) struct Plan {
     position: i64,
     /// Whether the timeline advances through the block.
     playing: bool,
+    /// Events dropped because a buffer was full, shared with the graph.
+    overflows: Arc<AtomicU64>,
 }
 
 impl Plan {
@@ -130,6 +152,7 @@ impl Plan {
         steps: Vec<Step>,
         bindings: Vec<Binding>,
         latency: usize,
+        overflows: Arc<AtomicU64>,
     ) -> Self {
         Plan {
             slots,
@@ -139,6 +162,7 @@ impl Plan {
             frames: 0,
             position: 0,
             playing: false,
+            overflows,
         }
     }
 
@@ -185,7 +209,8 @@ impl Plan {
     }
 
     /// Silences everything the plan holds of past signals: every node's state, every feedback
-    /// delay, and every compensation delay. Allocation-free.
+    /// delay, every compensation delay and pending event, and this block's events.
+    /// Allocation-free.
     pub(crate) fn reset(&mut self) {
         for slot in &mut self.slots {
             match &mut slot.kind {
@@ -194,25 +219,32 @@ impl Plan {
                 Kind::Node(None) | Kind::Source | Kind::Sink | Kind::Curve => {}
             }
             for feed in &mut slot.feeds {
-                feed.line.clear();
+                match &mut feed.signal {
+                    Signal::Audio { line, .. } => line.clear(),
+                    Signal::Events(delay) => delay.clear(),
+                }
+            }
+            for buffer in slot.inputs.iter_mut().chain(slot.outputs.iter_mut()) {
+                if let Some(events) = buffer.events_mut() {
+                    events.clear();
+                }
             }
         }
     }
 
-    /// Sets the length of the coming block, which must fit every buffer.
+    /// Starts a block of `frames`, which must fit every buffer: sets every audio buffer's length
+    /// and empties every event buffer.
     pub(crate) fn set_frames(&mut self, frames: usize) {
         self.frames = frames;
         for slot in &mut self.slots {
-            for block in slot.inputs.iter_mut().chain(slot.outputs.iter_mut()) {
-                // Every buffer holds the graph's largest block, which `frames` was checked
-                // against.
-                let _ = block.set_frames(frames);
+            for buffer in slot.inputs.iter_mut().chain(slot.outputs.iter_mut()) {
+                buffer.begin_block(frames);
             }
         }
     }
 
     /// The output buffer of source `id`.
-    pub(crate) fn source_mut(&mut self, id: NodeId) -> Option<&mut Block> {
+    fn source_buffer(&mut self, id: NodeId) -> Option<&mut PortBuffer> {
         let slot = self.slots.iter_mut().find(|slot| slot.id == id)?;
         match slot.kind {
             Kind::Source => slot.outputs.first_mut(),
@@ -221,12 +253,32 @@ impl Plan {
     }
 
     /// The input buffer of sink `id`.
-    pub(crate) fn sink(&self, id: NodeId) -> Option<&Block> {
+    fn sink_buffer(&self, id: NodeId) -> Option<&PortBuffer> {
         let slot = self.slots.iter().find(|slot| slot.id == id)?;
         match slot.kind {
             Kind::Sink => slot.inputs.first(),
             _ => None,
         }
+    }
+
+    /// The audio buffer of audio source `id`.
+    pub(crate) fn source_mut(&mut self, id: NodeId) -> Option<&mut Block> {
+        self.source_buffer(id)?.audio_mut()
+    }
+
+    /// The audio buffer of audio sink `id`.
+    pub(crate) fn sink(&self, id: NodeId) -> Option<&Block> {
+        self.sink_buffer(id)?.audio()
+    }
+
+    /// The event buffer of event source `id`.
+    pub(crate) fn event_source_mut(&mut self, id: NodeId) -> Option<&mut EventBuffer> {
+        self.source_buffer(id)?.events_mut()
+    }
+
+    /// The event buffer of event sink `id`.
+    pub(crate) fn event_sink(&self, id: NodeId) -> Option<&EventBuffer> {
+        self.sink_buffer(id)?.events()
     }
 
     /// Runs the plan over the current block. With bindings, while playing, the block is split
@@ -242,17 +294,16 @@ impl Plan {
             bindings,
             position,
             playing,
+            overflows,
             ..
         } = self;
-        if bindings.is_empty() {
-            run_steps(slots, steps, 0, frames);
-            return;
-        }
-        if !*playing {
+        let overflows: &AtomicU64 = overflows;
+        if bindings.is_empty() || !*playing {
             for binding in bindings.iter_mut() {
                 binding.drive(*position, frames);
             }
-            run_steps(slots, steps, 0, frames);
+            run_steps(slots, steps, 0, frames, overflows);
+            end_block(slots, frames);
             return;
         }
         let mut start = 0;
@@ -265,20 +316,36 @@ impl Plan {
                 binding.drive(next, to_next);
             }
             let length = to_next.min(frames - start);
-            run_steps(slots, steps, start, length);
+            run_steps(slots, steps, start, length, overflows);
             start += length;
+        }
+        end_block(slots, frames);
+    }
+}
+
+/// Ends a block of `frames`: every pending event becomes due that much sooner.
+fn end_block(slots: &mut [Slot], frames: usize) {
+    for feed in slots.iter_mut().flat_map(|slot| slot.feeds.iter_mut()) {
+        if let Signal::Events(delay) = &mut feed.signal {
+            delay.end_block(frames);
         }
     }
 }
 
 /// Runs every step over `start..start + frames`.
-fn run_steps(slots: &mut [Slot], steps: &[Step], start: usize, frames: usize) {
+fn run_steps(
+    slots: &mut [Slot],
+    steps: &[Step],
+    start: usize,
+    frames: usize,
+    overflows: &AtomicU64,
+) {
     let end = start + frames;
     for step in steps {
         match step {
             Step::Run(index) => {
-                gather(slots, *index, start, frames);
-                run(&mut slots[*index], start, frames);
+                gather(slots, *index, start, frames, overflows);
+                run(&mut slots[*index], start, frames, overflows);
             }
             Step::Cycle {
                 delays,
@@ -292,11 +359,11 @@ fn run_steps(slots: &mut [Slot], steps: &[Step], start: usize, frames: usize) {
                         emit(&mut slots[delay], offset, length);
                     }
                     for &member in members {
-                        gather(slots, member, offset, length);
-                        run(&mut slots[member], offset, length);
+                        gather(slots, member, offset, length, overflows);
+                        run(&mut slots[member], offset, length, overflows);
                     }
                     for &delay in delays {
-                        gather(slots, delay, offset, length);
+                        gather(slots, delay, offset, length, overflows);
                         absorb(&mut slots[delay], offset, length);
                     }
                     offset += length;
@@ -306,12 +373,12 @@ fn run_steps(slots: &mut [Slot], steps: &[Step], start: usize, frames: usize) {
     }
 }
 
-/// Sums every feed into slot `index`'s inputs over `start..start + frames`.
-fn gather(slots: &mut [Slot], index: usize, start: usize, frames: usize) {
+/// Sums or merges every feed into slot `index`'s inputs over `start..start + frames`.
+fn gather(slots: &mut [Slot], index: usize, start: usize, frames: usize, overflows: &AtomicU64) {
     // Taking the vectors leaves empty ones, which neither allocate nor free.
     let mut inputs = std::mem::take(&mut slots[index].inputs);
     let mut feeds = std::mem::take(&mut slots[index].feeds);
-    for block in &mut inputs {
+    for block in inputs.iter_mut().filter_map(PortBuffer::audio_mut) {
         for channel in 0..block.channels() {
             if let Some(range) = block
                 .channel_mut(channel)
@@ -323,16 +390,32 @@ fn gather(slots: &mut [Slot], index: usize, start: usize, frames: usize) {
     }
     for feed in &mut feeds {
         let source = &slots[feed.from].outputs[feed.output];
-        accumulate(source, &mut inputs[feed.input], feed, start, frames);
+        match (source, &mut inputs[feed.input], &mut feed.signal) {
+            (PortBuffer::Audio(source), PortBuffer::Audio(target), Signal::Audio { line, pan }) => {
+                accumulate(source, target, line, *pan, start, frames);
+            }
+            (PortBuffer::Events(source), PortBuffer::Events(target), Signal::Events(delay)) => {
+                delay.carry(source, target, start, frames, overflows);
+            }
+            // Connections join ports of one type, so nothing else occurs.
+            _ => {}
+        }
     }
     slots[index].inputs = inputs;
     slots[index].feeds = feeds;
 }
 
-/// Adds `source`, delayed by the feed's line and converted to `target`'s layout, into `target`.
-fn accumulate(source: &Block, target: &mut Block, feed: &mut Feed, start: usize, frames: usize) {
+/// Adds `source`, delayed by `line` and converted to `target`'s layout (a mono source panned
+/// with `pan`), into `target`.
+fn accumulate(
+    source: &Block,
+    target: &mut Block,
+    line: &mut DelayLine,
+    pan: (f32, f32),
+    start: usize,
+    frames: usize,
+) {
     let range = start..start + frames;
-    let line = &mut feed.line;
     let (Some(first), second) = (source.channel(0), source.channel(1)) else {
         return;
     };
@@ -365,8 +448,8 @@ fn accumulate(source: &Block, target: &mut Block, feed: &mut Feed, start: usize,
                         *r += line.exchange(1, second[t]);
                     }
                     None => {
-                        *l += a * feed.pan.0;
-                        *r += a * feed.pan.1;
+                        *l += a * pan.0;
+                        *r += a * pan.1;
                     }
                 }
                 line.advance();
@@ -376,15 +459,15 @@ fn accumulate(source: &Block, target: &mut Block, feed: &mut Feed, start: usize,
 }
 
 /// Runs a slot over `start..start + frames`, its inputs already gathered.
-fn run(slot: &mut Slot, start: usize, frames: usize) {
+fn run(slot: &mut Slot, start: usize, frames: usize, overflows: &AtomicU64) {
     match &mut slot.kind {
         Kind::Node(Some(node)) => {
             let inputs = Inputs::new(&slot.inputs, start, frames);
-            let mut outputs = Outputs::new(&mut slot.outputs, start, frames);
+            let mut outputs = Outputs::new(&mut slot.outputs, start, frames, overflows);
             node.process(&inputs, &mut outputs);
         }
         Kind::Node(None) => {
-            for block in &mut slot.outputs {
+            for block in slot.outputs.iter_mut().filter_map(PortBuffer::audio_mut) {
                 block.clear();
             }
         }
@@ -393,8 +476,9 @@ fn run(slot: &mut Slot, start: usize, frames: usize) {
             let mut offset = start;
             while offset < start + frames {
                 let length = line.length().min(start + frames - offset);
-                if let (Some(input), Some(output)) = (slot.inputs.first(), slot.outputs.first_mut())
-                {
+                let input = slot.inputs.first().and_then(PortBuffer::audio);
+                let output = slot.outputs.first_mut().and_then(PortBuffer::audio_mut);
+                if let (Some(input), Some(output)) = (input, output) {
                     line.emit(output, offset, length);
                     line.absorb(input, offset, length);
                 }
@@ -407,14 +491,16 @@ fn run(slot: &mut Slot, start: usize, frames: usize) {
 
 /// Writes a feedback delay's output for `start..start + frames` from what it already holds.
 fn emit(slot: &mut Slot, start: usize, frames: usize) {
-    if let (Kind::Delay(line), Some(output)) = (&slot.kind, slot.outputs.first_mut()) {
+    let output = slot.outputs.first_mut().and_then(PortBuffer::audio_mut);
+    if let (Kind::Delay(line), Some(output)) = (&slot.kind, output) {
         line.emit(output, start, frames);
     }
 }
 
 /// Stores a feedback delay's gathered input for `start..start + frames`.
 fn absorb(slot: &mut Slot, start: usize, frames: usize) {
-    if let (Kind::Delay(line), Some(input)) = (&mut slot.kind, slot.inputs.first()) {
+    let input = slot.inputs.first().and_then(PortBuffer::audio);
+    if let (Kind::Delay(line), Some(input)) = (&mut slot.kind, input) {
         line.absorb(input, start, frames);
     }
 }

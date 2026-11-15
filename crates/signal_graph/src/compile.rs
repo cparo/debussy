@@ -8,7 +8,8 @@
 //! from a node that is not live-only is delayed by the difference between its source's departure
 //! and its target's arrival, so every node sees its playback inputs aligned. Sinks are all aligned
 //! to the latest arrival at any sink, which is the plan's latency. A loop-closing connection, or
-//! one from a live-only node, is not compensated.
+//! one from a live-only node, is not compensated. An event connection is compensated like an
+//! audio one, by shifting its events' frames.
 //!
 //! Each curve-to-parameter connection becomes a binding that evaluates its curve at the timeline
 //! frame minus the node's arrival time (`docs/architecture/automation.md` "Evaluation"). For a
@@ -16,15 +17,19 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+
+use midi::{EVENT_CAPACITY, EventBuffer};
 
 use dsp::pan_gains;
 
+use crate::buffers::{EventDelay, PortBuffer};
 use crate::delay::{DelayLine, feedback_delay_frames};
 use crate::error::Error;
 use crate::graph::{Connection, ControlConnection, Entry, EntryKind, automatable};
-use crate::plan::{Binding, Feed, Kind, Plan, Slot, Step};
+use crate::plan::{Binding, Feed, Kind, Plan, Signal, Slot, Step};
 use crate::topology::{self, Group};
-use crate::types::{Config, ConnectionId, NodeId};
+use crate::types::{Config, ConnectionId, NodeId, Port, PortType};
 
 /// Checks that the connections form no cycle without a feedback delay.
 ///
@@ -56,8 +61,9 @@ fn numbered(
     (edges, is_delay)
 }
 
-/// Compiles the graph into a plan. Nodes not yet in a plan move into it; nodes already in the
-/// plan at `live` (its slot order) are marked to be carried over from it.
+/// Compiles the graph into a plan that counts dropped events in `overflows`. Nodes not yet in a
+/// plan move into it; nodes already in the plan at `live` (its slot order) are marked to be
+/// carried over from it.
 ///
 /// # Errors
 ///
@@ -69,6 +75,7 @@ pub(crate) fn compile(
     controls: &BTreeMap<ConnectionId, ControlConnection>,
     live: &[NodeId],
     config: &Config,
+    overflows: &Arc<AtomicU64>,
 ) -> Result<Plan, Error> {
     let (edges, is_delay) = numbered(nodes, connections);
     let analysis = topology::analyse(nodes.len(), &edges, &is_delay)?;
@@ -124,13 +131,20 @@ pub(crate) fn compile(
 
     let mut slots = Vec::with_capacity(entries.len());
     for (&id, entry) in nodes.keys().zip(&entries) {
-        // Control ports have no buffer.
-        let blocks = |ports: &[crate::types::Port]| {
+        let blocks = |ports: &[Port]| -> Result<Vec<PortBuffer>, Error> {
             ports
                 .iter()
-                .filter(|port| port.kind == crate::types::PortType::Audio)
-                .map(|port| audio_buffers::Block::new(port.layout, config.max_frames))
-                .collect::<Result<Vec<_>, _>>()
+                .map(|port| {
+                    Ok(match port.kind {
+                        PortType::Audio => PortBuffer::Audio(audio_buffers::Block::new(
+                            port.layout,
+                            config.max_frames,
+                        )?),
+                        PortType::Event => PortBuffer::Events(EventBuffer::new(EVENT_CAPACITY)),
+                        PortType::Control => PortBuffer::None,
+                    })
+                })
+                .collect()
         };
         let kind = match entry.kind {
             EntryKind::FeedbackDelay { .. } => Kind::Delay(DelayLine::new(
@@ -163,13 +177,19 @@ pub(crate) fn compile(
         } else {
             target - departure
         };
-        let channels = entries[from].outputs[connection.output].layout.channels();
+        let port = &entries[from].outputs[connection.output];
+        let signal = match port.kind {
+            PortType::Event => Signal::Events(EventDelay::new(compensation)),
+            _ => Signal::Audio {
+                line: DelayLine::new(port.layout.channels(), compensation),
+                pan: pan_gains(connection.pan),
+            },
+        };
         slots[to].feeds.push(Feed {
             from,
             output: connection.output,
             input: connection.input,
-            line: DelayLine::new(channels, compensation),
-            pan: pan_gains(connection.pan),
+            signal,
         });
     }
 
@@ -221,5 +241,11 @@ pub(crate) fn compile(
             slot.carry_from = None;
         }
     }
-    Ok(Plan::new(slots, steps, bindings, latency))
+    Ok(Plan::new(
+        slots,
+        steps,
+        bindings,
+        latency,
+        Arc::clone(overflows),
+    ))
 }
