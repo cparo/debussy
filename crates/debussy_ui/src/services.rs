@@ -179,6 +179,15 @@ pub trait Services {
     /// A message for the status line.
     fn save(&mut self, session: &Session) -> Result<(), String>;
 
+    /// Asks where to write a project archive through a save dialog, saves `session`, then writes
+    /// the project there as one file (`docs/architecture/project.md` "Project archives").
+    /// Returns the archive's file name; `None` if the user cancelled.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line; no archive is left behind.
+    fn archive(&mut self, session: &Session) -> Result<Option<String>, String>;
+
     /// Asks the user for files to import, then imports and summarises them. An empty list if
     /// the user cancelled.
     ///

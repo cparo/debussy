@@ -34,6 +34,8 @@ struct Calls {
     samples: Vec<(String, u64, usize)>,
     /// Each export's path and settings.
     exports: Vec<(PathBuf, ExportSettings)>,
+    /// How many times Share/Archive… ran.
+    archives: usize,
     /// Whether the save dialog is cancelled.
     export_cancelled: bool,
     /// Whether MP3 is offered.
@@ -200,6 +202,12 @@ impl Services for Fake {
 
     fn mp3_available(&mut self) -> bool {
         self.calls.borrow().mp3
+    }
+
+    fn archive(&mut self, _session: &Session) -> Result<Option<String>, String> {
+        let mut calls = self.calls.borrow_mut();
+        calls.archives += 1;
+        Ok((!calls.export_cancelled).then(|| "Song.debussy.zip".to_owned()))
     }
 
     fn pick_export_path(&mut self, settings: &ExportSettings) -> Option<PathBuf> {
@@ -737,6 +745,18 @@ fn test_export_and_device_choice() -> Result<(), Box<dyn Error>> {
     block(&mut processor)?;
     app.update(Message::Device(interface));
     assert_eq!(calls.borrow().device.as_deref(), Some("b"));
+    Ok(())
+}
+
+#[test]
+fn test_archive_reports_the_file_and_stays_quiet_when_cancelled() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, calls, _) = app()?;
+    app.update(Message::Archive);
+    assert_eq!(app.status(), Some("Archived Song.debussy.zip"));
+    calls.borrow_mut().export_cancelled = true;
+    app.update(Message::Archive);
+    assert_eq!(app.status(), None);
+    assert_eq!(calls.borrow().archives, 2);
     Ok(())
 }
 

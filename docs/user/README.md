@@ -184,6 +184,19 @@ restart Debussy; **MP3** then appears among the export formats.
 
 A command-line export renders the whole project and exits without opening the window.
 
+## Sharing a project
+
+A project is a folder that the Finder shows as one file, which cloud drives and chat apps may not
+handle. To send one, choose **Share/Archive…** from the ≡ menu (while stopped) and pick where to
+save: Debussy saves the project and writes it as one `Song.debussy.zip` file, with its audio
+unchanged and without the waveform caches, which are rebuilt on opening.
+
+To open an archive, choose **Open…**, then **Browse…**, and pick the `.zip` file. Debussy copies
+the project into `~/Music/Debussy` (as `Song 2` if `Song` is already there) and opens it. Double-
+clicking the archive in the Finder also unzips it into a project you can open. Debussy only opens
+archives that hold a single project and nothing else, so an archive re-zipped by another tool may
+be refused; unzip it and open the project instead.
+
 ## Not yet available
 
 Punch-in and loop recording, editing clips in the window, and automation.

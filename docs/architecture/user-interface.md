@@ -26,7 +26,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
 - **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste
   (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new project and open (see
-  [Application startup](startup.md#application-startup)), import, export, export mono, and quit.
+  [Application startup](startup.md#application-startup)), import, export, export mono, share/archive
+  (see [Project archives](project.md#project-archives)), and quit.
 - **Bottom bar:** the audio device button, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the click button, the position bar, the playhead's time, and the
   status line ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). The

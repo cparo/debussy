@@ -163,4 +163,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0137](0137-stop-and-pause-silence-the-plan-s-tails-at-once.md) | Stop and pause silence the plan's tails at once | Accepted | [Transport](../architecture/engine.md#transport) |
 | [ADR-0138](0138-the-first-release-is-an-unsigned-github-build.md) | The first release is an unsigned GitHub build gated only on single-file project archives | Accepted | [Releases](../architecture/platform.md#releases) |
 | [ADR-0139](0139-midi-starts-with-performance-capture-voiced-by-a.md) | MIDI starts with performance capture voiced by a built-in synth, a sampler or external hardware | Accepted | [Instruments](../architecture/signal-graph.md#instruments) |
+| [ADR-0140](0140-project-archives-are-read-and-written-with-the-zip.md) | Project archives are read and written with the zip crate, deflate only | Accepted | [Project archives](../architecture/project.md#project-archives) |
+| [ADR-0141](0141-a-project-archive-is-a-plain-zip-of-the-bundle.md) | A project archive is a plain zip of the bundle without its cache, opened only under strict limits | Accepted | [Project archives](../architecture/project.md#project-archives) |
 
