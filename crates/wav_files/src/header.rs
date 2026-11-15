@@ -163,7 +163,7 @@ fn next_chunk(pos: u64, size: u64) -> Result<u64, Error> {
         .ok_or(Error::SizeOverflow)
 }
 
-fn parse_fmt(b: &[u8], id: ChunkId, size: u64) -> Result<Spec, Error> {
+pub(crate) fn parse_fmt(b: &[u8], id: ChunkId, size: u64) -> Result<Spec, Error> {
     let mut tag = le16(b, 0);
     let channels = le16(b, 2);
     let sample_rate = le32(b, 4);

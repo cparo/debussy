@@ -523,6 +523,7 @@ impl App {
         app.refresh_devices();
         app.refresh_lanes();
         app.sync_click();
+        app.recover_takes();
         app
     }
 
@@ -793,7 +794,7 @@ impl App {
 
     /// Saves the project if the session changed since the last save or attempt. A failure goes
     /// to the status line and is not retried until the next change.
-    fn autosave(&mut self) {
+    pub(crate) fn autosave(&mut self) {
         let revision = self.session.revision();
         if revision == self.saved_revision {
             return;

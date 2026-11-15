@@ -12,11 +12,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_effects::Mode;
-use audio_engine::{Engine, Processor, Streams, TakeSink, TrackFeeds, TransportState};
+use audio_engine::{Engine, Processor, Streams, TakeInfo, TakeSink, TrackFeeds, TransportState};
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
-    ImportedTrack, Menu, Message, MixerFocus, NewNode, Renaming, SPECTRUM_BANDS, Selection,
-    Services, Spectrum, TakeFiles, TakeStatus,
+    ImportedTrack, Menu, Message, MixerFocus, NewNode, PassMarker, Recovered, RecoveredPass,
+    Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
 };
 use engine_bridge::Bridge;
 use project_model::{AudioFile, Clip, NodeId, NodeKind, Session, Source, State, TrackId};
@@ -56,6 +56,12 @@ struct Calls {
     started: Vec<Vec<String>>,
     kept: Vec<String>,
     discarded: Vec<String>,
+    /// The crash marker: each pass marked, where each began, and how often it was cleared.
+    marked: Vec<PassMarker>,
+    marked_started: Vec<TakeInfo>,
+    marker_clears: usize,
+    /// What opening the project found of a pass a crash cut off.
+    recovered: Option<Recovered>,
     /// The click preferences remembered.
     click: ClickPreferences,
     /// How many times they were remembered.
@@ -322,6 +328,24 @@ impl Services for Fake {
         self.calls.borrow_mut().discarded.extend_from_slice(files);
     }
 
+    fn mark_pass(&mut self, marker: &PassMarker) -> Result<(), String> {
+        self.calls.borrow_mut().marked.push(marker.clone());
+        Ok(())
+    }
+
+    fn mark_pass_started(&mut self, info: TakeInfo) -> Result<(), String> {
+        self.calls.borrow_mut().marked_started.push(info);
+        Ok(())
+    }
+
+    fn clear_pass_marker(&mut self) {
+        self.calls.borrow_mut().marker_clears += 1;
+    }
+
+    fn take_recovered(&mut self) -> Option<Recovered> {
+        self.calls.borrow_mut().recovered.take()
+    }
+
     fn click_preferences(&mut self) -> ClickPreferences {
         self.calls.borrow().click
     }
@@ -355,6 +379,11 @@ fn app() -> Result<Fixture, Box<dyn Error>> {
 
 /// The fixture with the clip at `gain_db`.
 fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
+    app_with(gain_db, None)
+}
+
+/// The fixture with the clip at `gain_db`, opening to find `recovered`.
+fn app_with(gain_db: f32, recovered: Option<Recovered>) -> Result<Fixture, Box<dyn Error>> {
     let mut session = Session::new_project();
     let track = session.add_track("Vocal", Layout::Mono)?;
     let file = AudioFile {
@@ -371,6 +400,7 @@ fn app_with_gain(gain_db: f32) -> Result<Fixture, Box<dyn Error>> {
     let (engine, processor) = Engine::new(runner, output, 48_000)?;
     let calls = Rc::new(RefCell::new(Calls {
         inputs: 2,
+        recovered,
         ..Calls::default()
     }));
     let services = Box::new(Fake {
@@ -1965,6 +1995,22 @@ fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>
     // The pass is saved, so Record is available again.
     assert!(app.can_record());
     assert_eq!(calls.borrow().kept, ["Vocal 0.wav"]);
+    // The crash marker named the pass, then where it began, and went once the take was placed.
+    assert_eq!(
+        calls.borrow().marked,
+        [PassMarker {
+            device_latency: LATENCY,
+            tracks: vec![(track, vec!["Vocal 0.wav".into()])],
+        }]
+    );
+    assert_eq!(
+        calls.borrow().marked_started,
+        [TakeInfo {
+            start_frame: 10_000,
+            latency: 0
+        }]
+    );
+    assert_eq!(calls.borrow().marker_clears, 1);
     let clips = &app.session().state().track(track).ok_or("no track")?.clips;
     assert_eq!(clips.len(), 2);
     let (_, take) = clips.last().ok_or("no take")?;
@@ -2019,6 +2065,7 @@ fn test_close_discards_the_pass_disarms_and_saves() -> Result<(), Box<dyn Error>
     app.close();
     assert!(!app.engine().is_playing());
     assert_eq!(calls.borrow().discarded, ["Vocal 0.wav"]);
+    assert_eq!(calls.borrow().marker_clears, 1);
     assert!(app.arming(track).is_none());
     assert_eq!(calls.borrow().input.last(), Some(&false));
     assert!(calls.borrow().saves > saves, "the rename is saved");
@@ -2037,6 +2084,64 @@ fn test_take_stopped_before_capture_is_discarded() -> Result<(), Box<dyn Error>>
     app.update(Message::Tick);
     assert_eq!(calls.borrow().discarded, ["Vocal 0.wav"]);
     assert!(!app.session().can_undo());
+    assert!(calls.borrow().marked_started.is_empty());
+    assert_eq!(calls.borrow().marker_clears, 1);
+    Ok(())
+}
+
+#[test]
+fn test_recovered_take_is_placed_as_one_undoable_step() -> Result<(), Box<dyn Error>> {
+    let (probe, _, _, _) = app()?;
+    let track = vocal(&probe)?;
+    drop(probe);
+    let pass = RecoveredPass {
+        tracks: vec![
+            (track, vec!["Vocal 1.wav".into()]),
+            // A track deleted since, and one whose layout does not match, are skipped.
+            (TrackId(999), vec!["Gone.wav".into()]),
+            (track, vec!["L.wav".into(), "R.wav".into()]),
+        ],
+        frames: 5000,
+        info: TakeInfo {
+            start_frame: 20_000,
+            latency: 50,
+        },
+        device_latency: 150,
+    };
+    let (mut app, _, calls, _) = app_with(0.0, Some(Recovered::Takes(pass)))?;
+    assert_eq!(
+        app.status(),
+        Some("Recovered a take interrupted by a crash.")
+    );
+    let clips = &app.session().state().track(track).ok_or("no track")?.clips;
+    assert_eq!(clips.len(), 2);
+    let (_, take) = clips.last().ok_or("no take")?;
+    assert_eq!(
+        (take.position, take.offset, take.length),
+        (20_000 - 200, 0, 5000)
+    );
+    {
+        let calls = calls.borrow();
+        assert_eq!(calls.kept, ["Vocal 1.wav"]);
+        assert_eq!(calls.saves, 1, "saved before the marker went");
+        assert_eq!(calls.marker_clears, 1);
+    }
+    app.update(Message::Undo);
+    let clips = &app.session().state().track(track).ok_or("no track")?.clips;
+    assert_eq!(clips.len(), 1);
+    assert!(!app.session().can_undo());
+    Ok(())
+}
+
+#[test]
+fn test_unrecoverable_take_is_reported() -> Result<(), Box<dyn Error>> {
+    let (app, _, calls, _) = app_with(0.0, Some(Recovered::Discarded))?;
+    assert_eq!(
+        app.status(),
+        Some("A take interrupted by a crash could not be recovered.")
+    );
+    assert!(!app.session().can_undo());
+    assert_eq!(calls.borrow().marker_clears, 1);
     Ok(())
 }
 

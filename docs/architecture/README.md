@@ -160,6 +160,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Count-in](recording.md#count-in)
   - [Writer thread](recording.md#writer-thread)
   - [Take placement](recording.md#take-placement)
+  - [Take recovery](recording.md#take-recovery)
 - [Signal Graph](signal-graph.md)
   - [Processing graph](signal-graph.md#processing-graph)
   - [Feedback loops](signal-graph.md#feedback-loops)

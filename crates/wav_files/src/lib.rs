@@ -11,6 +11,7 @@
 //! - `header`: parsing the chunks before the samples.
 //! - `reader`: [`WavReader`], streaming reads of any frame range.
 //! - `writer`: [`WavWriter`], which switches to RF64 when the file passes 4 GB.
+//! - `repair`: [`repair_sizes`], which finishes a file a crash left unfinished.
 //! - `error`: [`Error`].
 //!
 //! Wrap files in [`std::io::BufReader`] or [`std::io::BufWriter`]: the reader and writer make
@@ -22,9 +23,11 @@ mod error;
 mod format;
 mod header;
 mod reader;
+mod repair;
 mod writer;
 
 pub use error::{ChunkId, Error};
 pub use format::{Channels, MAX_SAMPLE_RATE, SampleFormat, Spec};
 pub use reader::WavReader;
+pub use repair::repair_sizes;
 pub use writer::WavWriter;

@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use project_model::{Session, State};
+use serde::Serialize;
 
 use crate::error::Error;
 use crate::format::SavedProject;
 use crate::migrate;
+use crate::recovery::{self, RECORDING_FILE, Recording, Recovery, SavedRecording};
 use crate::validate::{self, MAX_NAME_BYTES, SAMPLE_RATES, is_plain_file_name};
 
 /// The largest file this build will read, in bytes.
@@ -44,6 +46,8 @@ pub struct Bundle {
     path: PathBuf,
     sample_rate: u32,
     versions: BTreeMap<String, SavedVersion>,
+    /// What opening found in a recording marker, until taken.
+    recovery: Option<Recovery>,
     /// The locked `lock` file; dropping it releases the lock.
     _lock: File,
 }
@@ -72,6 +76,7 @@ impl Bundle {
             path: path.to_owned(),
             sample_rate,
             versions: BTreeMap::new(),
+            recovery: None,
             _lock: lock,
         };
         bundle.save(&Session::new_project())?;
@@ -80,8 +85,9 @@ impl Bundle {
 
     /// Opens the bundle at `path`: locks it (creating `lock` if missing), deletes files left
     /// half-written by a crash, reads and checks `project.json` and every version (a file from
-    /// elsewhere is untrusted), then deletes audio files that neither the state nor any version
-    /// uses. The returned [`Bundle`] holds the lock until it is dropped.
+    /// elsewhere is untrusted), recovers the takes of a pass a crash cut off
+    /// ([`Bundle::take_recovery`]), then deletes audio files that neither the state, any version
+    /// nor a recovered take uses. The returned [`Bundle`] holds the lock until it is dropped.
     ///
     /// # Errors
     ///
@@ -126,13 +132,16 @@ impl Bundle {
                 .map(|(name, v)| (name.clone(), v.state.clone()))
                 .collect(),
         );
+        let audio = path.join(AUDIO_DIR);
+        let (recovery, keep) = recovery::recover(path, &audio, &session, sample_rate);
         let bundle = Bundle {
             path: path.to_owned(),
             sample_rate,
             versions,
+            recovery,
             _lock: lock,
         };
-        bundle.clean_up(&session)?;
+        bundle.clean_up_keeping(&session, &keep)?;
         Ok((bundle, session))
     }
 
@@ -193,11 +202,21 @@ impl Bundle {
     ///
     /// [`Error::Io`].
     pub fn clean_up(&self, session: &Session) -> Result<Vec<String>, Error> {
+        self.clean_up_keeping(session, &BTreeSet::new())
+    }
+
+    /// [`Bundle::clean_up`], also keeping the files in `extra`.
+    fn clean_up_keeping(
+        &self,
+        session: &Session,
+        extra: &BTreeSet<String>,
+    ) -> Result<Vec<String>, Error> {
         let audio = self.audio_dir();
         if !audio.is_dir() {
             return Ok(Vec::new());
         }
-        let keep: BTreeSet<&str> = session.referenced_files();
+        let mut keep: BTreeSet<&str> = session.referenced_files();
+        keep.extend(extra.iter().map(String::as_str));
         let mut removed = Vec::new();
         for entry in fs::read_dir(&audio).map_err(io(&audio))? {
             let entry = entry.map_err(io(&audio))?;
@@ -216,6 +235,42 @@ impl Bundle {
             }
         }
         Ok(removed)
+    }
+
+    /// Records the pass being recorded in `recording.json`, crash-safely, so its takes can be
+    /// recovered if the process dies before they are placed (`docs/architecture/recording.md`
+    /// "Take recovery").
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`], [`Error::Json`].
+    pub fn mark_recording(&self, recording: &Recording) -> Result<(), Error> {
+        write_json(
+            &self.path.join(RECORDING_FILE),
+            &SavedRecording::from(recording),
+        )
+    }
+
+    /// Removes `recording.json`, if present, once the pass's takes are placed or discarded.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Io`].
+    pub fn clear_recording(&self) -> Result<(), Error> {
+        let marker = self.path.join(RECORDING_FILE);
+        match fs::remove_file(&marker) {
+            Ok(()) => sync_dir(&self.path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(Error::Io {
+                path: marker,
+                source,
+            }),
+        }
+    }
+
+    /// What [`Bundle::open`] found in a recording marker, the first time it is asked.
+    pub fn take_recovery(&mut self) -> Option<Recovery> {
+        self.recovery.take()
     }
 
     /// Whether a process (this one included) has the bundle at `path` open, judged by trying a
@@ -409,7 +464,7 @@ fn remove_temp_files(dir: &Path) -> Result<(), Error> {
 
 /// Writes `saved` to `path` crash-safely: to `<path>.tmp`, synced, renamed over `path`, then the
 /// directory synced, so `path` always holds either the old or the new file.
-fn write_json(path: &Path, saved: &SavedProject) -> Result<(), Error> {
+fn write_json<T: Serialize>(path: &Path, saved: &T) -> Result<(), Error> {
     let text = serde_json::to_vec_pretty(saved).map_err(|source| Error::Json {
         path: path.to_owned(),
         source,

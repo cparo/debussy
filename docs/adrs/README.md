@@ -158,4 +158,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0132](0132-finder-open-document-events-arrive-through-an.md) | Finder open-document events arrive through an Apple Event handler installed at will-finish-launching | Accepted | [Documents opened from the Finder](../architecture/platform.md#documents-opened-from-the-finder) |
 | [ADR-0133](0133-one-process-at-a-time-opens-a-project-enforced-by.md) | One process at a time opens a project, enforced by an advisory lock on a lock file inside the bundle | Accepted | [Project bundle](../architecture/project.md#project-bundle) |
 | [ADR-0134](0134-wire-handles-are-saved-as-optional-offsets-from-a.md) | Wire handles and points are saved on a connection, in project format 6 | Accepted | [Saved format](../architecture/project.md#saved-format) |
+| [ADR-0135](0135-takes-interrupted-by-a-crash-are-recovered-from-a.md) | Takes interrupted by a crash are recovered from a marker file | Accepted | [Take recovery](../architecture/recording.md#take-recovery) |
 

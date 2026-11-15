@@ -13,9 +13,73 @@ use crate::reader::SCRATCH_BYTES;
 
 /// Body size of the `JUNK`/`ds64` reserve: RIFF size, data size, sample count (u64 each) and an
 /// empty table length (u32).
-const DS64_BODY: u32 = 28;
+pub(crate) const DS64_BODY: u32 = 28;
 /// Offset of the reserve chunk.
-const RESERVE_AT: u64 = 12;
+pub(crate) const RESERVE_AT: u64 = 12;
+
+/// Where the size fields of a file laid out by [`WavWriter`] are, as offsets from `base`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Positions {
+    /// Where the file starts in its stream.
+    pub(crate) base: u64,
+    /// The `fact` chunk's sample count, for float files.
+    pub(crate) fact_at: Option<u64>,
+    /// The `data` chunk's size field.
+    pub(crate) data_size_at: u64,
+    /// The first sample.
+    pub(crate) data_start: u64,
+}
+
+/// Writes the pad byte after `data_bytes` of samples if their count is odd, then the RIFF,
+/// `data` and `fact` sizes, as RF64 with a `ds64` chunk in the reserve if the RIFF size is over
+/// `rf64_threshold`. Returns the file's end, as an offset from `base`, without seeking there.
+pub(crate) fn write_sizes<W: Write + Seek>(
+    w: &mut W,
+    at: Positions,
+    data_bytes: u64,
+    frames: u64,
+    rf64_threshold: u64,
+) -> Result<u64, Error> {
+    let mut put = |offset: u64, bytes: &[u8]| -> Result<(), Error> {
+        w.seek(SeekFrom::Start(at.base + offset))?;
+        w.write_all(bytes)?;
+        Ok(())
+    };
+    let pad = data_bytes & 1;
+    if pad == 1 {
+        put(at.data_start + data_bytes, &[0])?;
+    }
+    let end = at.data_start + data_bytes + pad;
+    let riff_size = end - 8;
+    if riff_size > rf64_threshold {
+        put(0, b"RF64")?;
+        put(4, &SIZE_IN_DS64.to_le_bytes())?;
+        let mut ds64 = Vec::with_capacity(36);
+        ds64.extend_from_slice(b"ds64");
+        ds64.extend_from_slice(&DS64_BODY.to_le_bytes());
+        ds64.extend_from_slice(&riff_size.to_le_bytes());
+        ds64.extend_from_slice(&data_bytes.to_le_bytes());
+        ds64.extend_from_slice(&frames.to_le_bytes());
+        ds64.extend_from_slice(&0_u32.to_le_bytes());
+        put(RESERVE_AT, &ds64)?;
+        put(at.data_size_at, &SIZE_IN_DS64.to_le_bytes())?;
+        if let Some(fact) = at.fact_at {
+            let frames = u32::try_from(frames).unwrap_or(SIZE_IN_DS64);
+            put(fact, &frames.to_le_bytes())?;
+        }
+    } else {
+        // A repaired file may have been part-way to RF64; these restore the plain layout.
+        put(0, b"RIFF")?;
+        put(RESERVE_AT, b"JUNK")?;
+        // All three are at most `riff_size`, which fits in 32 bits here.
+        put(4, &(riff_size as u32).to_le_bytes())?;
+        put(at.data_size_at, &(data_bytes as u32).to_le_bytes())?;
+        if let Some(fact) = at.fact_at {
+            put(fact, &(frames as u32).to_le_bytes())?;
+        }
+    }
+    Ok(end)
+}
 
 /// Writes a WAV file's samples, given as `f32` per channel. Integer formats are rounded and
 /// clipped without dither; dither is applied before this, in `dsp`.
@@ -25,12 +89,8 @@ const RESERVE_AT: u64 = 12;
 pub struct WavWriter<W: Write + Seek> {
     inner: W,
     spec: Spec,
-    /// Where the file starts in `inner`.
-    base: u64,
-    /// Offsets from `base`.
-    fact_at: Option<u64>,
-    data_size_at: u64,
-    data_start: u64,
+    /// Where the size fields are.
+    at: Positions,
     data_bytes: u64,
     frames: u64,
     /// The RIFF size above which the file becomes RF64; lowered only by tests.
@@ -87,10 +147,12 @@ impl<W: Write + Seek> WavWriter<W> {
         Ok(Self {
             inner,
             spec,
-            base,
-            fact_at,
-            data_size_at,
-            data_start: h.len() as u64,
+            at: Positions {
+                base,
+                fact_at,
+                data_size_at,
+                data_start: h.len() as u64,
+            },
             data_bytes: 0,
             frames: 0,
             rf64_threshold: u64::from(u32::MAX),
@@ -153,45 +215,22 @@ impl<W: Write + Seek> WavWriter<W> {
     ///
     /// [`Error::Io`] if writing, seeking or flushing fails.
     pub fn finish(mut self) -> Result<W, Error> {
-        let pad = self.data_bytes & 1;
-        if pad == 1 {
-            self.inner.write_all(&[0])?;
-        }
-        let end = self.data_start + self.data_bytes + pad;
-        let riff_size = end - 8;
-        if riff_size > self.rf64_threshold {
-            self.put(0, b"RF64")?;
-            self.put(4, &SIZE_IN_DS64.to_le_bytes())?;
-            let mut ds64 = Vec::with_capacity(36);
-            ds64.extend_from_slice(b"ds64");
-            ds64.extend_from_slice(&DS64_BODY.to_le_bytes());
-            ds64.extend_from_slice(&riff_size.to_le_bytes());
-            ds64.extend_from_slice(&self.data_bytes.to_le_bytes());
-            ds64.extend_from_slice(&self.frames.to_le_bytes());
-            ds64.extend_from_slice(&0_u32.to_le_bytes());
-            self.put(RESERVE_AT, &ds64)?;
-            self.put(self.data_size_at, &SIZE_IN_DS64.to_le_bytes())?;
-            if let Some(at) = self.fact_at {
-                let frames = u32::try_from(self.frames).unwrap_or(SIZE_IN_DS64);
-                self.put(at, &frames.to_le_bytes())?;
-            }
-        } else {
-            // All three are at most `riff_size`, which fits in 32 bits here.
-            self.put(4, &(riff_size as u32).to_le_bytes())?;
-            self.put(self.data_size_at, &(self.data_bytes as u32).to_le_bytes())?;
-            if let Some(at) = self.fact_at {
-                self.put(at, &(self.frames as u32).to_le_bytes())?;
-            }
-        }
-        self.inner.seek(SeekFrom::Start(self.base + end))?;
+        let end = write_sizes(
+            &mut self.inner,
+            self.at,
+            self.data_bytes,
+            self.frames,
+            self.rf64_threshold,
+        )?;
+        self.inner.seek(SeekFrom::Start(self.at.base + end))?;
         self.inner.flush()?;
         Ok(self.inner)
     }
 
-    fn put(&mut self, at: u64, bytes: &[u8]) -> Result<(), Error> {
-        self.inner.seek(SeekFrom::Start(self.base + at))?;
-        self.inner.write_all(bytes)?;
-        Ok(())
+    /// The underlying writer, to flush and sync what has been written so far. Writing or
+    /// seeking through it corrupts the file.
+    pub fn get_mut(&mut self) -> &mut W {
+        &mut self.inner
     }
 
     /// Lowers the RF64 threshold, so tests can cross it without gigabytes of data.
