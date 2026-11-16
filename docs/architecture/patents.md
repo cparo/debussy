@@ -39,4 +39,10 @@ feedback and without through-zero flanging
 white noise through a cascade of first-order sections with alternating real poles and zeros, one
 pole per octave ([ADR-0122](../adrs/0122-pink-noise-is-a-seeded-alternating-pole-zero.md)), and
 automation curves: cubic Bézier segments kept functions of time, read by fixed-count bisection,
-without split-value steps ([ADR-0123](../adrs/0123-automation-curves-are-cubic-b-zier-segments-kept.md)).
+without split-value steps ([ADR-0123](../adrs/0123-automation-curves-are-cubic-b-zier-segments-kept.md)), and the synthesizer:
+MinBLEP-corrected saw and pulse oscillators and a triangle integrated from the MinBLEP square,
+without PolyBLEP or hard sync; the ADSR envelope of exponential one-pole segments retriggered from
+its current level; voice allocation of a free, then the quietest released, then the oldest held
+voice with a fade-out of a stolen voice, without unison, legato or mono note priority; and 12-TET
+pitch with ranged pitch bend, velocity scaling and sustain
+([ADR-0148](../adrs/0148-the-synth-s-oscillators-use-minblep-with-polyblep.md)).

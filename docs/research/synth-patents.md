@@ -45,8 +45,9 @@ of the MinBLEP square. The analysis above of the PolyBLEP form is kept as the re
 
 ## Summary
 
-Stage 2 (claim reading) done 2026-11-16 for all four in-force candidates (3 and 4 in a second
-pass the same day). Per-claim reading under Claim analysis.
+Stage 2 (claim reading) done 2026-11-16 for every in-force candidate: 1 to 4 first (3 and 4 in a
+second pass), then 5 (with 4), then 6, 8 and 9 from pass 3 (7 has lapsed and was not read).
+Per-claim reading under Claim analysis.
 
 | Technique | Verdict | Confidence |
 |---|---|---|
@@ -54,8 +55,9 @@ pass the same day). Per-claim reading under Claim analysis.
 | 1b. Triangle by PolyBLAMP at slope changes | **Does not read.** No claim covers it: a triangle has no discontinuity, and the PolyBLAMP residual is even, not odd, and has nonzero area (1/6 per unit slope change). | Medium (no claim covers slope discontinuities; "discontinuity" is not defined in the claims) |
 | 1c. Triangle as a leaky integral of a PolyBLEP square | **Reads**, through the square it integrates (1a; claims 2, 6, 15, 19). | High |
 | 1d. Two oscillators per voice, summed | **Does not read** claims 28, 43, 58, 59 (hard sync): the design has no second waveform whose discontinuity phase depends on another waveform's event. | High |
-| 2, 6. Envelope, LFO | No in-force candidate touches them, so no claims were read (LFO cleared by ADR-0119). | Low for 2 (search gaps in Open uncertainties) |
-| 4. Voice allocation and stealing | **Does not read** US8017856B2 (Roland, to 2029-07-12). Every independent claim needs several timbre "parts" per note: claims 1, 14, 20, 26 assign several parts to one sound; claims 10, 16, 22 need "a plurality of parts comprising different timbers" reassigned among the sounding notes. The design gives each note one voice, all voices play the same patch, and nothing is stacked. | High for the claims (search gaps for element 4 in Open uncertainties) |
+| 2. Envelope (retrigger from current level) | **Does not read** US8053658B2 (Roland, to 2029-10-03, candidate 8). Claims 1, 4, 6, 15 all need an on-on time between note-ons measured and the attack time set from it (claim 1 also a gate time setting release). The design retriggers from the current level whatever the time since the last note and uses no note timing. Adding legato or timing-dependent attack/release needs a fresh reading. | High for the decisive elements (quoted verbatim); the rest of each claim seen only as the fetch tool's paraphrase. Search gaps for 2 in Open uncertainties |
+| 6. LFO | Cleared by ADR-0119; no claims read. | — |
+| 4. Voice allocation and stealing | **Does not read** US8017856B2 (Roland, to 2029-07-12). Every independent claim needs several timbre "parts" per note: claims 1, 14, 20, 26 assign several parts to one sound; claims 10, 16, 22 need "a plurality of parts comprising different timbers" reassigned among the sounding notes. The design gives each note one voice, all voices play the same patch, and nothing is stacked. **Does not read** US11735152B2 (Roland, to 2041-07-30, candidate 6): claims 1, 5, 9 need per-simulated-voice information sets of (random) pitch variation values, and claim 9 real voices shared by several parts; the design's voices are identical and the pool is one node's. Per-voice detune drift or a shared pool needs a fresh reading. **Does not read** US9799313B2 (Yamaha, to 2034-10-20, candidate 9): claims 1, 4, 5, 8 need selectors that, on a key-off, decide by pitch difference whether to re-sound a held note; the design's key-off only starts release. A mono or note-priority mode needs a fresh reading. **Does not read** US8053658B2 (candidate 8; see 2). | High for the claims (search gaps for element 4 in Open uncertainties) |
 | 5. Pitch, bend, velocity, CC 64 | **Does not read** EP2775475B1 (Yamaha), nor its US family member US9064485B2 (candidate 5, in force; same independent claim structure, read in short pieces only, Medium confidence). Claims 1, 10 and 11 need chord information, a check that a tone's pitch glides from a first note pitch to a second, and conversion of both pitches to fit the chord. The design has no chord input and makes no such check. Google lists the EP as "Not-in-force", which disagrees with the Status column (Open uncertainties). | High for the claims |
 | 3. Filter (per-sample cutoff modulation of `dsp::Svf`) | **Does not read** US11202147B2, carried over from `docs/research/eq-filter-patents.md`: its claims need a resonant frequency modulated through zero into negative frequency. The synth modulates cutoff every sample in log2 Hz (always positive) and clamps it below 0.49·fs. | High |
 
@@ -167,12 +169,12 @@ in by a human from Google Patents or USPTO Patent Center.
 | 3 | US8017856B2, Electronic musical instrument (publication US20100077908A1; Japanese priority 2008-250239). Abstract: in a "Unison 2" mode four instrument parts are assigned to the depressed notes and divided among them as evenly as possible. Claims not read. | Roland Corp (inventor Tanaka) | 2008-09-29 / 2009-05-18; granted 2011-09-13 | 2029-07-12 (Google, adjusted) | 4 (marginal: assignment of voices to depressed notes, CPC G10H 1/18; the design has no unison parts and allocates by free, releasing, oldest, so a reading is unlikely) | [GP](https://patents.google.com/patent/US8017856B2/en) || In force |
 | 4 | EP2775475A1 / B1 (granted 2017-05-03), In a music synthesizer, diatonic scalar transposition, or pitch bend according to chord type. Abstract: pitch-bend target pitch identified and converted according to chord. Claims not read; no US counterpart seen. | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / 2014-03-05 | 2034-03-05 (Google) | 5 (marginal: pitch bend handling, but chord-based conversion of the bend target; the design scales the bend by a semitone range with no chord logic) | [GP](https://patents.google.com/patent/EP2775475A1/en) || Not in force |
 | 5 | US9064485B2, US family member of candidate 4 (pitch bend according to chord type) | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / see GP | 2034-03-06 (Google) | 5 (pitch bend) | [GP](https://patents.google.com/patent/US9064485B2/en) | In force |
-| 6 | US11735152B2, Musical sound generation method (sounding a set number of simulated analog-synth voices per part) | Roland Corp | priority 2019 | not read (see GP) | 4 (voice assignment) | [GP](https://patents.google.com/patent/US11735152B2/en) | |
-| 7 | US7728217B2, Sound generator for producing a sound from a new note (new note supplied to synthesis generators by a priority associated with it) | Infineon Technologies AG | priority 2007 | not read (see GP) | 4 (voice allocation, stealing) | [GP](https://patents.google.com/patent/US7728217B2/en) | |
-| 8 | US8053658B2, Electronic musical instrument using on-on note time (time between note starts controls the new sound) | Roland Corp | priority 2008 | not read (see GP) | 2, 4 (retrigger, legato) | [GP](https://patents.google.com/patent/US8053658B2/en) | |
-| 9 | US9799313B2, Electronic musical instrument, storage medium and note selecting method (assigners decide which note sounds on a key-off) | (Google; not read) | priority 2013 | not read (see GP) | 4 (marginal) | [GP](https://patents.google.com/patent/US9799313B2/en) | |
+| 6 | US11735152B2, Musical sound generation method (sounding a set number of simulated analog-synth voices per part) | Roland Corp | priority 2019 | 2041-07-30 (Google) | 4 (voice assignment) | [GP](https://patents.google.com/patent/US11735152B2/en) || In force |
+| 7 | US7728217B2, Sound generator for producing a sound from a new note (new note supplied to synthesis generators by a priority associated with it) | Infineon Technologies AG | priority 2007 | not read (see GP) | 4 (voice allocation, stealing) | [GP](https://patents.google.com/patent/US7728217B2/en) || Lapsed (fees) |
+| 8 | US8053658B2, Electronic musical instrument using on-on note time (time between note starts controls the new sound) | Roland Corp | priority 2008 | 2029-10-03 (Google) | 2, 4 (retrigger, legato) | [GP](https://patents.google.com/patent/US8053658B2/en) || In force |
+| 9 | US9799313B2, Electronic musical instrument, storage medium and note selecting method (assigners decide which note sounds on a key-off) | Yamaha Corp | priority 2013 | 2034-10-20 (Google) | 4 (marginal) | [GP](https://patents.google.com/patent/US9799313B2/en) || In force |
 
-Statuses checked by Chris Paro on 2026-11-16: candidates 1, 2, 3 and 5 are in force; candidate 4 (EP2775475B1) is not in force.
+Statuses checked by Chris Paro on 2026-11-16: candidates 1, 2, 3, 5, 6, 8 and 9 are in force; candidate 4 (EP2775475B1) is not in force; candidate 7 (US7728217B2) has lapsed for unpaid fees.
 
 Status values: **In force**, **Lapsed (fees)**, **Expired (term)**, **Abandoned**, **Invalidated**,
 **Not found**. Record who checked and when, under the table.
@@ -494,6 +496,193 @@ are about plain bend, not the claimed chord conversion. Validity is not the ques
 scale-quantised pitch bend or transpose feature would need a fresh reading of this patent and of
 US9064485B2.
 
+### Candidate 6: US11735152B2 (Roland)
+
+Source: Google Patents HTML text of the grant
+([US11735152B2](https://patents.google.com/patent/US11735152B2/en)), second text window (offset
+100000). The page does not say whether the text is OCR. The fetch tool returned each independent
+claim as consecutive quoted pieces of under 125 characters, joined below. 12 claims. Independent: 1,
+5, 9. Inventors Iwamoto and Isogawa; priority 2019-09-04, filed 2020-09-04, granted 2023-08-22;
+Google: Active, adjusted expiry 2041-07-30. The grant PDF
+([patentimages](https://patentimages.storage.googleapis.com/ee/89/3a/143e7d284557d6/US11735152.pdf))
+was not opened.
+
+**What the spec means.** As the fetch tool summarised it: the instrument has 16 parts, each with
+its own timbre, and 128 "real voices" shared among them. A part can be set to simulate an analog
+synth with a number of "virtual voices" (1 to an upper limit, 8 in the example). Each virtual voice
+holds variation values (pitch and other parameters), mainly "calculated from a random number and
+information indicating a variation depth" (claim 4's words), held per virtual voice and applied to
+the real voices that sound a note. That is, per-voice analog-style detune drift, not voice
+stealing.
+
+**Claim 1** (method):
+
+| Element | Planned design |
+|---|---|
+| "A musical sound generation method comprising:" | The synth node. Assume met. |
+| "a control device assigning, when a performance operator among a plurality of performance operators has been operated for a part that has been set to sound a predetermined number of simulated voices of an analog synthesizer," | A note-on reaching the voice allocator. Whether one synth node with a 16-voice pool is "a part that has been set to sound a predetermined number of simulated voices of an analog synthesizer" is arguable; assume met for the sake of the reading. |
+| "at least one sounding parameter being a pitch of one or pitches of two or more voices, which form a timbre of a simulated voice of the analog synthesizer corresponding to a note number of the operated performance operator and are selected from a plurality of voices capable of being sounded, to a sound generation circuit;" | The allocator picks one voice from the pool and gives it the note's pitch (`440 · 2^((note − 69) / 12)`). Met. |
+| "the control device assigning, to the sound generation circuit, an information set selected from a plurality of information sets which are prepared for the predetermined number of simulated voices and each include a pitch variation value that applies a pitch variation to the sounding parameter of the one or two or more voices; and" | **Not met.** The design has no per-voice information sets. Every voice plays the same patch; oscillator detune (cents) is a patch parameter applied identically to every voice, not a value selected from a set prepared per simulated voice. |
+| "the sound generation circuit performing a sounding process of the one or two or more voices using the sounding parameter and the information set," | Not met (no information set). |
+| "wherein, when the one or two or more voices are generated using a plurality of oscillators included in the sound generation circuit, the information set includes pitch variation values respectively corresponding to the oscillators." | Not met. The two oscillators per voice have per-oscillator detune, but from the patch, the same in every voice. |
+
+Verdict: **Does not read**. Missing: "an information set selected from a plurality of information
+sets which are prepared for the predetermined number of simulated voices and each include a pitch
+variation value".
+
+**Claim 5** (method): the first three elements are as claim 1 (the information sets "each include a
+variation value that applies a variation to the sounding parameter", not only pitch), then
+"wherein unused information sets among the plurality of information sets are registered in an
+unused list, each of the information sets in the unused list includes identification information
+of a performance operator that has triggered assignment to the sound generation circuit in the
+past, and when an information set is selected from the unused list in response to operation of a
+certain performance operator among the plurality of performance operators, an information set
+including identification information of the certain performance operator is preferentially
+selected." The design has no information sets, so this fails as claim 1 does. It also has no
+unused list keyed by the key that last used an entry: a note already sounding retriggers its own
+(busy) voice, and a free voice is taken without regard to which note it last played. Missing: the
+information sets and "an information set including identification information of the certain
+performance operator is preferentially selected". Verdict: **Does not read**.
+
+**Claim 9** (device):
+
+| Element | Planned design |
+|---|---|
+| "A musical sound generation device comprising:" | Assume met. |
+| "a first predetermined number of real voices provided for a plurality of parts;" | **Not met.** The 16-voice pool belongs to one synth node, which plays one patch. Several synth nodes each have their own pool; no pool serves several parts. |
+| "a number of virtual voices, whose upper limit is a second predetermined number, provided for each of the parts;" | Not met. There is one tier of voices, not real voices plus per-part virtual voices. |
+| "a real voice assigner configured to assign at least one real voice among the first predetermined number of real voices for operation of a performance operator for a part that has been set to sound simulated voices of an analog synthesizer;" | The allocator assigns one voice per note. Met in isolation. |
+| "a virtual voice assigner configured to assign one of the virtual voices of the part; and" | Not met. |
+| "a sound generation circuit configured to generate a musical sound on the basis of a sounding parameter being a pitch of the assigned real voice corresponding to a note number of the performance operator and a pitch variation value of the assigned virtual voice," | Not met: no per-voice pitch variation value. |
+| "wherein the real voices are shared by the plurality of parts, and" | Not met. |
+| "wherein, when the one or two or more voices are generated using a plurality of oscillators included in the sound generation circuit, the information set includes pitch variation values respectively corresponding to the oscillators." | Not met. (The clause refers to "the information set", which claim 9 does not introduce; the tool confirmed this wording when asked, but it may be a transcription error. Check the grant PDF.) |
+
+Verdict: **Does not read**. Missing: "a virtual voice assigner" with "a pitch variation value of the
+assigned virtual voice", and "the real voices are shared by the plurality of parts".
+
+**Element 4 against these claims.** None of the independent claims recites a stealing order, a
+fade-out, retriggering a sounding note's voice or omni channels; they are about per-simulated-voice
+variation values. The design's three-tier steal order, 3 ms fade, same-note retrigger and omni
+reception are not what the claims require, and the claims do not read for the missing variation
+sets alone.
+
+**Prior art predating 2019-09-04:** the element 4 list under Prior art (1981-1990) bears on voice
+assignment generally, not on per-voice variation sets. No art on per-voice random detune
+("analog drift") was searched for or is in this note.
+
+**Verdict: Does not read** (claims 1, 5, 9; High confidence). Before 2041-07-30, any per-voice
+variation would need a fresh reading: per-voice random or fixed detune, "analog drift" or "voice
+spread" of pitch, cutoff or envelope, a "virtual voice count" or simulated-polyphony setting, or
+one voice pool shared by several synth parts or nodes. So would picking the free voice that last
+played the same note (claim 5) if per-voice variation were ever added.
+
+### Candidate 8: US8053658B2 (Roland)
+
+Source: Google Patents HTML text of the grant
+([US8053658B2](https://patents.google.com/patent/US8053658B2/en)), first text window. The page
+does not say whether the text is OCR; it has typos ("Unites States", "envelop waveform"), so treat
+the quotes as possibly OCR. **The fetch tool declined to give the claims whole.** It gave a
+paraphrase of each independent claim and, on request, short exact quotes of the elements named
+below. The quoted elements are verbatim; the rest of each claim is known to me only through the
+tool's paraphrase, which is marked as such. 23 claims. Independent: 1, 4, 6, 15. Title "Electronic
+musical instrument using on-on note times to determine an attack rate"; inventors Tanaka and
+Umemoto; priority 2008-04-07 (JP2008-098953), filed 2009-01-28, granted 2011-11-08; Google: Active,
+adjusted expiry 2029-10-03.
+
+**Claim 1** (instrument):
+
+| Element | Planned design |
+|---|---|
+| "An electronic musical instrument comprising" (preamble; input device and sound source per the paraphrase) | Debussy running the synth node, MIDI input. Assume met. |
+| "an on-on time timer device that measures an on-on time difference between a first sound generation instruction" (and a second, per the paraphrase) | **Not met.** The design never measures the time between note-ons. A gate-on retriggers the ADSR from its current level whatever the time since the last note. |
+| (paraphrase: a gate time timer measuring from the second note-on to its note-off) | **Not met.** No gate time is measured; release time is a patch parameter. |
+| attack set "to have a shorter attack time as the on-on time difference becomes shorter" | **Not met.** Attack time is a fixed patch parameter. Velocity scales amplitude and cutoff only, not attack time. |
+| "when the on-on time difference is shorter than a multiple stop judgment time having a predetermined time duration" (the second note's attack then matches the first's, per the paraphrase) | **Not met.** No chord or multiple-stop detection. |
+| release set "to have a shorter release time as the gate time difference becomes shorter" | **Not met.** |
+| (paraphrase: an instruction device applying these settings to the sound source) | Not met (nothing to apply). |
+
+Verdict: **Does not read**. Missing: "an on-on time timer device", and attack time set from it.
+
+**Claim 4** (instrument): as claim 1 without the gate time and release elements: "an on-on time
+timer device that measures an on-on time difference between a first sound generation instruction"
+..., "to have a shorter attack time as the on-on time difference becomes shorter", and the multiple
+stop judgment time ("when the on-on time difference is shorter than a multiple stop judgment time
+having a predetermined time duration"). Missing as claim 1. Verdict: **Does not read**.
+
+**Claim 6** (method, "A method, comprising") and **claim 15** ("A computer readable storage medium
+including a program", the same operations): "determining an on-on time indicating a time difference
+between selection of a current note and a previous note"; "determining whether the determined
+on-on time is less than a performance judgment time" (claim 6; claim 15 the same per the
+paraphrase); "setting the attack rate of the current note to have a shorter attack time as the
+on-on time becomes shorter"; "when the on-on time is shorter than a multiple stop judgment time
+having a predetermined time duration" (copy the previous note's attack rate, per the paraphrase);
+then (paraphrase) compute the attack time from the rate and a standard attack time and instruct the
+sound source. The design determines no on-on time, compares nothing with a judgment time, and does
+not set attack rate per note. Missing: "determining an on-on time". Verdict: **Does not read**.
+
+**Elements 2 and 4 against these claims.** Retriggering from the current level (element 2) and
+same-note retrigger or stealing (element 4) are not recited; every independent claim turns on the
+on-on time controlling attack. Because the design uses no timing between note starts for anything,
+none reads.
+
+**Prior art predating 2008-04-07:** US5786541A (Yamaha, filed 1997) continues an envelope from its
+current level on a new note; it is not about on-on time. No art on attack time set from inter-onset
+time is in this note. Validity is not the question here.
+
+**Verdict: Does not read** (claims 1, 4, 6, 15; High confidence for the decisive elements, which
+were quoted verbatim; the rest of each claim was seen only as a paraphrase). Before 2029-10-03, a
+fresh reading is needed for any feature that uses the time between note-ons or a note's gate time:
+legato or fingered-portamento modes keyed on overlap timing, attack or release time scaled by
+playing speed or note length, or chord detection that equalises attacks.
+
+### Candidate 9: US9799313B2 (Yamaha)
+
+Source: Google Patents HTML text of the grant
+([US9799313B2](https://patents.google.com/patent/US9799313B2/en)), second text window (offset
+100000). The page does not say whether the text is OCR; the description has artefacts (split
+reference numerals, a truncated sentence), so treat it as possibly OCR. The claim pieces read
+cleanly. The fetch tool returned each independent claim as consecutive quoted pieces of under 125
+characters, joined below. 8 claims. Independent: 1, 4, 5, 8. Assignee Yamaha Corp; priority
+2013-10-21, filed 2014-10-20, granted 2017-10-24; Google: Active, expiry 2034-10-20 (no term
+adjustment shown). Per the description (as summarised by the tool), "selectors" (the description's
+"assigners") pick which held key sounds; on a key-off one may reselect a note from the keys still
+held, and a "decider" chooses, per selector, whether it does.
+
+**Claim 1** (instrument):
+
+| Element | Planned design |
+|---|---|
+| "An electronic musical instrument, comprising:" | Assume met. |
+| "a plurality of selectors, each selector respectively configured to select, in accordance with a rule set for the selector, a note to be sounded according to operation state of plural controls corresponding respectively to notes;" | Arguable at most. The design has one voice allocator, which sounds every note-on it receives; it does not pick some held keys over others by a rule (no mono, high-, low- or last-note priority), and there are not several selectors. Treated as not met. |
+| "a decider configured to decide, for each of the plurality of selectors, whether or not to select a note to be sounded in response to a tone generation stopping operation of any of the controls; and" | **Not met.** On a key-off the voice enters release (or is held by CC 64); nothing decides whether to sound another note. |
+| "a controller configured to instruct, when a tone generation stopping operation of any of the controls is detected, a selector for which the decider decided to select a note to be sounded, to select, in accordance with the rule set for the selector, a note to be sounded according to operation state of the plural controls after the detection of the tone generation stopping operation," | **Not met.** A key-off never causes a still-held note to sound again. |
+| "wherein the decider decides, for each of the plurality of selectors, that, when the tone generation stopping operation of any of the controls is detected, if pitch difference is equal to or more than a predetermined value between a note selected by one selector at a timing of the detection and a note predicted to be selected by the one selector according to operation state of the plural controls after the detection of the tone generation stopping operation, the one selector does not select a note to be sounded in response to a tone generation stopping operation of any of the controls, and if the pitch difference is less than the predetermined value, the one selector selects a note to be sounded in response to a tone generation stopping operation of any of the controls." | **Not met.** No pitch difference is computed on key-off. |
+
+Verdict: **Does not read**. Missing: "a decider configured to decide ... whether or not to select a
+note to be sounded in response to a tone generation stopping operation", and the pitch-difference
+test.
+
+**Claim 4** (storage medium: "A non-transitory machine-readable storage medium containing program
+instructions executable by a computer and enabling the computer to function as:") recites the same
+selectors, decider, controller and pitch-difference "wherein" clause word for word. **Claim 5**
+("An electronic musical instrument, comprising: a processor configured to perform:") and **claim 8**
+(storage medium, "one or more computers ... to perform:") recite them as steps: "selecting, for each
+of a plurality of selectors respectively, in accordance with a rule set for the selector, a note to
+be sounded according to operation state of plural controls", "deciding, for each of the plurality
+of selectors, whether or not to select a note to be sounded in response to a tone generation
+stopping operation of any of the controls", "instructing, when a tone generation stopping operation
+of any of the controls is detected, a selector for which the decider decided to select a note to be
+sounded, to select", and the same pitch-difference test ("it is decided that the one selector does
+not select a note to be sounded ..."). Missing as claim 1. Verdict: **Does not read**.
+
+**Prior art predating 2013-10-21:** none in this note on note priority or key-off reselection
+(mono last-note priority on 1970s synths is folklore here, not a dated source).
+
+**Verdict: Does not read** (claims 1, 4, 5, 8; High confidence). Before 2034-10-20, a fresh reading
+is needed for a mono or legato mode with note priority that re-sounds a held note on key-off, any
+per-voice or per-layer note-priority rule (for instance a mono bass layer under a poly layer), or a
+rule that decides by pitch interval whether to return to a held note.
+
 ## Search log
 
 All entries 2026-11-16. The search tool returns a prose summary, not result lists, so "Hits" are
@@ -558,6 +747,7 @@ approximate (about 10 per query unless noted).
 | Google Patents via Claude in Chrome (pass 3) | `(sawtooth) (alias OR aliasing OR bandlimited OR "band-limited") (discontinuity) (synthesizer OR "musical tone")`, priority after 2002 | 2026-11-16 | ~17 | Finds candidate 1; also US11594207B2 (partial-series/additive rendering, mentions oversampling), US11837212B1 (additive), US9741329B2 (control points); none touches MinBLEP |
 | Google Patents via Claude in Chrome (pass 3) | `("minimum phase" OR "minimum-phase") (step OR impulse) (oscillator) (alias OR aliasing) (synthesizer OR "musical tone" OR sawtooth)`, priority after 2002 | 2026-11-16 | ~7 | Only candidate 1 and unrelated DDS/PWM patents: no MinBLEP patent found |
 | Google Patents via Claude in Chrome (pass 3) | voice stealing full text (`steal`/`truncat*` with voice, polyphon*, release/oldest/lowest), priority after 2006 | 2026-11-16 | ~13 | All off-topic |
+| Google Patents (stage 2 claim reading, candidates 6, 8, 9) | US11735152B2 (offset 0 and 100000: header, spec on parts and virtual voices, claims 1, 5, 9 in consecutive pieces, claim 4's wording, a recheck of claim 9's last clause); US8053658B2 (offset 0: header, paraphrase of claims 1, 4, 6, 15, then verbatim quotes of their decisive elements; the tool declined to give whole claims); US9799313B2 (offset 0 and 100000: header, description summary, claims 1, 4, 5, 8 in consecutive pieces) | 2026-11-16 | 3 | HTML text; OCR status not stated by the pages, typos in 8 and 9. Grant PDFs not opened |
 
 Refused or failed: Michigan Publishing page for Stilson and Smith returned 403; earlevel.com
 "Envelope generators ADSR code" returned 404; the KAIST JASA 2012 PDF fetch timed out (300 s) and
@@ -645,6 +835,20 @@ comes from a web search or a citation list.
   claims also need chord information and a glide determination, but they were seen only in short
   pieces; confirming them from the USPTO text remains open. (c) The EP claims were read in English only, from Google's HTML, possibly OCR; claims
   10 and 11 only as pieces. The authentic text is the EPO B1 publication, which was not opened.
+- Candidates 6, 8 and 9 **do not read** (stage 2). For a human: (a) claim text is Google's HTML via
+  a tool returning short pieces; compare with the USPTO grant PDFs before relying on it. For
+  candidate 8 only the decisive elements were seen verbatim (the tool refused whole claims; the rest
+  is its paraphrase). Candidate 6's claim 9 ends with a clause on "the information set", which
+  claim 9 never introduces; check whether that is in the grant or a transcription error (it does
+  not change the verdict). (b) Candidate 6: whether one synth node with a 16-voice pool is "a part
+  that has been set to sound a predetermined number of simulated voices of an analog synthesizer"
+  was not decided; the verdict rests on the missing per-voice variation sets. Decide now whether
+  per-voice detune drift or "analog" voice spread is on the roadmap: before 2041-07-30 it would
+  need a new reading, as would a voice pool shared across parts or nodes. (c) Candidate 8: any
+  legato mode, or attack or release scaled by inter-onset time or gate time, needs a new reading
+  before 2029-10-03. (d) Candidate 9: any mono or note-priority mode that re-sounds a held note on
+  key-off needs a new reading before 2034-10-20. (e) The Candidates table's "Est. term end" for 6, 8
+  and 9 still says "not read"; the dates Google prints are under each Claim analysis section.
 - Term ends are as Google prints them (Google says they are assumptions). Candidate 1's adjusted
   date 2028-07-04 was not checked against the USPTO record; terminal disclaimers and fee lapse
   are for the human check of Status.
