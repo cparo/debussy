@@ -16,6 +16,7 @@ use crate::routing::{
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Grid;
 use crate::types::{ClipId, CurveId, Source, TrackId, TrackKind};
+use crate::zones::SampleZone;
 
 /// A project open for editing. Every change goes through [`Session::apply`] (or a method built
 /// on it) and is one step of an unlimited undo history, which is never saved.
@@ -356,6 +357,7 @@ impl Session {
                 NodeKind::Instrument {
                     kind: kind.to_owned(),
                     parameters: BTreeMap::new(),
+                    zones: Vec::new(),
                 },
             ),
         });
@@ -380,6 +382,18 @@ impl Session {
         edits.extend(joining);
         self.apply(Edit::Batch(edits))?;
         Ok(id)
+    }
+
+    /// Replaces sampler `node`'s zones, as one step (`docs/architecture/instruments.md`
+    /// "Sampler"). Adding, changing and removing a zone are each a whole new list.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownNode`], [`Error::WrongNodeKind`] for a node that is not an instrument, or
+    /// [`Error::InvalidZone`] for a zone outside its limits or an instrument other than the
+    /// sampler.
+    pub fn set_zones(&mut self, node: NodeId, zones: Vec<SampleZone>) -> Result<(), Error> {
+        self.apply(Edit::SetZones { node, zones })
     }
 
     /// Sets MIDI track `track`'s key and pitch names, as one step
@@ -983,13 +997,19 @@ impl Session {
     /// The names of every audio file the current state or a named version uses; cleanup must
     /// keep these (`docs/architecture/project.md` "Editing model").
     pub fn referenced_files(&self) -> BTreeSet<&str> {
-        std::iter::once(&self.state)
-            .chain(self.versions.values())
+        let states = || std::iter::once(&self.state).chain(self.versions.values());
+        let clips = states()
             .flat_map(|state| &state.tracks)
             .flat_map(|track| &track.clips)
-            .flat_map(|(_, clip)| clip.source.files())
-            .map(|file| file.name.as_str())
-            .collect()
+            .flat_map(|(_, clip)| clip.source.files());
+        let zones = states()
+            .flat_map(|state| &state.nodes)
+            .flat_map(|node| match &node.kind {
+                NodeKind::Instrument { zones, .. } => zones.as_slice(),
+                _ => &[],
+            })
+            .flat_map(|zone| zone.file.files());
+        clips.chain(zones).map(|file| file.name.as_str()).collect()
     }
 
     /// The layer a clip arriving on `track` goes to: the top, once `leaving` has left it.

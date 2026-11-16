@@ -49,3 +49,18 @@ mono, the same signal on both channels.
 
 The design follows [ADR-0148](../adrs/0148-the-synth-s-oscillators-use-minblep-with-polyblep.md)
 and [ADR-0149](../adrs/0149-the-synthesizer-is-a-fixed-pool-of-two-oscillator.md).
+
+## Sampler
+
+`instruments::Sampler`, kind id `sampler`, shown as **Sampler**: plays the project's own audio
+files, mapped to notes by zones.
+
+- **Zones.** A sampler node carries a list of zones, each a file in the bundle's `audio/`
+  directory (mono or stereo), a key range (`low` to `high`, 0–127), a root key, a mode (one-shot or
+  gated) and an optional choke group (1–16). Only a `sampler` instrument has zones; choosing a
+  different instrument removes them. Zone files count as used for cleanup
+  (`docs/architecture/project.md` "Cleanup").
+- **Loading.** Zone samples are imported like any other audio, at the project rate, and are at
+  most 60 s long. The engine bridge reads them whole into memory off the audio thread and builds a
+  new sampler node when the zones change; a missing or unreadable file leaves its zone silent and
+  is reported as a warning ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)).

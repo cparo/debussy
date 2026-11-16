@@ -9,15 +9,16 @@ use modulation::{Curve, Handle, Point};
 use project_model::{
     Accidental, AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane,
     Edit, Endpoint, Key, Letter, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Mode, Node, NodeId,
-    NodeKind, Notation, Note, Position, Sequence, Side, Source, State, Tempo, Track, TrackId,
-    TrackKind, WireHandle, WirePoint, WireShape,
+    NodeKind, Notation, Note, Position, SampleZone, Sequence, Side, Source, State, Tempo, Track,
+    TrackId, TrackKind, WireHandle, WirePoint, WireShape, ZoneMode,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedAccidental, SavedClip, SavedConnection, SavedCurve, SavedEndpoint,
     SavedFile, SavedHandle, SavedKey, SavedLayout, SavedLetter, SavedName, SavedNode,
-    SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSequence, SavedSide, SavedSource,
-    SavedTempo, SavedTrack, SavedTrackKind, SavedWireHandle, SavedWirePoint,
+    SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSample, SavedSequence, SavedSide,
+    SavedSource, SavedTempo, SavedTrack, SavedTrackKind, SavedWireHandle, SavedWirePoint,
+    SavedZone, SavedZoneMode,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -472,9 +473,14 @@ fn kind_to_saved(kind: &NodeKind) -> SavedNodeKind {
             effect: kind.clone(),
             parameters: parameters.clone(),
         },
-        NodeKind::Instrument { kind, parameters } => SavedNodeKind::Instrument {
+        NodeKind::Instrument {
+            kind,
+            parameters,
+            zones,
+        } => SavedNodeKind::Instrument {
             instrument: kind.clone(),
             parameters: parameters.clone(),
+            zones: zones.iter().filter_map(zone_to_saved).collect(),
         },
         NodeKind::Mixer {
             channels,
@@ -555,6 +561,53 @@ fn file_from_saved(file: SavedFile) -> Result<AudioFile, String> {
     })
 }
 
+/// A zone as saved; `None` for a MIDI source, which the model never holds in a zone.
+fn zone_to_saved(zone: &SampleZone) -> Option<SavedZone> {
+    let file = match &zone.file {
+        Source::Mono(file) => SavedSample::Mono {
+            file: file_to_saved(file),
+        },
+        Source::Stereo { left, right } => SavedSample::Stereo {
+            left: file_to_saved(left),
+            right: file_to_saved(right),
+        },
+        Source::Midi(_) => return None,
+    };
+    Some(SavedZone {
+        file,
+        low: zone.low,
+        high: zone.high,
+        root: zone.root,
+        mode: match zone.mode {
+            ZoneMode::OneShot => SavedZoneMode::OneShot,
+            ZoneMode::Gated => SavedZoneMode::Gated,
+        },
+        choke: zone.choke,
+    })
+}
+
+/// A zone from the file, its file names checked; its keys and choke group are checked with the
+/// rest of the instrument by `project_model::check_zones`.
+fn zone_from_saved(zone: SavedZone) -> Result<SampleZone, String> {
+    Ok(SampleZone {
+        file: match zone.file {
+            SavedSample::Mono { file } => Source::Mono(file_from_saved(file)?),
+            SavedSample::Stereo { left, right } => Source::Stereo {
+                left: file_from_saved(left)?,
+                right: file_from_saved(right)?,
+            },
+        },
+        low: zone.low,
+        high: zone.high,
+        root: zone.root,
+        mode: match zone.mode {
+            SavedZoneMode::OneShot => ZoneMode::OneShot,
+            SavedZoneMode::Gated => ZoneMode::Gated,
+        },
+        choke: zone.choke,
+    })
+}
+
 fn parameters_from_saved(
     parameters: BTreeMap<String, f32>,
 ) -> Result<BTreeMap<String, f32>, String> {
@@ -582,11 +635,18 @@ fn kind_from_saved(kind: SavedNodeKind) -> Result<NodeKind, String> {
         SavedNodeKind::Instrument {
             instrument,
             parameters,
+            zones,
         } => {
             check_name(&instrument, "an instrument id")?;
+            let zones = zones
+                .into_iter()
+                .map(zone_from_saved)
+                .collect::<Result<Vec<_>, _>>()?;
+            project_model::check_zones(&instrument, &zones).map_err(|e| e.to_string())?;
             NodeKind::Instrument {
                 kind: instrument,
                 parameters: parameters_from_saved(parameters)?,
+                zones,
             }
         }
         SavedNodeKind::Mixer {

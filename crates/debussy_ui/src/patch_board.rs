@@ -1288,6 +1288,7 @@ mod tests {
         let synth = session.add_node(NodeKind::Instrument {
             kind: "from-the-future".to_owned(),
             parameters: std::collections::BTreeMap::new(),
+            zones: Vec::new(),
         })?;
         let bus = session.add_node(NodeKind::Bus(Layout::Stereo))?;
         let pin = |endpoint, output, port| Pin {

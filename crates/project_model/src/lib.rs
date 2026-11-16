@@ -38,6 +38,7 @@
 //! - `edit`: [`Edit`].
 //! - `range`: [`Range`], [`Excerpt`], [`Lane`].
 //! - `tempo`: [`Tempo`], [`Beat`], [`Grid`] and the grid math.
+//! - `zones`: [`SampleZone`] and [`ZoneMode`], a sampler's key map.
 //! - `session`: [`Session`].
 //! - `error`: [`Error`].
 
@@ -53,6 +54,7 @@ mod session;
 mod state;
 pub mod tempo;
 mod types;
+mod zones;
 
 pub use edit::Edit;
 pub use error::Error;
@@ -67,3 +69,6 @@ pub use session::Session;
 pub use state::{Clip, CurveLane, State, Track};
 pub use tempo::{Beat, Grid, Tempo};
 pub use types::{AudioFile, ClipId, CurveId, Source, TrackId, TrackKind};
+pub use zones::{
+    MAX_CHOKE_GROUP, MAX_KEY, MAX_ZONES, SAMPLER_KIND, SampleZone, ZoneMode, check_zones,
+};

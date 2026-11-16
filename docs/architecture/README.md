@@ -82,6 +82,7 @@ The principles every crate and module follows are in [Design Principles](princip
   - [MP3 export](import-export.md#mp3-export)
 - [Instruments](instruments.md)
   - [Synthesizer](instruments.md#synthesizer)
+  - [Sampler](instruments.md#sampler)
 - [Licensing](licensing.md)
   - [Project licence](licensing.md#project-licence)
   - [Dependency licences](licensing.md#dependency-licences)

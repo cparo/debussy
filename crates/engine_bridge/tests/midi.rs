@@ -170,6 +170,7 @@ fn test_midi_clip_plays_through_the_synth_offline() -> Result<(), Box<dyn Error>
     let synth = session.add_node(NodeKind::Instrument {
         kind: "synth".to_owned(),
         parameters: BTreeMap::new(),
+        zones: Vec::new(),
     })?;
     session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
     session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;

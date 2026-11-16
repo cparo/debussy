@@ -14,6 +14,7 @@ fn unknown_instrument() -> NodeKind {
     NodeKind::Instrument {
         kind: "from-the-future".to_owned(),
         parameters: BTreeMap::new(),
+        zones: Vec::new(),
     }
 }
 

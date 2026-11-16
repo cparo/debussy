@@ -136,6 +136,7 @@ fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dy
                     4 => NodeKind::Instrument {
                         kind: "unknown-synth".to_owned(),
                         parameters: BTreeMap::new(),
+                        zones: Vec::new(),
                     },
                     _ => NodeKind::Effect {
                         kind: "unknown-reverb".to_owned(),
@@ -408,6 +409,7 @@ fn test_set_monitored_leaves_a_monitored_midi_track_out_of_latency() -> Result<(
         s.add_node(NodeKind::Instrument {
             kind: "synth".to_owned(),
             parameters: BTreeMap::new(),
+            zones: Vec::new(),
         })
     })?;
     let limiter = bridge.edit(&mut session, |s| {
@@ -884,6 +886,7 @@ fn test_midi_track_drives_unknown_instrument_stand_in() -> Result<(), Box<dyn Er
         s.add_node(NodeKind::Instrument {
             kind: "from-the-future".to_owned(),
             parameters: BTreeMap::from([("cutoff".to_owned(), 500.0)]),
+            zones: Vec::new(),
         })
     })?;
     bridge.edit(&mut session, |s| {

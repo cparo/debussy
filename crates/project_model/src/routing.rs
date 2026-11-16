@@ -13,6 +13,7 @@ use audio_buffers::Layout;
 
 use crate::error::Error;
 use crate::types::{CurveId, TrackId};
+use crate::zones::{SampleZone, check_zones};
 
 /// Identifies a routing node. Ids are never reused within a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -96,6 +97,9 @@ pub enum NodeKind {
         kind: String,
         /// Parameter values by name.
         parameters: BTreeMap<String, f32>,
+        /// The sampler's key map; empty for every other instrument
+        /// (`docs/architecture/instruments.md` "Sampler").
+        zones: Vec<SampleZone>,
     },
     /// A mixer (`docs/architecture/signal-graph.md` "Mixer"): `channels` mono inputs and one
     /// stereo output, with the parameter values that differ from their defaults, by name.
@@ -327,7 +331,13 @@ pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
         }
     }
     match &node.kind {
-        NodeKind::Effect { parameters, .. } | NodeKind::Instrument { parameters, .. } => {
+        NodeKind::Effect { parameters, .. } => check_parameters(parameters),
+        NodeKind::Instrument {
+            kind,
+            parameters,
+            zones,
+        } => {
+            check_zones(kind, zones)?;
             check_parameters(parameters)
         }
         NodeKind::Mixer {

@@ -18,7 +18,7 @@
 //! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
 //!   or limiter, and [`DelayLine`] for lookahead (ADR-0099).
 //! - `delay`: [`TapDelay`], a delay line read at any whole-frame tap, or at a fractional one by
-//!   linear or cubic Hermite interpolation.
+//!   linear or cubic Hermite interpolation, and [`hermite`], the 4-point Hermite kernel itself.
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
 //! - `oscillator`: [`Oscillator`], saw, pulse and triangle waves band-limited by a [`MinBlep`]
 //!   table, and [`note_to_hz`] (ADR-0148).
@@ -39,7 +39,7 @@ mod oscillator;
 mod oversample;
 mod resample;
 
-pub use delay::TapDelay;
+pub use delay::{TapDelay, hermite};
 pub use dither::{Depth, Ditherer};
 pub use dynamics::{
     Ballistics, Ceiling, Curve, DelayLine, FLOOR_DB, ceiling_gain_db, curve_gain_db,

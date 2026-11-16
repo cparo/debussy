@@ -65,12 +65,7 @@ impl TapDelay {
     /// to `2..=max_tap − 1` so all four exist, and NaN reads tap 2
     /// (`docs/architecture/modulation.md` "Modulated delay", ADR-0120).
     ///
-    /// With `y₋₁, y₀, y₁, y₂` the taps from the newest to the oldest and `x` the fraction:
-    /// `c₁ = (y₁ − y₋₁)/2`, `c₂ = y₋₁ − 2.5·y₀ + 2·y₁ − y₂/2`,
-    /// `c₃ = (y₂ − y₋₁)/2 + 1.5·(y₀ − y₁)`, and the value is `((c₃·x + c₂)·x + c₁)·x + y₀`
-    /// (the "4-point, 3rd-order Hermite, x-form" of Niemitalo, *Polynomial Interpolators for
-    /// High-Quality Resampling of Oversampled Audio*, 2001). It passes every tap and reproduces
-    /// any quadratic exactly.
+    /// The taps from the newest to the oldest go to [`hermite`] as `y₋₁, y₀, y₁, y₂`.
     pub fn read_cubic(&self, frames: f32) -> f32 {
         #[allow(clippy::cast_precision_loss)] // delay lines are far shorter than 2^24 frames
         let max = (self.max_tap() as f32 - 1.0).max(2.0);
@@ -88,13 +83,13 @@ impl TapDelay {
         if x == 0.0 {
             return y0;
         }
-        let newer = self.read(tap - 1);
-        let y1 = self.read(tap + 1);
-        let y2 = self.read(tap + 2);
-        let c1 = 0.5 * (y1 - newer);
-        let c2 = newer - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
-        let c3 = 0.5 * (y2 - newer) + 1.5 * (y0 - y1);
-        ((c3 * x + c2) * x + c1) * x + y0
+        hermite(
+            self.read(tap - 1),
+            y0,
+            self.read(tap + 1),
+            self.read(tap + 2),
+            x,
+        )
     }
 
     /// Writes the next sample.
@@ -112,6 +107,21 @@ impl TapDelay {
     pub fn clear(&mut self) {
         self.buffer.fill(0.0);
     }
+}
+
+/// The value at fraction `x` (0 to 1) of the way from `y0` to `y1`, by 4-point, 3rd-order
+/// Hermite (Catmull-Rom) interpolation over the evenly spaced samples `ym1, y0, y1, y2`
+/// (ADR-0120). With them as `y₋₁, y₀, y₁, y₂`: `c₁ = (y₁ − y₋₁)/2`,
+/// `c₂ = y₋₁ − 2.5·y₀ + 2·y₁ − y₂/2`, `c₃ = (y₂ − y₋₁)/2 + 1.5·(y₀ − y₁)`, and the value is
+/// `((c₃·x + c₂)·x + c₁)·x + y₀` (the "4-point, 3rd-order Hermite, x-form" of Niemitalo,
+/// *Polynomial Interpolators for High-Quality Resampling of Oversampled Audio*, 2001). It passes
+/// through `y0` at 0 and `y1` at 1 and reproduces any quadratic exactly.
+#[must_use]
+pub fn hermite(ym1: f32, y0: f32, y1: f32, y2: f32, x: f32) -> f32 {
+    let c1 = 0.5 * (y1 - ym1);
+    let c2 = ym1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+    let c3 = 0.5 * (y2 - ym1) + 1.5 * (y0 - y1);
+    ((c3 * x + c2) * x + c1) * x + y0
 }
 
 #[cfg(test)]
@@ -214,6 +224,17 @@ mod tests {
         }
         // Their gains there are 0.707 and 0.884, whatever the phase.
         assert!(cubic > 1.2 * linear, "{cubic} vs {linear}");
+    }
+
+    #[test]
+    fn test_hermite_passes_its_points_and_reproduces_a_quadratic() {
+        let f = |t: f32| 0.5 * t * t - 2.0 * t + 1.0;
+        let (ym1, y0, y1, y2) = (f(-1.0), f(0.0), f(1.0), f(2.0));
+        assert_eq!(hermite(ym1, y0, y1, y2, 0.0), y0);
+        assert!((hermite(ym1, y0, y1, y2, 1.0) - y1).abs() < 1e-6);
+        for x in [0.125_f32, 0.5, 0.75] {
+            assert!((hermite(ym1, y0, y1, y2, x) - f(x)).abs() < 1e-6, "{x}");
+        }
     }
 
     #[test]

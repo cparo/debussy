@@ -203,7 +203,9 @@ impl Target {
                     };
                     (shape, parameters.clone(), None)
                 }
-                NodeKind::Instrument { kind, parameters } => {
+                NodeKind::Instrument {
+                    kind, parameters, ..
+                } => {
                     let shape = match instruments::instrument(kind) {
                         Some(_) => Shape::Instrument(kind.clone()),
                         None => Shape::UnknownInstrument,

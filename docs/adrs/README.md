@@ -177,4 +177,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0151](0151-midi-takes-are-journaled-to-a-fixed-record-log-so.md) | MIDI takes are journaled to a fixed-record log so a crash cannot lose them | Accepted | [Take recovery](../architecture/recording.md#take-recovery) |
 | [ADR-0152](0152-midi-clips-are-edited-through-range-selection.md) | MIDI clips are edited through range selection: quantize by grid and strength, a note miniature, and a per-track instrument menu | Accepted | [Track Pane](../architecture/track-pane.md#track-pane) |
 | [ADR-0153](0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md) | MIDI tracks carry a key and pitch names; lanes label roots and named pitches | Accepted | [Key and pitch names](../architecture/track-pane.md#key-and-pitch-names) |
+| [ADR-0154](0154-sampler-zones-are-saved-on-the-instrument-node-and.md) | Sampler zones are saved on the instrument node and their samples are loaded whole | Accepted | [Sampler](../architecture/instruments.md#sampler) |
 
