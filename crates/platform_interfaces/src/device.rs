@@ -63,6 +63,9 @@ pub struct Buffers<'a> {
     pub output_channels: usize,
     /// Frames in this callback; at most the configured buffer size.
     pub frames: usize,
+    /// The host clock when the callback began, in nanoseconds; the clock of
+    /// [`crate::MidiDevices::host_nanos`].
+    pub host_nanos: u64,
 }
 
 /// Code run on the platform's real-time audio thread once per buffer. It must not allocate,

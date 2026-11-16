@@ -137,6 +137,15 @@ impl Shared {
     }
 }
 
+/// The host-clock time of a callback, in nanoseconds, `offset` frames at `rate` after
+/// `instant`. On macOS a `cpal` stream instant counts host-clock nanoseconds
+/// (`docs/architecture/platform.md` "MIDI devices").
+fn host_nanos(instant: cpal::StreamInstant, offset: usize, rate: u32) -> u64 {
+    let base = u64::try_from(instant.as_nanos()).unwrap_or(u64::MAX);
+    let offset = (offset as u64).saturating_mul(1_000_000_000) / u64::from(rate.max(1));
+    base.saturating_add(offset)
+}
+
 /// Frames in `duration` at `rate`, saturating.
 fn frames(duration: std::time::Duration, rate: u32) -> u32 {
     (duration.as_secs_f64() * f64::from(rate))
@@ -268,13 +277,14 @@ impl AudioDevices for MacDevices {
                             frames(t.callback.duration_since(t.capture), rate),
                             Ordering::Release,
                         );
-                        for chunk in data.chunks(buffer * in_channels) {
+                        for (i, chunk) in data.chunks(buffer * in_channels).enumerate() {
                             callback.process(Buffers {
                                 input: chunk,
                                 output: &mut no_output,
                                 input_channels: in_channels,
                                 output_channels: 0,
                                 frames: chunk.len() / in_channels,
+                                host_nanos: host_nanos(t.callback, i * buffer, rate),
                             });
                         }
                     },
@@ -322,7 +332,7 @@ impl AudioDevices for MacDevices {
                             frames(t.playback.duration_since(t.callback), rate),
                             Ordering::Release,
                         );
-                        for chunk in data.chunks_mut(buffer * out_channels) {
+                        for (i, chunk) in data.chunks_mut(buffer * out_channels).enumerate() {
                             let n = chunk.len() / out_channels;
                             let input = &mut staging[..n * in_channels];
                             if let Some(ring) = &ring {
@@ -335,6 +345,7 @@ impl AudioDevices for MacDevices {
                                 input_channels: in_channels,
                                 output_channels: out_channels,
                                 frames: n,
+                                host_nanos: host_nanos(t.callback, i * buffer, rate),
                             });
                         }
                         if let Some(ring) = &ring {

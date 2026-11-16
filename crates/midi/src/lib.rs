@@ -10,11 +10,20 @@
 //! - `message`: [`Message`], a validated channel message, and [`Kind`], its decoded form.
 //! - `buffer`: [`Event`], a message stamped with a frame, and [`EventBuffer`], a frame-ordered
 //!   buffer of them with a fixed capacity.
+//! - `live`: [`TimedMessage`] and the lock-free [`LiveProducer`]/[`LiveInput`] pair that carries
+//!   live input to the audio thread and stamps it with frames (ADR-0146).
 
 #![forbid(unsafe_code)]
 
 mod buffer;
+mod live;
 mod message;
 
+/// The real-time guard's allocator, for the unit tests that run code inside the guard.
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: realtime_guard::GuardAllocator = realtime_guard::GuardAllocator;
+
 pub use buffer::{EVENT_CAPACITY, Event, EventBuffer};
+pub use live::{LIVE_QUEUE_CAPACITY, LiveInput, LiveProducer, TimedMessage, channel};
 pub use message::{Kind, Message};

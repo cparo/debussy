@@ -89,6 +89,17 @@ sounding note. A note-off the event buffer refuses is sent at the next block; ev
 is counted, and the count is readable from the control side
 ([ADR-0145](../adrs/0145-midi-clips-play-through-a-per-track-real-time-note.md)).
 
+## Live MIDI input
+
+Live MIDI input reaches the audio thread through a bounded lock-free queue per input, filled on
+the platform's MIDI thread, and is stamped with frames one block late: a message that arrived at
+host time `t` lands at frame `(t − (callback host time − block length)) × sample rate / 10⁹` of the
+block whose callback runs at that host time, clamped to the block. A message older than that lands
+at frame 0; one at or after the callback's host time waits, with everything queued behind it, for
+the next block; one more than a second ahead lands at the block's last frame. At most the event
+buffer's spare capacity is taken each block; the rest waits
+([ADR-0146](../adrs/0146-midi-devices-use-coremidi-through-objc2-core-midi.md)).
+
 ## Transport
 
 Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last

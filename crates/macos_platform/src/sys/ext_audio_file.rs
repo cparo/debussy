@@ -19,7 +19,7 @@ use objc2_core_audio_types::{
 };
 use objc2_core_foundation::CFURL;
 
-/// A failed AudioToolbox call: its name and `OSStatus`.
+/// A failed Apple framework call: its name and `OSStatus`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Status {
     /// The function that failed.
@@ -42,7 +42,7 @@ impl std::fmt::Display for Status {
 }
 
 /// `Ok` for `noErr`, else the status.
-fn check(call: &'static str, code: i32) -> Result<(), Status> {
+pub(crate) fn check(call: &'static str, code: i32) -> Result<(), Status> {
     if code == 0 {
         Ok(())
     } else {

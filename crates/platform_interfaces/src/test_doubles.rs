@@ -4,6 +4,10 @@
 //! - [`FakeDevices`] has one duplex device. A stream runs its callback on its own thread, as fast
 //!   as it can, with input from a generator function, and captures the output.
 //! - [`FakeCodecs`] decodes files registered with it and keeps what is encoded, all in memory.
+//! - [`FakeMidi`] has endpoints a test adds, unplugs and replugs, takes injected input and
+//!   records what is sent.
+//!
+//! All of them share one host clock, [`host_nanos`].
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,6 +21,17 @@ use crate::device::{
     AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, Latency, StreamConfig,
 };
 use crate::error::Error;
+
+mod midi;
+
+pub use midi::{FakeMidi, SentMessage};
+
+/// The fake host clock: nanoseconds since the first call in this process.
+pub fn host_nanos() -> u64 {
+    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let elapsed = EPOCH.get_or_init(Instant::now).elapsed();
+    u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX)
+}
 
 /// Generates the fake device's input: the sample for `(frame, channel)`, counting frames from the
 /// stream's start.
@@ -130,6 +145,7 @@ impl FakeDevices {
                         input_channels: ins,
                         output_channels: outs,
                         frames,
+                        host_nanos: host_nanos(),
                     });
                     thread_shared.capture(&output);
                     position += frames as u64;

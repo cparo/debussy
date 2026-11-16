@@ -6,6 +6,8 @@
 //!   because sample-rate conversion has no drift correction (ADR-0036).
 //! - **Codecs** ([`Codecs`], [`Decoder`], [`Encoder`]): compressed formats, which go through the
 //!   platform's licensed codecs (ADR-0024).
+//! - **MIDI devices** ([`MidiDevices`], [`MidiInput`], [`MidiOutput`], [`MidiInputCallback`]):
+//!   list endpoints, follow hot-plug, receive host-time-stamped input and send output (ADR-0146).
 //!
 //! Nothing here names a platform type. `macos_platform` implements these traits, and
 //! [`test_doubles`] provides in-memory implementations for other crates' tests.
@@ -14,7 +16,8 @@
 //!
 //! - `device`: audio device traits and types.
 //! - `codec`: codec traits and types.
-//! - [`test_doubles`]: a fake device and fake codecs.
+//! - `midi_io`: MIDI device traits and types.
+//! - [`test_doubles`]: a fake device, fake codecs and fake MIDI endpoints.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -22,6 +25,7 @@
 mod codec;
 mod device;
 mod error;
+mod midi_io;
 pub mod test_doubles;
 
 pub use codec::{CodecFormat, Codecs, Decoder, EncodeSettings, Encoder, FlacDepth, SourceInfo};
@@ -29,3 +33,8 @@ pub use device::{
     AudioCallback, AudioDevices, AudioStream, Buffers, DeviceId, DeviceInfo, Latency, StreamConfig,
 };
 pub use error::Error;
+pub use midi::TimedMessage;
+pub use midi_io::{
+    MidiDevices, MidiDirection, MidiEndpointId, MidiEndpointInfo, MidiInput, MidiInputCallback,
+    MidiOutput,
+};

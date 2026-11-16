@@ -11,6 +11,9 @@ pub enum Error {
     /// No device has this identifier; it may have been unplugged.
     #[error("no audio device {0:?}")]
     DeviceNotFound(String),
+    /// No MIDI endpoint has this identifier; it may have been unplugged.
+    #[error("no MIDI endpoint {0:?}")]
+    MidiEndpointNotFound(String),
     /// The device cannot run this configuration.
     #[error("the device does not support {0}")]
     UnsupportedConfig(String),
