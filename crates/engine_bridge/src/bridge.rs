@@ -179,7 +179,8 @@ impl Bridge {
 
     /// Marks the sources of `tracks` as live input, and every other track's as not, so delay
     /// compensation leaves monitored input undelayed (`docs/architecture/recording.md` "Input
-    /// monitoring", ADR-0136). The marks are kept across later syncs and committed now.
+    /// monitoring", "MIDI recording", ADR-0136). A MIDI track's event source is marked like an
+    /// audio track's source. The marks are kept across later syncs and committed now.
     ///
     /// # Errors
     ///
@@ -193,9 +194,12 @@ impl Bridge {
         self.commit()
     }
 
-    /// Applies `monitored` to every track's source.
+    /// Applies `monitored` to every track's source and event source.
     fn mark_live(&mut self) -> Result<(), Error> {
-        for (track, source) in sources(&self.mirror) {
+        let all = sources(&self.mirror)
+            .into_iter()
+            .chain(event_sources(&self.mirror));
+        for (track, source) in all {
             self.graph
                 .set_live(source, self.monitored.contains(&track))
                 .map_err(Error::Graph)?;

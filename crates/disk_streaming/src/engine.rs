@@ -2,17 +2,34 @@
 //! track channel streams as a [`TimelineSource`], whose reads render the channel's clips from the
 //! stored files through [`WavClipAudio`] on the reader thread; [`Playback`] feeds the engine and
 //! [`Streamer`] moves every stream when the transport starts or jumps. A [`Take`] is the
-//! engine's sink for one recorded channel (`docs/architecture/recording.md` "Capture").
+//! engine's sink for one recorded channel (`docs/architecture/recording.md` "Capture"), and a
+//! [`MidiTake`] for one armed MIDI track ("MIDI recording").
 
 use std::path::PathBuf;
 
-use audio_engine::{ClipAudio, Streams, TakeSink, TrackFeed, TrackRenderer};
+use audio_engine::{ClipAudio, NoteSink, Streams, TakeSink, TrackFeed, TrackRenderer};
+use signal_graph::Message;
 
 use crate::error::Error;
+use crate::midi_take::MidiTake;
 use crate::playback::Playback;
 use crate::source::{FrameSource, open_wav};
 use crate::streamer::{Plan, Streamer};
 use crate::take::Take;
+
+impl NoteSink for MidiTake {
+    fn write(&mut self, frame: u64, message: Message) -> bool {
+        let mut bytes = [0; 3];
+        for (to, from) in bytes.iter_mut().zip(message.bytes()) {
+            *to = *from;
+        }
+        MidiTake::write(self, frame, bytes)
+    }
+
+    fn end(&mut self, frames: u64) {
+        MidiTake::end(self, frames);
+    }
+}
 
 impl TakeSink for Take {
     fn write(&mut self, samples: &[f32]) -> usize {

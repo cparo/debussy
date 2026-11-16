@@ -11,7 +11,8 @@ use audio_engine::Engine;
 use debussy_ui::{App, Launcher, ProjectEntry, Start};
 use engine_bridge::Bridge;
 use import_export::Lame;
-use macos_platform::{MacDevices, folders};
+use macos_platform::{MacDevices, MacMidi, folders};
+use platform_interfaces::MidiDevices;
 use project_model::Session;
 use project_storage::{
     ARCHIVE_SPACE_MARGIN, AppSettings, Bundle, Error as StorageError, unpack_archive,
@@ -84,6 +85,7 @@ impl AppLauncher {
                 settings,
                 settings_path,
                 lame,
+                midi_devices(),
             ));
             let mut app = App::new(session, rate, bridge, engine, services);
             app.set_project_name(name);
@@ -132,6 +134,18 @@ impl AppLauncher {
             let _ = fs::remove_dir_all(&unpacked);
         }
         started
+    }
+}
+
+/// CoreMIDI's endpoints, or `None` (MIDI input then offered nowhere) if CoreMIDI refuses a
+/// client.
+fn midi_devices() -> Option<Box<dyn MidiDevices>> {
+    match MacMidi::new() {
+        Ok(midi) => Some(Box::new(midi)),
+        Err(error) => {
+            eprintln!("debussy: MIDI is not available: {error}");
+            None
+        }
     }
 }
 

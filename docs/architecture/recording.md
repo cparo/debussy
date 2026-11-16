@@ -111,3 +111,31 @@ breaks a limit, has no start (the crash came during the count-in), or leaves not
 removed, its files are left to cleanup, and the status line says the take could not be
 recovered. A bad marker never refuses the bundle
 ([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
+
+## MIDI recording
+
+An armed MIDI track reads one MIDI input, defaulting to the first one online, and is monitored by
+default. Each armed MIDI track opens its own platform input; re-arming keeps it open. Its live
+input is played into the track's event source, merged with clip playback while the transport is
+stopped or playing; while counting in or recording, the track's clips are muted and only live
+input sounds. The engine bridge marks the event source of an armed, monitored MIDI track live, as
+for audio in [Input monitoring](#input-monitoring), so its clips are not delay-compensated either
+while it is armed and monitored.
+
+While capturing, each live message goes to the take at its frame from the take's first frame.
+Messages heard during the count-in are not captured, so a note held from the count-in has no
+note-on in the take. The writer thread collects a pass's MIDI messages in memory; a message the
+take's queue of 4096 cannot hold is dropped and counted as an overrun. When the pass ends, the
+messages become a sequence the take's length long:
+
+- a note-on with velocity 0 is a note-off; a note-off with no note held is ignored;
+- a note-on on a channel and pitch already held ends the held note there, and one that would then
+  be no frames long is dropped;
+- notes still held at the end of the take end there;
+- control changes are kept; pitch bend, pressure and program change are dropped.
+
+A MIDI take is placed like an audio take (see [Take placement](#take-placement)), shifted back by
+the device's output latency plus one device block, the delay with which live input is stamped,
+and the plan latency, instead of the device latency. A take with no notes adds no clip. MIDI takes
+are not in the crash marker and are lost in a crash
+([ADR-0150](../adrs/0150-midi-tracks-are-recorded-and-monitored-through-a.md)).

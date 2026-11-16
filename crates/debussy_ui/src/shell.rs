@@ -485,9 +485,7 @@ mod tests {
     use signal_graph::{Config, NodeId};
 
     use crate::launcher::Start;
-    use crate::services::{
-        ClickPreferences, DeviceChoice, ImportedTrack, Services, TakeFiles, TakeStatus,
-    };
+    use crate::services::{ClickPreferences, DeviceChoice, ImportedTrack, Services, TakeStatus};
     use crate::waveform::Spectrum;
 
     struct NoStreams;
@@ -574,8 +572,28 @@ mod tests {
         fn device_latency(&mut self) -> u64 {
             0
         }
-        fn start_takes(&mut self, _: &[(String, usize)]) -> Result<Vec<TakeFiles>, String> {
+        fn midi_latency(&mut self) -> u64 {
+            0
+        }
+        fn midi_inputs(&mut self) -> Vec<crate::MidiInputChoice> {
+            Vec::new()
+        }
+        fn midi_inputs_changed(&mut self) -> bool {
+            false
+        }
+        fn open_midi_input(
+            &mut self,
+            _: project_model::TrackId,
+            _: &str,
+        ) -> Result<midi::LiveInput, String> {
+            Err("no MIDI here".into())
+        }
+        fn close_midi_input(&mut self, _: project_model::TrackId) {}
+        fn start_takes(&mut self, _: &[(String, usize)], _: usize) -> Result<crate::Takes, String> {
             Err("no recording here".into())
+        }
+        fn take_messages(&mut self, _: usize) -> Vec<(u64, [u8; 3])> {
+            Vec::new()
         }
         fn take_status(&mut self) -> Vec<TakeStatus> {
             Vec::new()

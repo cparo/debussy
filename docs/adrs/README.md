@@ -173,4 +173,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0147](0147-instruments-are-their-own-node-kind.md) | Instruments are their own node kind | Accepted | [Instruments](../architecture/signal-graph.md#instruments) |
 | [ADR-0148](0148-the-synth-s-oscillators-use-minblep-with-polyblep.md) | The synth's oscillators use MinBLEP, with PolyBLEP excluded by a Korg patent | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0149](0149-the-synthesizer-is-a-fixed-pool-of-two-oscillator.md) | The synthesizer is a fixed pool of two-oscillator voices summed to mono | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
+| [ADR-0150](0150-midi-tracks-are-recorded-and-monitored-through-a.md) | MIDI tracks are recorded and monitored through a live event source | Accepted | [MIDI recording](../architecture/recording.md#midi-recording) |
 

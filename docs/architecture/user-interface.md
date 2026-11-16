@@ -249,11 +249,14 @@ shows a monitor toggle, off by default, an input choice: one device input for a 
 pair (1–2, 3–4, …) for a stereo track, defaulting to input 1 or 1–2, and an input meter, one bar
 per channel from −60 to 0 dBFS, red from −1 dBFS, that holds a peak and falls 1.5 dB per display
 frame. Arm, monitor and input are session state, not saved in the project, and change only while
-the transport is stopped or paused. The device's inputs are open only while a track is armed: arming the first track reopens
-the device duplex, and disarming the last reopens it output-only.
+the transport is stopped or paused. The device's inputs are open only while an audio track is armed: arming the first reopens
+the device duplex, and disarming the last reopens it output-only. An armed MIDI track shows a monitor
+toggle, on by default, a choice of MIDI input, defaulting to the first, refreshed when inputs come
+and go, and an activity light lit for six display frames after each message
+([ADR-0150](../adrs/0150-midi-tracks-are-recorded-and-monitored-through-a.md)).
 
-Record is enabled while stopped or paused with a track armed, the device's inputs open and the
-previous take saved. It records every armed track from the playhead while the other tracks play,
+Record is enabled while stopped or paused with a track armed, the device's inputs open if an audio
+track is armed, and the previous take saved. It records every armed track from the playhead while the other tracks play,
 after the chosen count-in, and runs on past the project's end. Record is lit from the press, and
 the status line reads "Count-in" while counting in. Stop or pause ends the pass. Once its files are written, one
 clip per armed track is placed as one undo step (see `docs/architecture/recording.md` "Take

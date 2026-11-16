@@ -111,6 +111,74 @@ impl Sequence {
         })
     }
 
+    /// The sequence a recorded take of `frames` frames makes from `events`: raw MIDI 1.0 channel
+    /// messages (status, then data bytes; an unused data byte is 0) at frames from the take's
+    /// start, in the order they arrived (`docs/architecture/recording.md` "MIDI recording").
+    ///
+    /// - A note-on with velocity 0 is a note-off. A note-off with no note held is ignored.
+    /// - A note-on on a channel and pitch already held ends the held note there; one that would
+    ///   then be no frames long is dropped.
+    /// - Notes still held at `frames` end there; events at or past `frames` start nothing.
+    /// - A control change becomes a [`Control`]. Pitch bend, pressure and program change, and
+    ///   anything that is not a valid channel message, are dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidSequence`] only if the result breaks [`Sequence::new`]'s rules, which
+    /// these rules prevent.
+    pub fn from_capture(events: &[(u64, [u8; 3])], frames: u64) -> Result<Sequence, Error> {
+        // Each held key's note-on frame and velocity, by channel × 128 + pitch.
+        let mut held: Vec<Option<(u64, u8)>> = vec![None; 16 * 128];
+        let mut notes = Vec::new();
+        let mut controls = Vec::new();
+        let mut order: Vec<usize> = (0..events.len()).collect();
+        // Stable, so events at one frame keep their arrival order.
+        order.sort_by_key(|&i| events[i].0);
+        let close = |notes: &mut Vec<Note>, slot: &mut Option<(u64, u8)>, key: usize, at: u64| {
+            if let Some((start, velocity)) = slot.take()
+                && at > start
+            {
+                notes.push(Note {
+                    start,
+                    length: at - start,
+                    channel: (key / 128) as u8,
+                    pitch: (key % 128) as u8,
+                    velocity,
+                });
+            }
+        };
+        for i in order {
+            let (frame, [status, first, second]) = events[i];
+            if !(0x80..=0xEF).contains(&status) || first > 0x7F || second > 0x7F {
+                continue;
+            }
+            let channel = usize::from(status & 0x0F);
+            let key = channel * 128 + usize::from(first);
+            let at = frame.min(frames);
+            match status & 0xF0 {
+                0x90 if second > 0 => {
+                    close(&mut notes, &mut held[key], key, at);
+                    if frame < frames {
+                        held[key] = Some((frame, second));
+                    }
+                }
+                0x80 | 0x90 => close(&mut notes, &mut held[key], key, at),
+                0xB0 if frame < frames => controls.push(Control {
+                    frame,
+                    channel: channel as u8,
+                    controller: first,
+                    value: second,
+                }),
+                _ => {}
+            }
+        }
+        for (key, slot) in held.iter_mut().enumerate() {
+            close(&mut notes, slot, key, frames);
+        }
+        notes.sort_by_key(|n| (n.start, n.channel, n.pitch));
+        Sequence::new(frames, notes, controls)
+    }
+
     /// Its length, in frames.
     pub fn frames(&self) -> u64 {
         self.frames
@@ -256,6 +324,113 @@ mod tests {
             ],
             vec![]
         ));
+    }
+
+    const ON: u8 = 0x90;
+    const OFF: u8 = 0x80;
+
+    #[test]
+    fn test_from_capture_pairs_note_on_and_off() -> Result<(), Error> {
+        let events = [
+            (10, [ON, 60, 100]),
+            (12, [ON | 3, 64, 90]),
+            (20, [OFF, 60, 40]),
+            // A note-on with velocity 0 is a note-off.
+            (30, [ON | 3, 64, 0]),
+        ];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert_eq!(
+            sequence.notes(),
+            [note(10, 10, 0, 60, 100), note(12, 18, 3, 64, 90)]
+        );
+        assert_eq!(sequence.frames(), 100);
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_retrigger_ends_the_held_note() -> Result<(), Error> {
+        let events = [(0, [ON, 60, 100]), (5, [ON, 60, 80]), (9, [OFF, 60, 0])];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert_eq!(
+            sequence.notes(),
+            [note(0, 5, 0, 60, 100), note(5, 4, 0, 60, 80)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_duplicate_note_on_in_one_frame_keeps_the_later() -> Result<(), Error> {
+        let events = [(5, [ON, 60, 100]), (5, [ON, 60, 80]), (9, [OFF, 60, 0])];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert_eq!(sequence.notes(), [note(5, 4, 0, 60, 80)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_closes_held_notes_at_the_end() -> Result<(), Error> {
+        let events = [(90, [ON, 60, 100]), (100, [ON, 61, 100])];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert_eq!(sequence.notes(), [note(90, 10, 0, 60, 100)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_ignores_unmatched_and_unsupported_events() -> Result<(), Error> {
+        let events = [
+            (1, [OFF, 60, 0]),
+            (2, [0xE0, 0, 64]),
+            (3, [0xC0, 5, 0]),
+            (4, [0xD0, 50, 0]),
+            (5, [0xA0, 60, 50]),
+            // Not channel messages.
+            (6, [0x40, 60, 50]),
+            (7, [0xF8, 0, 0]),
+            (8, [ON, 200, 50]),
+        ];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert!(sequence.notes().is_empty());
+        assert!(sequence.controls().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_keeps_control_changes_in_order() -> Result<(), Error> {
+        let events = [
+            (4, [0xB1, 64, 127]),
+            (4, [0xB1, 64, 0]),
+            (2, [0xB0, 7, 90]),
+            (100, [0xB0, 7, 10]),
+        ];
+        let sequence = Sequence::from_capture(&events, 100)?;
+        assert_eq!(
+            sequence.controls(),
+            [
+                control(2, 0, 7, 90),
+                control(4, 1, 64, 127),
+                control(4, 1, 64, 0)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_capture_sorts_notes_for_new() -> Result<(), Error> {
+        let events = [
+            (0, [ON | 2, 70, 100]),
+            (0, [ON, 72, 100]),
+            (0, [ON, 60, 100]),
+            (3, [OFF | 2, 70, 0]),
+        ];
+        let sequence = Sequence::from_capture(&events, 10)?;
+        assert_eq!(
+            sequence.notes(),
+            [
+                note(0, 10, 0, 60, 100),
+                note(0, 10, 0, 72, 100),
+                note(0, 3, 2, 70, 100)
+            ]
+        );
+        Ok(())
     }
 
     #[test]

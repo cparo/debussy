@@ -132,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "dsp",
+ "midi",
  "realtime_guard",
  "signal_graph",
  "thiserror 2.0.21",
@@ -544,6 +545,7 @@ dependencies = [
  "engine_bridge",
  "import_export",
  "macos_platform",
+ "midi",
  "platform_interfaces",
  "project_model",
  "project_storage",
@@ -563,7 +565,9 @@ dependencies = [
  "engine_bridge",
  "iced",
  "instruments",
+ "midi",
  "modulation",
+ "platform_interfaces",
  "project_model",
  "signal_graph",
 ]
