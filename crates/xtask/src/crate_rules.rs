@@ -55,6 +55,7 @@ const CRATES: &[(&str, Kind)] = &[
     ("modulation", Kind::RealtimeCore),
     ("midi", Kind::RealtimeCore),
     ("audio_effects", Kind::RealtimeCore),
+    ("instruments", Kind::RealtimeCore),
     ("signal_graph", Kind::RealtimeCore),
     ("audio_engine", Kind::RealtimeCore),
     ("audio_analysis", Kind::Core),

@@ -22,6 +22,7 @@ const MIGRATIONS: &[Migration] = &[
     four_to_five,
     five_to_six,
     six_to_seven,
+    seven_to_eight,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -92,6 +93,12 @@ fn six_to_seven(mut value: Value) -> Result<Value, String> {
             );
         }
     }
+    Ok(value)
+}
+
+/// Version 8 added instrument nodes (ADR-0147); no version 7 file can hold one, so nothing
+/// changes.
+fn seven_to_eight(value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
@@ -264,6 +271,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_seven_unchanged() -> Result<(), Box<dyn StdError>> {
+        let v7 = r#"{"format_version":7,"sample_rate":48000,"connections":[],
+            "nodes":[{"id":1,"kind":{"kind":"effect","effect":"delay","parameters":{}},
+                      "curve_ports":{}}],
+            "tracks":[{"id":2,"name":"m","kind":{"kind":"midi"},"clips":[]}],
+            "tempo":{"bpm":90.0,"beats_per_bar":3,"beat_unit":4},"curves":[],
+            "sequences":[]}"#;
+        let saved = parse(Path::new("p"), v7)?;
+        assert_eq!(saved.format_version, FORMAT_VERSION);
+        assert_eq!(saved.nodes.len(), 1);
+        assert_eq!(saved.tracks[0].kind, SavedTrackKind::Midi {});
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -271,12 +293,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":8");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":9");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 8,
-                supported: 7,
+                found: 9,
+                supported: 8,
                 ..
             })
         ));

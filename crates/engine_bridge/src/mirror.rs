@@ -69,6 +69,9 @@ pub(crate) struct Mirror {
 fn processor(shape: &Shape) -> Option<Box<dyn Node>> {
     match shape {
         Shape::Effect(kind) => audio_effects::effect(kind),
+        Shape::Instrument(kind) => instruments::instrument(kind)
+            .or_else(|| Some(Box::new(instruments::Silence) as Box<dyn Node>)),
+        Shape::UnknownInstrument => Some(Box::new(instruments::Silence)),
         Shape::Unknown { inputs, outputs } => {
             Some(Box::new(audio_effects::Silence::new(*inputs, *outputs)))
         }

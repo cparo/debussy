@@ -170,4 +170,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0144](0144-midi-clips-are-windows-onto-shared-note-sequences.md) | MIDI clips are windows onto shared note sequences; format 7 | Accepted | [Editing model](../architecture/project.md#editing-model) |
 | [ADR-0145](0145-midi-clips-play-through-a-per-track-real-time-note.md) | MIDI clips play through a per-track real-time note player that treats any jump as a seek | Accepted | [MIDI clip playback](../architecture/engine.md#midi-clip-playback) |
 | [ADR-0146](0146-midi-devices-use-coremidi-through-objc2-core-midi.md) | MIDI devices use CoreMIDI through objc2-core-midi, with validated, bounded input stamped one block late | Accepted | [MIDI devices](../architecture/platform.md#midi-devices) |
+| [ADR-0147](0147-instruments-are-their-own-node-kind.md) | Instruments are their own node kind | Accepted | [Instruments](../architecture/signal-graph.md#instruments) |
 

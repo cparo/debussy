@@ -392,6 +392,10 @@ fn kind_to_saved(kind: &NodeKind) -> SavedNodeKind {
             effect: kind.clone(),
             parameters: parameters.clone(),
         },
+        NodeKind::Instrument { kind, parameters } => SavedNodeKind::Instrument {
+            instrument: kind.clone(),
+            parameters: parameters.clone(),
+        },
         NodeKind::Mixer {
             channels,
             parameters,
@@ -492,6 +496,16 @@ fn kind_from_saved(kind: SavedNodeKind) -> Result<NodeKind, String> {
             check_name(&effect, "an effect id")?;
             NodeKind::Effect {
                 kind: effect,
+                parameters: parameters_from_saved(parameters)?,
+            }
+        }
+        SavedNodeKind::Instrument {
+            instrument,
+            parameters,
+        } => {
+            check_name(&instrument, "an instrument id")?;
+            NodeKind::Instrument {
+                kind: instrument,
                 parameters: parameters_from_saved(parameters)?,
             }
         }

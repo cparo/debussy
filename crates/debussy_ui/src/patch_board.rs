@@ -101,7 +101,8 @@ pub struct Board {
 }
 
 /// A node's input and output ports' layouts. Effects' ports are not known to the model; they
-/// are drawn as one stereo input and output.
+/// are drawn as one stereo input and output. An instrument's event input is one pin, like a mono
+/// port's.
 fn ports(kind: &NodeKind) -> (Vec<Layout>, Vec<Layout>) {
     match kind {
         NodeKind::Mixer { channels, .. } => (vec![Layout::Mono; *channels], vec![Layout::Stereo]),
@@ -109,6 +110,7 @@ fn ports(kind: &NodeKind) -> (Vec<Layout>, Vec<Layout>) {
             (vec![*layout], vec![*layout])
         }
         NodeKind::Effect { .. } => (vec![Layout::Stereo], vec![Layout::Stereo]),
+        NodeKind::Instrument { .. } => (vec![Layout::Mono], vec![Layout::Stereo]),
     }
 }
 
@@ -120,6 +122,9 @@ pub fn title(kind: &NodeKind) -> String {
         NodeKind::FeedbackDelay { .. } => "Feedback delay".to_owned(),
         NodeKind::Effect { kind, .. } => {
             audio_effects::display_name(kind).map_or_else(|| kind.clone(), str::to_owned)
+        }
+        NodeKind::Instrument { kind, .. } => {
+            instruments::display_name(kind).map_or_else(|| kind.clone(), str::to_owned)
         }
     }
 }
@@ -208,22 +213,30 @@ pub fn occupied(state: &State, pin: Pin) -> bool {
 }
 
 /// Whether a wire may run from output `from` to input `to`: an output to a free input of
-/// another endpoint carrying the same kind of signal, audio to audio or control to control. A
-/// MIDI track's event output connects to nothing yet: no input takes events.
+/// another endpoint carrying the same kind of signal: audio to audio, control to control, or
+/// events (a MIDI track's output) to events (an instrument's input).
 pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
     from.output
         && !to.output
         && from.endpoint != to.endpoint
         && from.endpoint.is_control() == to.endpoint.is_control()
-        && !is_event(state, from)
+        && is_event(state, from) == is_event(state, to)
         && !occupied(state, to)
 }
 
-/// Whether `pin` carries events: a MIDI track's output.
+/// Whether `pin` carries events: a MIDI track's output, or an instrument's input 0.
 fn is_event(state: &State, pin: Pin) -> bool {
     match pin.endpoint {
         Endpoint::Track(id) => {
             pin.output && state.track(id).is_some_and(|t| t.kind == TrackKind::Midi)
+        }
+        Endpoint::Node(id) => {
+            !pin.output
+                && pin.port == 0
+                && matches!(
+                    state.node(id).map(|n| &n.kind),
+                    Some(NodeKind::Instrument { .. })
+                )
         }
         _ => false,
     }
@@ -1264,6 +1277,67 @@ mod tests {
             };
             assert!(!can_connect(session.state(), out, input));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_midi_track_connects_only_to_instrument_input() -> Result {
+        let mut session = Session::new_project();
+        let keys = session.add_midi_track("Keys")?;
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let synth = session.add_node(NodeKind::Instrument {
+            kind: "from-the-future".to_owned(),
+            parameters: std::collections::BTreeMap::new(),
+        })?;
+        let bus = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+        let pin = |endpoint, output, port| Pin {
+            endpoint,
+            output,
+            port,
+            side: None,
+        };
+        let board = layout(
+            session.state(),
+            &[(keys, vec![50.0]), (vocal, vec![150.0])],
+            &[],
+            Size::new(500.0, 400.0),
+        );
+        let event_in = pin(Endpoint::Node(synth), false, 0);
+        assert!(board.pins.contains_key(&event_in));
+        assert_eq!(
+            board
+                .nodes
+                .iter()
+                .find(|n| n.id == synth)
+                .map(|n| &n.title[..]),
+            Some("from-the-future")
+        );
+        let state = session.state();
+        assert!(can_connect(
+            state,
+            pin(Endpoint::Track(keys), true, 0),
+            event_in
+        ));
+        assert!(!can_connect(
+            state,
+            pin(Endpoint::Track(vocal), true, 0),
+            event_in
+        ));
+        let stereo_out = Pin {
+            side: Some(Side::Left),
+            ..pin(Endpoint::Node(synth), true, 0)
+        };
+        assert!(board.pins.contains_key(&stereo_out));
+        let bus_in = Pin {
+            side: Some(Side::Left),
+            ..pin(Endpoint::Node(bus), false, 0)
+        };
+        assert!(can_connect(state, stereo_out, bus_in));
+        assert!(!can_connect(
+            state,
+            pin(Endpoint::Track(keys), true, 0),
+            bus_in
+        ));
         Ok(())
     }
 

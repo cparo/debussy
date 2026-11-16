@@ -89,11 +89,16 @@ or into a new project, which copies the audio files it references ([ADR-0012](..
 
 The project's routing is part of its editable state, in the same undo history and named versions as
 its tracks. Each audio track is a source with one output of the track's layout. Every project has one
-stereo output, which cannot be removed. Other nodes are effects, mixers, buses and feedback delays joined
+stereo output, which cannot be removed. Other nodes are effects, instruments, mixers, buses and feedback delays joined
 by connections ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
 
 A MIDI track's output is one event port; it is not routed when the track is created, and it
 connects only to an event input ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)).
+
+An instrument node is saved as a stable kind id with its non-default parameter values keyed by
+name, as an effect is; an unknown kind id is kept and plays as silence. The model knows its ports:
+event input 0, which only a MIDI track's output may reach, and stereo output 0. A side of an event
+port is refused ([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)).
 
 A new track is connected to the output, panned centre, in the same undo step, and removing a track
 removes its connections. An effect node is saved as a stable kind id with its non-default parameter
@@ -202,7 +207,9 @@ version 5 files migrate unchanged ([ADR-0134](../adrs/0134-wire-handles-are-save
 `sequences`, each `frames`, `notes` as `[start, length, channel, pitch, velocity]` and `controls` as
 `[frame, channel, controller, value]`, and a clip source may be `{"kind":"midi","sequence":n}`, an
 index into `sequences`; a sequence shared by several clips is saved once. Version 6 files migrate
-to audio tracks and no sequences ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)). Times are
+to audio tracks and no sequences ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)). Since version 8 a node kind may
+be `{"kind":"instrument","instrument":…,"parameters":{…}}`; version 7 files migrate unchanged
+([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 7;
+pub const FORMAT_VERSION: u32 = 8;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -189,6 +189,11 @@ pub(crate) enum SavedNodeKind {
     /// A built-in effect by stable id, with parameter values by name.
     Effect {
         effect: String,
+        parameters: BTreeMap<String, f32>,
+    },
+    /// Since version 8: a built-in instrument by stable id, with parameter values by name.
+    Instrument {
+        instrument: String,
         parameters: BTreeMap<String, f32>,
     },
     Mixer {

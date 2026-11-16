@@ -59,6 +59,8 @@ pub enum NewNode {
     FeedbackDelay,
     /// A built-in effect of this kind id (`audio_effects::EFFECTS`), at its defaults.
     Effect(&'static str),
+    /// A built-in instrument of this kind id (`instruments::INSTRUMENTS`), at its defaults.
+    Instrument(&'static str),
 }
 
 impl NewNode {
@@ -74,6 +76,10 @@ impl NewNode {
                 seconds: 0.25,
             },
             NewNode::Effect(kind) => NodeKind::Effect {
+                kind: kind.to_owned(),
+                parameters: std::collections::BTreeMap::new(),
+            },
+            NewNode::Instrument(kind) => NodeKind::Instrument {
                 kind: kind.to_owned(),
                 parameters: std::collections::BTreeMap::new(),
             },

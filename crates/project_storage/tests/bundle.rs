@@ -182,6 +182,16 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
     for (i, &track) in tracks.iter().enumerate() {
         session.connect(Endpoint::Track(track), 0, Endpoint::Node(mixer), i)?;
     }
+    let keys = session.add_midi_track("Synth keys")?;
+    let mut synth_parameters = BTreeMap::new();
+    synth_parameters.insert("cutoff".to_owned(), random.below(10_000) as f32 + 20.5);
+    // An instrument this build does not know is kept as saved.
+    let synth = session.add_node(NodeKind::Instrument {
+        kind: "from-the-future".to_owned(),
+        parameters: synth_parameters,
+    })?;
+    session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
+    session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;
     session.connect(Endpoint::Node(mixer), 0, Endpoint::Node(effect), 0)?;
     let out = session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
     let reach = random.below(400) as f32 + 0.5;

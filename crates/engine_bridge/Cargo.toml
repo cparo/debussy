@@ -13,6 +13,7 @@ audio_buffers = { path = "../audio_buffers" }
 audio_effects = { path = "../audio_effects" }
 audio_engine = { path = "../audio_engine" }
 dsp = { path = "../dsp" }
+instruments = { path = "../instruments" }
 project_model = { path = "../project_model" }
 signal_graph = { path = "../signal_graph" }
 thiserror = "2.0.21"

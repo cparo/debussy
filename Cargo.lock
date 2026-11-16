@@ -562,6 +562,7 @@ dependencies = [
  "audio_engine",
  "engine_bridge",
  "iced",
+ "instruments",
  "modulation",
  "project_model",
  "signal_graph",
@@ -637,6 +638,7 @@ dependencies = [
  "audio_effects",
  "audio_engine",
  "dsp",
+ "instruments",
  "modulation",
  "project_model",
  "signal_graph",
@@ -1314,6 +1316,14 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "instruments"
+version = "0.1.0"
+dependencies = [
+ "audio_buffers",
+ "signal_graph",
 ]
 
 [[package]]
@@ -2362,6 +2372,7 @@ version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_effects",
+ "instruments",
  "midi",
  "modulation",
  "signal_graph",
