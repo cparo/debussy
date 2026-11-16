@@ -1,6 +1,6 @@
 [package]
 name = "macos_platform"
-description = "platform_interfaces for macOS: cpal audio devices and AudioToolbox codecs."
+description = "platform_interfaces for macOS: cpal audio devices, AudioToolbox codecs and CoreMIDI devices."
 version.workspace = true
 publish = false
 edition.workspace = true
@@ -20,6 +20,10 @@ objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = 
     "objc2-core-audio-types",
     "objc2-core-foundation",
 ] }
+objc2-core-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "HostTime",
+] }
 objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
     "std",
     "CoreAudioBaseTypes",
@@ -27,7 +31,17 @@ objc2-core-audio-types = { version = "0.3.2", default-features = false, features
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
     "CFBase",
+    "CFDate",
+    "CFRunLoop",
+    "CFString",
     "CFURL",
+] }
+objc2-core-midi = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "MIDIServices",
+    "block2",
+    "objc2",
+    "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
@@ -44,6 +58,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSString",
     "NSURL",
 ] }
+midi = { path = "../midi" }
 platform_interfaces = { path = "../platform_interfaces" }
 thiserror = "2.0.21"
 

@@ -29,6 +29,25 @@ pushes samples into a lock-free ring of 4 buffers; the output callback takes one
 (silence for any shortfall) and runs the audio callback with both. The input latency reported
 includes the frames waiting in the ring ([ADR-0052](../adrs/0052-a-duplex-stream-is-two-cpal-streams-joined-by-a.md)).
 
+## MIDI devices
+
+MIDI endpoints are listed, followed and opened through CoreMIDI, used only inside the platform
+crate through `objc2-core-midi`, and only behind `platform_interfaces`' MIDI device interface. The
+process has one CoreMIDI client, never disposed, made on a thread of its own that runs a
+`CFRunLoop` for its setup notifications. Its ports use the Universal MIDI Packet MIDI 1.0
+protocol. An endpoint is identified by its CoreMIDI unique ID. An open input reconnects by itself
+when its endpoint returns, and reports a stopped stream while it is gone; an output looks its
+endpoint up on every send and fails while it is offline. A stream's audio callback is given its
+host time, in the same nanoseconds as MIDI timestamps; on macOS a `cpal` stream instant is that
+clock.
+
+MIDI input is untrusted. Only MIDI 1.0 channel voice messages that `midi::Message` accepts are
+kept; system messages, SysEx, utility and MIDI 2.0 messages, and invalid or truncated ones are
+dropped. Each input's queue to the audio thread holds 1024 messages; what does not fit is dropped.
+Every dropped message is counted and the count is readable from the input. Timestamps are clamped
+when stamped (see `docs/architecture/engine.md` "Live MIDI input"). No input causes a panic
+([ADR-0146](../adrs/0146-midi-devices-use-coremidi-through-objc2-core-midi.md)).
+
 ## App bundle
 
 Debussy ships as `Debussy.app`, assembled by `cargo xtask bundle` from the release `debussy`

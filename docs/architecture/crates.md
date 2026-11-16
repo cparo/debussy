@@ -10,7 +10,7 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
 | `audio_buffers` | real-time core | Sample blocks, preallocated block pools, lock-free single-producer/single-consumer queues |
 | `dsp` | real-time core | Resampling, FFT, dither, filter and oscillator primitives |
 | `modulation` | real-time core | Modulation sources as plain DSP primitives: the LFO and tempo-sync arithmetic ([ADR-0118](../adrs/0118-modulation-sources-live-in-a-new-real-time-core.md)) |
-| `midi` | real-time core | MIDI 1.0 channel messages and fixed-capacity, frame-stamped event buffers ([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)) |
+| `midi` | real-time core | MIDI 1.0 channel messages, fixed-capacity, frame-stamped event buffers, and the live-input queue and its stamping ([ADR-0143](../adrs/0143-event-ports-carry-midi-1-0-channel-messages.md)) |
 | `audio_effects` | real-time core | The built-in effect nodes, built from `dsp` and `modulation`: mixer, filters, equaliser, dynamics, amplifier, delay, reverb, chorus, flanger, and the registry by kind id |
 | `signal_graph` | real-time core | The processing graph: nodes, typed ports, cycle rules, processing plans, delay compensation, panning and summing |
 | `audio_engine` | real-time core | Running a processing plan each block: transport, clip playback from streamed buffers, recording capture, input monitoring, offline rendering |
@@ -18,11 +18,11 @@ RustDoc, not here ([ADR-0026](../adrs/0026-the-workspace-is-split-into-seventeen
 | `engine_bridge` | core | The project as the engine runs it: routing kept in step with the processing graph, tracks as clip renderers ([ADR-0054](../adrs/0054-a-new-engine-bridge-crate-keeps-the-running-graph.md)) |
 | `project_model` | core | Tracks, clips, routing, edits as undoable commands, named versions |
 | `wav_files` | core | WAV and RF64 reading and writing over `Read`, `Write` and `Seek` |
-| `platform_interfaces` | core | The traits a platform implements: audio devices, compressed-audio codecs |
+| `platform_interfaces` | core | The traits a platform implements: audio devices, compressed-audio codecs, MIDI devices |
 | `disk_streaming` | I/O | Read-ahead of project audio from disk into buffers for `audio_engine`, and writing recorded takes to disk |
 | `project_storage` | I/O | The project bundle: `project.json`, versions, migrations, crash-safe saving, cleanup |
 | `import_export` | I/O | Import (decode, resample, split into mono files) and export (render, dither, encode) |
-| `macos_platform` | platform | `platform_interfaces` for macOS: `cpal` devices and AudioToolbox codecs |
+| `macos_platform` | platform | `platform_interfaces` for macOS: `cpal` devices, AudioToolbox codecs and CoreMIDI devices |
 | `debussy_ui` | UI | The `iced` user interface |
 | `debussy` | binary | The application: wires the platform, engine, storage and UI together |
 | `realtime_guard` | test support | The real-time guard (see `docs/architecture/engine.md` "Real-time thread") |

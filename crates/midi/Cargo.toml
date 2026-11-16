@@ -8,6 +8,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+audio_buffers = { path = "../audio_buffers" }
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
 
 [lints]
 workspace = true
