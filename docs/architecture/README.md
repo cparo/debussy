@@ -118,6 +118,8 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Export](import-export.md#export)
   - [Export bit depth](import-export.md#export-bit-depth)
   - [MP3 export](import-export.md#mp3-export)
+- [Instruments](instruments.md)
+  - [Synthesizer](instruments.md#synthesizer)
 - [Licensing](licensing.md)
   - [Project licence](licensing.md#project-licence)
   - [Dependency licences](licensing.md#dependency-licences)

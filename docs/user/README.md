@@ -105,7 +105,7 @@ is, after the count-in.
 ## Routing and effects
 
 The board on the right shows how tracks reach the output. Click **+** at its top right to add a
-mixer, bus, feedback delay or effect, drag from an output to an input to connect, and click a node
+mixer, bus, feedback delay, effect or instrument, drag from an output to an input to connect, and click a node
 to open its controls. Changes are heard while you drag; letting go makes one undo step.
 
 - **High-pass filter** removes what is below its **Cutoff** (default 80 Hz), such as rumble;
@@ -163,7 +163,20 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   spike at the start is the original sound; the delay's repeats are spikes after it and the
   reverb's tail is a falling slope. The time across fits the settings.
 
-Effect settings are saved with the project.
+- **Synthesizer**, under **Instruments** in the **+** menu, turns notes into sound. Wire a MIDI
+  track's output to its input (the only input a MIDI track can reach) and its output to a mixer or
+  the outputs. Each voice mixes two oscillators (**Wave**: saw, pulse or triangle; **Octave**,
+  **Detune**, **Pulse width** for the pulse wave, and **Level**), then a **Filter** that removes
+  what is above its **Cutoff**; **Resonance** makes it ring at the cutoff. The **Filter
+  envelope** moves the cutoff by **Envelope amount** octaves each time a note starts, and the
+  **Amp envelope** shapes each note's loudness: **Attack** (rise), **Decay** (fall to the
+  **Sustain** level while the key is held) and **Release** (fade after the key is let go). Harder
+  playing is louder by **Amp velocity** and brighter by the filter's **Velocity amount**. The
+  **LFO** wobbles the pitch, cutoff or loudness at its **Rate** by its **Depth**. **Bend range**
+  sets how far the pitch wheel bends, in semitones, and **Voices** how many notes sound at once;
+  a note beyond that takes over the quietest or oldest one. The sustain pedal holds notes.
+
+Effect and instrument settings are saved with the project.
 
 ## Exporting
 
@@ -199,4 +212,6 @@ be refused; unzip it and open the project instead.
 
 ## Not yet available
 
-Punch-in and loop recording, editing clips in the window, and automation.
+Punch-in and loop recording, editing clips in the window, and automation. MIDI tracks and their
+clips cannot yet be made or recorded in the window, so until they can, the synthesizer has no
+notes to play.

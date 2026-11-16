@@ -4,9 +4,11 @@ use std::error::Error;
 use std::sync::Arc;
 
 use audio_buffers::Layout;
-use audio_engine::{ControlPoint, MidiTrack, NoteSpan};
+use std::collections::BTreeMap;
+
+use audio_engine::{ControlPoint, MidiTrack, NoteSpan, render};
 use engine_bridge::{Bridge, midi_tracks, render_graph};
-use project_model::{Clip, Control, Note, Sequence, Session, Source, TrackId};
+use project_model::{Clip, Control, Endpoint, NodeKind, Note, Sequence, Session, Source, TrackId};
 use signal_graph::Config;
 
 fn config() -> Config {
@@ -153,5 +155,50 @@ fn test_render_graph_lists_event_sources() -> Result<(), Box<dyn Error>> {
         Some(tracks[0].source()),
         graph.event_sources.get(&midi).copied()
     );
+    Ok(())
+}
+
+#[test]
+fn test_midi_clip_plays_through_the_synth_offline() -> Result<(), Box<dyn Error>> {
+    // A MIDI track wired to a synth wired to the output; one note from frame 200 to 600.
+    let mut session = Session::new();
+    let keys = session.add_midi_track("keys")?;
+    session.add_clip(
+        keys,
+        Clip::new(sequence(vec![note(200, 400, 60)], Vec::new())?, 0, 1000, 0),
+    )?;
+    let synth = session.add_node(NodeKind::Instrument {
+        kind: "synth".to_owned(),
+        parameters: BTreeMap::new(),
+    })?;
+    session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
+    session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;
+    let mut graph = render_graph(session.state(), config())?;
+    let mut midi = midi_tracks(session.state(), &graph.event_sources);
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    render(
+        &mut graph.runner,
+        graph.output,
+        &mut [],
+        &mut midi,
+        0,
+        1000,
+        128,
+        &mut |l, r| {
+            left.extend_from_slice(l);
+            right.extend_from_slice(r);
+            Ok(())
+        },
+    )?;
+    assert_eq!(left.len(), 1000);
+    assert!(
+        left[..200].iter().all(|&s| s == 0.0),
+        "sound before the note"
+    );
+    assert!(
+        left[200..600].iter().any(|s| s.abs() > 1e-3),
+        "the note is silent"
+    );
+    assert_eq!(left, right);
     Ok(())
 }

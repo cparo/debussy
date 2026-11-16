@@ -1323,7 +1323,12 @@ name = "instruments"
 version = "0.1.0"
 dependencies = [
  "audio_buffers",
+ "dsp",
+ "midi",
+ "modulation",
+ "realtime_guard",
  "signal_graph",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -9,6 +9,8 @@
 //! - `shape`: [`Shape`], the LFO waveforms, each a value from −1 to 1 at a phase.
 //! - `lfo`: [`Lfo`], a phase-accumulator low-frequency oscillator with offset reads for stereo
 //!   spread and voices.
+//! - `envelope`: [`Adsr`], an attack, decay, sustain and release envelope of exponential
+//!   segments, retriggered from its current level, and its [`EnvelopeStage`].
 //! - `curve`: [`Curve`], an automation curve of cubic Bézier segments that is a function of
 //!   time, read through a [`Cursor`].
 //! - `error`: [`CurveError`], why points do not make a valid curve.
@@ -18,12 +20,14 @@
 #![forbid(unsafe_code)]
 
 mod curve;
+mod envelope;
 mod error;
 mod lfo;
 mod shape;
 pub mod sync;
 
 pub use curve::{Cursor, Curve, EMPTY_VALUE, Handle, Point};
+pub use envelope::{Adsr, Stage as EnvelopeStage};
 pub use error::CurveError;
 pub use lfo::Lfo;
 pub use shape::Shape;
