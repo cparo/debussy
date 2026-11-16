@@ -36,7 +36,7 @@ fn run(
     let (mut left, mut right) = (vec![0.0; blocks * BLOCK], vec![0.0; blocks * BLOCK]);
     for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
         let interleaved: Vec<f32> = (0..BLOCK * 2).map(|i| input(*at + i / 2, i % 2)).collect();
-        assert_realtime(|| processor.process(&interleaved, 2, l, r))?;
+        assert_realtime(|| processor.process(&interleaved, 2, 0, l, r))?;
         *at += BLOCK;
     }
     Ok((left, right))
@@ -73,12 +73,15 @@ fn test_capture_starts_once_primed_and_ends_on_stop() -> Result<(), Box<dyn Erro
     let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
     engine.set_tracks(tracks)?;
     let (sink, take) = memory_sink(100_000);
-    engine.arm(vec![ArmedTrack {
-        source: g.mono,
-        inputs: vec![1],
-        monitor: false,
-        sinks: vec![sink],
-    }])?;
+    engine.arm(
+        vec![ArmedTrack {
+            source: g.mono,
+            inputs: vec![1],
+            monitor: false,
+            sinks: vec![sink],
+        }],
+        Vec::new(),
+    )?;
     engine.locate(1000, &mut streams)?;
     engine.record(&mut streams, 0)?;
     assert!(engine.is_recording());
@@ -122,12 +125,15 @@ fn test_pause_ends_the_take_and_rearming_ends_the_old_one() -> Result<(), Box<dy
     let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
     let arm = |engine: &mut Engine| -> Result<_, Box<dyn Error>> {
         let (sink, take) = memory_sink(10_000);
-        engine.arm(vec![ArmedTrack {
-            source: g.mono,
-            inputs: vec![0],
-            monitor: false,
-            sinks: vec![sink],
-        }])?;
+        engine.arm(
+            vec![ArmedTrack {
+                source: g.mono,
+                inputs: vec![0],
+                monitor: false,
+                sinks: vec![sink],
+            }],
+            Vec::new(),
+        )?;
         Ok(take)
     };
     let first = arm(&mut engine)?;
@@ -158,12 +164,15 @@ fn test_monitored_input_replaces_clips_whenever_armed() -> Result<(), Box<dyn Er
     let mut streams = TestStreams(Arc::clone(&control));
     let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
     engine.set_tracks(tracks)?;
-    engine.arm(vec![ArmedTrack {
-        source: g.stereo,
-        inputs: vec![1, 0],
-        monitor: true,
-        sinks: Vec::new(),
-    }])?;
+    engine.arm(
+        vec![ArmedTrack {
+            source: g.stereo,
+            inputs: vec![1, 0],
+            monitor: true,
+            sinks: Vec::new(),
+        }],
+        Vec::new(),
+    )?;
     let mut at = 0;
     // Stopped: the input is heard, crossed as armed.
     let from = at;
@@ -188,12 +197,15 @@ fn test_unmonitored_armed_track_is_silent_only_while_recording() -> Result<(), B
     let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
     engine.set_tracks(tracks)?;
     let (sink, _take) = memory_sink(10_000);
-    engine.arm(vec![ArmedTrack {
-        source: g.stereo,
-        inputs: vec![0, 1],
-        monitor: false,
-        sinks: vec![sink],
-    }])?;
+    engine.arm(
+        vec![ArmedTrack {
+            source: g.stereo,
+            inputs: vec![0, 1],
+            monitor: false,
+            sinks: vec![sink],
+        }],
+        Vec::new(),
+    )?;
     let mut at = 0;
     engine.play(&mut streams)?;
     control.ready.store(true, Ordering::SeqCst);
@@ -218,14 +230,20 @@ fn test_arming_seeking_and_record_are_refused_while_playing() -> Result<(), Box<
         Err(EngineError::NotArmed)
     ));
     let (sink, _take) = memory_sink(16);
-    engine.arm(vec![ArmedTrack {
-        source: g.mono,
-        inputs: vec![0],
-        monitor: false,
-        sinks: vec![sink],
-    }])?;
+    engine.arm(
+        vec![ArmedTrack {
+            source: g.mono,
+            inputs: vec![0],
+            monitor: false,
+            sinks: vec![sink],
+        }],
+        Vec::new(),
+    )?;
     engine.record(&mut streams, 0)?;
-    assert!(matches!(engine.arm(Vec::new()), Err(EngineError::Playing)));
+    assert!(matches!(
+        engine.arm(Vec::new(), Vec::new()),
+        Err(EngineError::Playing)
+    ));
     assert!(matches!(
         engine.locate(10, &mut streams),
         Err(EngineError::Recording)
@@ -235,7 +253,7 @@ fn test_arming_seeking_and_record_are_refused_while_playing() -> Result<(), Box<
         Err(EngineError::Playing)
     ));
     engine.stop()?;
-    engine.arm(Vec::new())?;
+    engine.arm(Vec::new(), Vec::new())?;
     Ok(())
 }
 
@@ -252,12 +270,15 @@ fn test_placed_take_lines_up_with_the_playback_it_recorded() -> Result<(), Box<d
         let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
         engine.set_tracks(tracks)?;
         let (sink, take) = memory_sink(100_000);
-        engine.arm(vec![ArmedTrack {
-            source: g.mono,
-            inputs: vec![0],
-            monitor: false,
-            sinks: vec![sink],
-        }])?;
+        engine.arm(
+            vec![ArmedTrack {
+                source: g.mono,
+                inputs: vec![0],
+                monitor: false,
+                sinks: vec![sink],
+            }],
+            Vec::new(),
+        )?;
         engine.locate(from as u64, &mut streams)?;
         engine.record(&mut streams, 0)?;
         control.ready.store(true, Ordering::SeqCst);
@@ -272,7 +293,7 @@ fn test_placed_take_lines_up_with_the_playback_it_recorded() -> Result<(), Box<d
                 .flat_map(|&s| [s, 0.0])
                 .collect();
             let mut left = vec![0.0; BLOCK];
-            assert_realtime(|| processor.process(&interleaved, 2, &mut left, &mut right))?;
+            assert_realtime(|| processor.process(&interleaved, 2, 0, &mut left, &mut right))?;
             heard.extend_from_slice(&left);
         }
         engine.stop()?;
@@ -307,12 +328,15 @@ fn test_input_peaks_are_published_while_armed_and_cleared_on_read() -> Result<()
     // Not armed: not measured.
     run(&mut processor, &mut at, 1)?;
     assert_eq!(engine.take_input_peak(1), 0.0);
-    engine.arm(vec![ArmedTrack {
-        source: g.mono,
-        inputs: vec![0],
-        monitor: false,
-        sinks: Vec::new(),
-    }])?;
+    engine.arm(
+        vec![ArmedTrack {
+            source: g.mono,
+            inputs: vec![0],
+            monitor: false,
+            sinks: Vec::new(),
+        }],
+        Vec::new(),
+    )?;
     run(&mut processor, &mut at, 2)?;
     // The largest input so far on each channel, across both blocks.
     assert_eq!(engine.take_input_peak(0), input(at - 1, 0));
@@ -336,12 +360,15 @@ fn test_count_in_then_capture_starts_at_exactly_the_playhead() -> Result<(), Box
             let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
             engine.set_tracks(tracks)?;
             let (sink, take) = memory_sink(100_000);
-            engine.arm(vec![ArmedTrack {
-                source: g.mono,
-                inputs: vec![1],
-                monitor: false,
-                sinks: vec![sink],
-            }])?;
+            engine.arm(
+                vec![ArmedTrack {
+                    source: g.mono,
+                    inputs: vec![1],
+                    monitor: false,
+                    sinks: vec![sink],
+                }],
+                Vec::new(),
+            )?;
             let from = 3_000;
             engine.locate(from, &mut streams)?;
             engine.record(&mut streams, count_in as u64)?;
@@ -353,7 +380,7 @@ fn test_count_in_then_capture_starts_at_exactly_the_playhead() -> Result<(), Box
                 let interleaved: Vec<f32> =
                     (0..block * 2).map(|i| input(at + i / 2, i % 2)).collect();
                 let (mut l, mut r) = (vec![0.0; block], vec![0.0; block]);
-                assert_realtime(|| processor.process(&interleaved, 2, &mut l, &mut r))?;
+                assert_realtime(|| processor.process(&interleaved, 2, 0, &mut l, &mut r))?;
                 if at + block < count_in {
                     assert_eq!(engine.real_time_state(), TransportState::CountingIn);
                     assert_eq!(engine.playhead(), from);
@@ -392,12 +419,15 @@ fn test_stop_or_pause_during_count_in_captures_nothing() -> Result<(), Box<dyn E
         let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
         engine.set_tracks(tracks)?;
         let (sink, take) = memory_sink(100_000);
-        engine.arm(vec![ArmedTrack {
-            source: g.mono,
-            inputs: vec![0],
-            monitor: false,
-            sinks: vec![sink],
-        }])?;
+        engine.arm(
+            vec![ArmedTrack {
+                source: g.mono,
+                inputs: vec![0],
+                monitor: false,
+                sinks: vec![sink],
+            }],
+            Vec::new(),
+        )?;
         engine.record(&mut streams, 10_000)?;
         control.ready.store(true, Ordering::SeqCst);
         let mut at = 0;

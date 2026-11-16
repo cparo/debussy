@@ -393,6 +393,51 @@ fn test_set_monitored_leaves_monitored_track_out_of_latency() -> Result<(), Box<
 }
 
 #[test]
+fn test_set_monitored_leaves_a_monitored_midi_track_out_of_latency() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
+        runner.begin_block(256).map_err(|_| "block refused")?;
+        runner.process();
+        bridge.commit()?;
+        assert!(!bridge.is_pending());
+        Ok(())
+    };
+    let keys = bridge.edit(&mut session, |s| s.add_midi_track("keys"))?;
+    let synth = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Instrument {
+            kind: "synth".to_owned(),
+            parameters: BTreeMap::new(),
+        })
+    })?;
+    let limiter = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Effect {
+            kind: "dynamics".to_owned(),
+            parameters: BTreeMap::from([("lookahead".to_owned(), 5.0)]),
+        })
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(synth), 0, Endpoint::Node(limiter), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(limiter), 0, Endpoint::Output, 0)
+    })?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 240);
+    // The instrument fed only by the live event source is not delayed for compensation.
+    bridge.set_monitored(BTreeSet::from([keys]))?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 0);
+    bridge.set_monitored(BTreeSet::new())?;
+    settle(&mut bridge)?;
+    assert_eq!(bridge.latency(), 240);
+    Ok(())
+}
+
+#[test]
 fn test_tempo_change_replaces_only_nodes_that_use_it() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
     let (mut bridge, _runner) = Bridge::new(session.state(), config())?;

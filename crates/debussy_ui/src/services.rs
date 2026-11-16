@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
-use audio_engine::{Processor, Streams, TakeInfo, TakeSink, TrackFeeds};
+use audio_engine::{NoteSink, Processor, Streams, TakeInfo, TakeSink, TrackFeeds};
+use midi::LiveInput;
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
@@ -40,6 +41,31 @@ impl std::fmt::Display for DeviceChoice {
     }
 }
 
+/// A MIDI input the user can choose for an armed MIDI track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiInputChoice {
+    /// The platform's id for its endpoint.
+    pub id: String,
+    /// Its name, for display.
+    pub name: String,
+}
+
+impl std::fmt::Display for MidiInputChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
+/// A recording pass's takes: each armed audio track's files and sinks, then each armed MIDI
+/// track's sink.
+pub struct Takes {
+    /// One per armed audio track, in the order asked for.
+    pub audio: Vec<TakeFiles>,
+    /// One per armed MIDI track, in the order asked for. MIDI take `i` is numbered after every
+    /// audio file in [`TakeStatus`].
+    pub midi: Vec<Box<dyn NoteSink>>,
+}
+
 /// The new files of one armed track's take, and the sinks the engine records them through, one
 /// per channel, left first.
 pub struct TakeFiles {
@@ -49,8 +75,8 @@ pub struct TakeFiles {
     pub sinks: Vec<Box<dyn TakeSink>>,
 }
 
-/// What became of one take file, numbered across a recording pass in the order
-/// [`Services::start_takes`] returned them.
+/// What became of one take, numbered across a recording pass: each audio file in the order
+/// [`Services::start_takes`] returned them, then each MIDI take.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TakeStatus {
     /// The file is complete.
@@ -261,13 +287,40 @@ pub trait Services {
     /// The device's input plus output latency, in frames, for placing takes (ADR-0022).
     fn device_latency(&mut self) -> u64;
 
-    /// Starts recording one take per armed track, each named after the track and holding
-    /// `channels` channels: creates the files and starts writing what the sinks are given.
+    /// The device's output latency plus one device block, in frames, for placing MIDI takes
+    /// (`docs/architecture/recording.md` "MIDI recording").
+    fn midi_latency(&mut self) -> u64;
+
+    /// The MIDI input endpoints that can be used now.
+    fn midi_inputs(&mut self) -> Vec<MidiInputChoice>;
+
+    /// Whether the MIDI endpoints have changed since the last call.
+    fn midi_inputs_changed(&mut self) -> bool;
+
+    /// Opens MIDI input endpoint `id` for armed track `track`, closing the one it had: its
+    /// messages arrive at the returned live input (`docs/architecture/engine.md` "Live MIDI
+    /// input").
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn open_midi_input(&mut self, track: TrackId, id: &str) -> Result<LiveInput, String>;
+
+    /// Closes track `track`'s MIDI input, if open.
+    fn close_midi_input(&mut self, track: TrackId);
+
+    /// Starts recording one take per armed track: for each of `tracks`, an audio take named
+    /// after the track and holding `channels` channels, whose files are created and written;
+    /// and `midi` MIDI takes, whose messages are collected.
     ///
     /// # Errors
     ///
     /// A message for the status line; no files are left behind.
-    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String>;
+    fn start_takes(&mut self, tracks: &[(String, usize)], midi: usize) -> Result<Takes, String>;
+
+    /// MIDI take `take`'s messages (take frame and bytes, as they arrived), once its
+    /// [`TakeStatus`] has been reported; empty otherwise.
+    fn take_messages(&mut self, take: usize) -> Vec<(u64, [u8; 3])>;
 
     /// What has become of the current pass's files since the last call.
     fn take_status(&mut self) -> Vec<TakeStatus>;

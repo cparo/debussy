@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use audio_buffers::{Consumer, Producer, queue};
 use signal_graph::{NodeId, Runner};
 
-use crate::capture::{ArmedTrack, MAX_INPUTS, TakeInfo};
+use crate::capture::{ArmedMidi, ArmedTrack, MAX_INPUTS, TakeInfo};
 use crate::click::ClickTrack;
 use crate::error::Error;
 use crate::feed::{Streams, TrackFeeds};
@@ -130,9 +130,12 @@ impl Shared {
 /// Something the real-time side replaced, sent back to be dropped.
 pub(crate) enum Retired {
     Tracks(#[allow(dead_code)] Vec<TrackFeeds>), // Held only to be dropped.
-    Armed(#[allow(dead_code)] Vec<ArmedTrack>),  // Held only to be dropped.
+    Armed(
+        #[allow(dead_code)] Vec<ArmedTrack>, // Held only to be dropped.
+        #[allow(dead_code)] Vec<ArmedMidi>,  // Held only to be dropped.
+    ),
     Click(#[allow(dead_code)] Option<ClickTrack>), // Held only to be dropped.
-    Midi(#[allow(dead_code)] Vec<MidiTrack>),    // Held only to be dropped.
+    Midi(#[allow(dead_code)] Vec<MidiTrack>),      // Held only to be dropped.
 }
 
 /// A request from the control side to the real-time side.
@@ -141,8 +144,12 @@ pub(crate) enum Command {
     Tracks(Vec<TrackFeeds>),
     /// Replace the MIDI tracks, carrying over which notes are sounding.
     Midi(Vec<MidiTrack>),
-    /// Replace the armed tracks, ending the old ones' takes.
-    Arm(Vec<ArmedTrack>),
+    /// Replace the armed tracks, ending the old ones' takes; MIDI tracks carry over their
+    /// input and held notes, and the held notes of those no longer armed are released.
+    Arm {
+        audio: Vec<ArmedTrack>,
+        midi: Vec<ArmedMidi>,
+    },
     /// Replace the click.
     Click(ClickTrack),
     /// Play from `from` once every feed is primed, recording the armed tracks if `record`
@@ -251,19 +258,26 @@ impl Engine {
         self.shared.midi_overflows.load(Ordering::Relaxed)
     }
 
-    /// Replaces the armed tracks (`docs/architecture/recording.md` "Capture"), ending any takes
-    /// the old ones held. Only while stopped or paused. Monitoring takes effect at once.
+    /// Replaces the armed audio and MIDI tracks (`docs/architecture/recording.md` "Capture",
+    /// "MIDI recording"), ending any takes the old ones held. Only while stopped or paused.
+    /// Monitoring takes effect at once.
+    ///
+    /// An armed MIDI track given no input takes over the input of the one it replaces on the
+    /// same event source, and every one takes over the live notes sounding there; notes sounding
+    /// for a MIDI track no longer armed are released in the next block
+    /// (`docs/architecture/engine.md` "Live MIDI input").
     ///
     /// # Errors
     ///
-    /// [`Error::Playing`]; [`Error::Busy`].
-    pub fn arm(&mut self, armed: Vec<ArmedTrack>) -> Result<(), Error> {
+    /// [`Error::Playing`]; [`Error::Busy`]. The tracks are dropped, inputs too.
+    pub fn arm(&mut self, audio: Vec<ArmedTrack>, midi: Vec<ArmedMidi>) -> Result<(), Error> {
         if self.is_playing() {
             return Err(Error::Playing);
         }
         self.collect();
-        let takes = armed.iter().any(|a| !a.sinks.is_empty());
-        self.send(Command::Arm(armed))?;
+        let takes =
+            audio.iter().any(|a| !a.sinks.is_empty()) || midi.iter().any(ArmedMidi::has_sink);
+        self.send(Command::Arm { audio, midi })?;
         self.takes_armed = takes;
         Ok(())
     }

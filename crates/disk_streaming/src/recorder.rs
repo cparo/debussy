@@ -1,12 +1,13 @@
 //! Recording to disk: the control side, [`Recorder`], and its writer thread, which appends each
-//! take channel's queued blocks to a new WAV file (`docs/architecture/recording.md` "Writer
-//! thread").
+//! take channel's queued blocks to a new WAV file and collects each MIDI take's messages
+//! (`docs/architecture/recording.md` "Writer thread", "MIDI recording").
 //!
 //! This is not real-time code: it creates, writes and syncs files, sleeps when idle, and starts
 //! and joins its thread. The crate's `clippy.toml` bans those operations for the real-time side,
 //! which is in `take`, so this module allows them.
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ use audio_buffers::{Block, BlockPool, Consumer, Layout, Producer, queue};
 use wav_files::{Channels, SampleFormat, Spec, WavWriter};
 
 use crate::error::Error;
+use crate::midi_take::{CapturedMessage, MIDI_TAKE_CAPACITY, MidiTake, MidiTakeShared};
 use crate::reader::BLOCK_FRAMES;
 use crate::take::{Stamped, Take, TakeShared};
 
@@ -172,9 +174,43 @@ impl WriterTake {
     }
 }
 
+/// The writer's state for one MIDI take.
+struct WriterMidi {
+    shared: Arc<MidiTakeShared>,
+    messages: Consumer<CapturedMessage>,
+    /// The messages so far, in arrival order.
+    collected: Vec<CapturedMessage>,
+    done: bool,
+}
+
+impl WriterMidi {
+    /// Takes every message queued. Returns whether there were any.
+    fn drain(&mut self) -> bool {
+        let before = self.collected.len();
+        while let Some(message) = self.messages.try_pop() {
+            self.collected.push(message);
+        }
+        self.collected.len() > before
+    }
+}
+
+/// Where the writer thread reports to.
+struct Reports {
+    events: Producer<TakeEvent>,
+    /// Each finished MIDI take's messages, by take index; sent before its event.
+    notes: Producer<(usize, Vec<CapturedMessage>)>,
+}
+
 /// The writer thread's main loop: returns once every take has finished, or when told to stop,
-/// after finishing every file with what has arrived.
-fn run(mut takes: Vec<WriterTake>, mut events: Producer<TakeEvent>, stop: Arc<AtomicBool>) {
+/// after finishing every file with what has arrived. MIDI takes are numbered after the audio
+/// ones.
+fn run(
+    mut takes: Vec<WriterTake>,
+    mut midi: Vec<WriterMidi>,
+    mut reports: Reports,
+    stop: Arc<AtomicBool>,
+) {
+    let events = &mut reports.events;
     loop {
         let stopping = stop.load(Ordering::Acquire);
         let mut idle = true;
@@ -196,7 +232,28 @@ fn run(mut takes: Vec<WriterTake>, mut events: Producer<TakeEvent>, stop: Arc<At
                 let _ = events.try_push(take.finish(index, frames));
             }
         }
-        if takes.iter().all(|t| t.done) {
+        for (i, take) in midi.iter_mut().enumerate().filter(|(_, t)| !t.done) {
+            let ended = take.shared.ended.load(Ordering::Acquire);
+            idle &= !take.drain();
+            if ended || stopping {
+                take.done = true;
+                let frames = if ended {
+                    take.shared.frames.load(Ordering::Relaxed)
+                } else {
+                    take.collected.iter().map(|(f, _)| f + 1).max().unwrap_or(0)
+                };
+                let index = takes.len() + i;
+                // Both queues hold one entry for every take.
+                let _ = reports
+                    .notes
+                    .try_push((index, std::mem::take(&mut take.collected)));
+                let _ = events.try_push(TakeEvent::Finished {
+                    take: index,
+                    frames,
+                });
+            }
+        }
+        if takes.iter().all(|t| t.done) && midi.iter().all(|t| t.done) {
             return;
         }
         if idle {
@@ -210,7 +267,11 @@ fn run(mut takes: Vec<WriterTake>, mut events: Producer<TakeEvent>, stop: Arc<At
 #[derive(Debug)]
 pub struct Recorder {
     shared: Vec<Arc<TakeShared>>,
+    midi: Vec<Arc<MidiTakeShared>>,
     events: Consumer<TakeEvent>,
+    notes: Consumer<(usize, Vec<CapturedMessage>)>,
+    /// Finished MIDI takes' messages not yet taken, by take index.
+    collected: BTreeMap<usize, Vec<CapturedMessage>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -225,6 +286,22 @@ impl Recorder {
     /// [`Error::Io`] if a file exists or cannot be created (any already created are removed),
     /// [`Error::Wav`], [`Error::Buffers`], or [`Error::Thread`].
     pub fn start(paths: &[PathBuf], config: RecorderConfig) -> Result<(Self, Vec<Take>), Error> {
+        Recorder::start_with_midi(paths, 0, config).map(|(recorder, takes, _)| (recorder, takes))
+    }
+
+    /// As [`Recorder::start`], with `midi` MIDI takes as well, numbered after the audio ones: the
+    /// writer collects each one's messages, which [`Recorder::take_messages`] returns once its
+    /// [`TakeEvent`] has come. Returns a [`MidiTake`] per MIDI take, in order, for the real-time
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// As [`Recorder::start`].
+    pub fn start_with_midi(
+        paths: &[PathBuf],
+        midi: usize,
+        config: RecorderConfig,
+    ) -> Result<(Self, Vec<Take>, Vec<MidiTake>), Error> {
         let frames = (config.buffer.as_secs_f64() * f64::from(config.sample_rate)).ceil() as u64;
         // Enough blocks for the buffer, plus one being filled and one being written.
         let blocks = usize::try_from(frames.div_ceil(BLOCK_FRAMES as u64))
@@ -268,20 +345,43 @@ impl Recorder {
                 ));
                 shared.push(take_shared);
             }
-            let (events_tx, events) = queue::channel(paths.len().max(1))?;
+            let mut midi_shared = Vec::with_capacity(midi);
+            let mut midi_writers = Vec::with_capacity(midi);
+            let mut midi_takes = Vec::with_capacity(midi);
+            for _ in 0..midi {
+                let take_shared = Arc::new(MidiTakeShared::default());
+                let (tx, rx) = queue::channel(MIDI_TAKE_CAPACITY)?;
+                midi_writers.push(WriterMidi {
+                    shared: Arc::clone(&take_shared),
+                    messages: rx,
+                    collected: Vec::new(),
+                    done: false,
+                });
+                midi_takes.push(MidiTake::new(Arc::clone(&take_shared), tx));
+                midi_shared.push(take_shared);
+            }
+            let (events_tx, events) = queue::channel((paths.len() + midi).max(1))?;
+            let (notes_tx, notes) = queue::channel(midi.max(1))?;
+            let reports = Reports {
+                events: events_tx,
+                notes: notes_tx,
+            };
             let stop = Arc::new(AtomicBool::new(false));
             let thread_stop = Arc::clone(&stop);
             let thread = std::thread::Builder::new()
                 .name("disk-recording".into())
-                .spawn(move || run(writers, events_tx, thread_stop))
+                .spawn(move || run(writers, midi_writers, reports, thread_stop))
                 .map_err(Error::Thread)?;
             let recorder = Recorder {
                 shared,
+                midi: midi_shared,
                 events,
+                notes,
+                collected: BTreeMap::new(),
                 stop,
                 thread: Some(thread),
             };
-            Ok((recorder, takes))
+            Ok((recorder, takes, midi_takes))
         })();
         if result.is_err() {
             for path in created {
@@ -291,16 +391,27 @@ impl Recorder {
         result
     }
 
-    /// The number of take channels.
+    /// The number of takes: audio take channels, then MIDI takes.
     pub fn takes(&self) -> usize {
-        self.shared.len()
+        self.shared.len() + self.midi.len()
     }
 
     /// Overruns counted on take `take` so far, for the UI's notice; `None` for an unknown take.
     pub fn overruns(&self, take: usize) -> Option<u64> {
-        self.shared
-            .get(take)
-            .map(|s| s.overruns.load(Ordering::Relaxed))
+        match take.checked_sub(self.shared.len()) {
+            None => self.shared.get(take).map(|s| &s.overruns),
+            Some(midi) => self.midi.get(midi).map(|s| &s.overruns),
+        }
+        .map(|overruns| overruns.load(Ordering::Relaxed))
+    }
+
+    /// MIDI take `take`'s messages in the order they arrived, once its [`TakeEvent`] has been
+    /// polled; `None` before, for an audio take, or once taken.
+    pub fn take_messages(&mut self, take: usize) -> Option<Vec<CapturedMessage>> {
+        while let Some((index, messages)) = self.notes.try_pop() {
+            self.collected.insert(index, messages);
+        }
+        self.collected.remove(&take)
     }
 
     /// The next event from the writer thread, if any.

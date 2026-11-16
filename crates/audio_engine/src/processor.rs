@@ -7,7 +7,7 @@ use audio_buffers::{Consumer, Producer};
 use signal_graph::{NodeId, Runner};
 
 use crate::block::{self, Live};
-use crate::capture::{ArmedTrack, Input, end_takes};
+use crate::capture::{ArmedMidi, ArmedTrack, HeldNotes, Input, MAX_RELEASING, end_takes};
 use crate::click::ClickTrack;
 use crate::engine::{Command, Retired, Shared, TransportState};
 use crate::error::Error;
@@ -23,6 +23,10 @@ pub struct Processor {
     tracks: Vec<TrackFeeds>,
     midi: Vec<MidiTrack>,
     armed: Vec<ArmedTrack>,
+    armed_midi: Vec<ArmedMidi>,
+    /// Live notes of MIDI tracks no longer armed, still to be released; holds at most
+    /// [`MAX_RELEASING`], allocated once.
+    releasing: Vec<(NodeId, HeldNotes)>,
     click: Option<ClickTrack>,
     input: Input,
     commands: Consumer<Command>,
@@ -38,6 +42,9 @@ pub struct Processor {
     capturing: bool,
     /// Frames of count-in still to run before recording plays.
     count_in: u64,
+    /// The take frame of the next frame captured.
+    capture_frame: u64,
+    sample_rate: u32,
     /// Frames every feed must have ready before playback starts: 100 ms.
     prime: u64,
 }
@@ -58,6 +65,8 @@ impl Processor {
             tracks: Vec::new(),
             midi: Vec::new(),
             armed: Vec::new(),
+            armed_midi: Vec::new(),
+            releasing: Vec::with_capacity(MAX_RELEASING),
             click: None,
             input,
             commands,
@@ -69,17 +78,21 @@ impl Processor {
             recording: false,
             capturing: false,
             count_in: 0,
+            capture_frame: 0,
+            sample_rate,
             prime: u64::from(sample_rate / 10),
         }
     }
 
     /// Runs one block of `left.len()` frames into `left` and `right`, with the device's
-    /// interleaved `input` of `input_channels` channels (empty, or too short, is silence): takes
+    /// interleaved `input` of `input_channels` channels (empty, or too short, is silence), whose
+    /// callback ran at host time `host_nanos` (the clock live MIDI input is stamped with): takes
     /// pending commands, starts playback (or recording's count-in) once every feed is primed,
     /// fills the track sources
     /// (silence unless playing; armed tracks' input or silence, see
     /// `docs/architecture/recording.md` "Input monitoring") and the MIDI tracks' event sources
-    /// (`docs/architecture/engine.md` "MIDI clip playback"), hands the input to the takes while
+    /// (`docs/architecture/engine.md` "MIDI clip playback") and armed MIDI tracks' live input
+    /// (`docs/architecture/engine.md` "Live MIDI input"), hands the input to the takes while
     /// recording, publishes each input's peak for the meters while armed, runs the plan, adds
     /// the click while playing with it on (`docs/architecture/recording.md` "Click track") and
     /// advances the playhead. The graph runs while stopped too, so plans swap, tails ring out
@@ -95,6 +108,7 @@ impl Processor {
         &mut self,
         input: &[f32],
         input_channels: usize,
+        host_nanos: u64,
         left: &mut [f32],
         right: &mut [f32],
     ) -> Result<(), Error> {
@@ -130,7 +144,7 @@ impl Processor {
         let (count_left, left) = left.split_at_mut(counted);
         let (count_right, right) = right.split_at_mut(counted);
         if counted > 0 {
-            if let Err(error) = self.count_in_part(count_left, count_right) {
+            if let Err(error) = self.count_in_part(host_nanos, count_left, count_right) {
                 left.fill(0.0);
                 right.fill(0.0);
                 self.shared.publish(self.state, self.playhead);
@@ -149,7 +163,9 @@ impl Processor {
                 return Ok(());
             }
         }
-        let result = self.play_part(left, right);
+        let offset =
+            (counted as u64).saturating_mul(1_000_000_000) / u64::from(self.sample_rate.max(1));
+        let result = self.play_part(host_nanos.saturating_add(offset), left, right);
         self.report_midi_overflows();
         self.shared.publish(self.state, self.playhead);
         result
@@ -157,16 +173,27 @@ impl Processor {
 
     /// Runs `left.len()` frames of the count-in: the tracks silent (armed ones as when
     /// recording), the playhead held, and the click at the count-in's position behind the
-    /// playhead, whether or not the click is on.
-    fn count_in_part(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), Error> {
+    /// playhead, whether or not the click is on. Live MIDI input is heard but not captured.
+    fn count_in_part(
+        &mut self,
+        host_nanos: u64,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) -> Result<(), Error> {
         let position = self.playhead_frame();
         let mut live = Live {
             armed: &mut self.armed,
             input: &self.input,
+            midi: &mut self.armed_midi,
+            releasing: &mut self.releasing,
+            host_nanos,
+            sample_rate: self.sample_rate,
             recording: self.recording,
             capturing: false,
+            capture_frame: 0,
+            overflows: 0,
         };
-        block::run(
+        let result = block::run(
             &mut self.runner,
             self.output,
             &mut self.tracks,
@@ -177,7 +204,10 @@ impl Processor {
             self.shared.mono(),
             left,
             right,
-        )?;
+        );
+        let overflows = live.overflows;
+        self.add_live_overflows(overflows);
+        result?;
         if let Some(click) = &self.click {
             let position = self.playhead as i64 - self.count_in as i64;
             let heard = position - self.runner.latency() as i64;
@@ -193,18 +223,32 @@ impl Processor {
 
     /// Runs `left.len()` frames as the transport stands: playing (capturing if recording) or
     /// not, with the click while playing with it on, and advances the playhead if playing.
-    fn play_part(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), Error> {
+    fn play_part(
+        &mut self,
+        host_nanos: u64,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) -> Result<(), Error> {
         let take_starts =
             self.recording && !self.capturing && self.state == TransportState::Playing;
         self.capturing |= take_starts;
+        if take_starts {
+            self.capture_frame = 0;
+        }
         let playing = self.state == TransportState::Playing;
         let frames = left.len();
         let position = self.playhead_frame();
         let mut live = Live {
             armed: &mut self.armed,
             input: &self.input,
+            midi: &mut self.armed_midi,
+            releasing: &mut self.releasing,
+            host_nanos,
+            sample_rate: self.sample_rate,
             recording: self.recording,
             capturing: self.capturing,
+            capture_frame: self.capture_frame,
+            overflows: 0,
         };
         let result = block::run(
             &mut self.runner,
@@ -218,6 +262,11 @@ impl Processor {
             left,
             right,
         );
+        let overflows = live.overflows;
+        self.add_live_overflows(overflows);
+        if self.capturing && result.is_ok() {
+            self.capture_frame = self.capture_frame.saturating_add(frames as u64);
+        }
         if playing
             && result.is_ok()
             && self.shared.click()
@@ -266,10 +315,28 @@ impl Processor {
                     let old = self.click.replace(click);
                     self.send_back(Retired::Click(old));
                 }
-                Command::Arm(armed) => {
-                    let mut old = std::mem::replace(&mut self.armed, armed);
-                    end_takes(&mut old);
-                    self.send_back(Retired::Armed(old));
+                Command::Arm { audio, mut midi } => {
+                    let mut old = std::mem::replace(&mut self.armed, audio);
+                    for track in &mut midi {
+                        if let Some(previous) = self
+                            .armed_midi
+                            .iter_mut()
+                            .find(|p| p.source() == track.source())
+                        {
+                            track.carry_over(previous);
+                        }
+                    }
+                    let mut old_midi = std::mem::replace(&mut self.armed_midi, midi);
+                    for track in &mut old_midi {
+                        let held = track.take_held();
+                        // Beyond the room made for them, notes are left to the next reset.
+                        if !held.is_empty() && self.releasing.len() < self.releasing.capacity() {
+                            self.releasing.push((track.source(), held));
+                        }
+                    }
+                    // Takes not recorded are empty; those recorded have ended already.
+                    end_takes(&mut old, &mut old_midi, 0);
+                    self.send_back(Retired::Armed(old, old_midi));
                 }
                 Command::Play {
                     from,
@@ -292,13 +359,13 @@ impl Processor {
                     }
                     self.end_recording();
                     // Effect tails and compensation delays stop with the transport.
-                    self.runner.reset();
+                    self.reset_graph();
                 }
                 Command::Stop { to } => {
                     self.playhead = to;
                     self.state = TransportState::Stopped;
                     self.end_recording();
-                    self.runner.reset();
+                    self.reset_graph();
                 }
                 Command::Locate { frame } => self.playhead = frame,
             }
@@ -313,10 +380,34 @@ impl Processor {
         }
     }
 
+    /// Silences the graph: every node's state and delay. Live notes sounding are also sent
+    /// note-offs in the next block, for nodes that keep notes through a reset.
+    fn reset_graph(&mut self) {
+        self.runner.reset();
+        for track in &mut self.armed_midi {
+            let held = track.take_held();
+            if !held.is_empty() && self.releasing.len() < self.releasing.capacity() {
+                self.releasing.push((track.source(), held));
+            }
+        }
+    }
+
+    /// Adds live MIDI events the event sources refused to the shared count.
+    fn add_live_overflows(&mut self, refused: u64) {
+        if refused > 0 {
+            self.shared.add_midi_overflows(refused);
+        }
+    }
+
     /// Ends the takes being recorded, if any, and any count-in.
     fn end_recording(&mut self) {
         if self.recording {
-            end_takes(&mut self.armed);
+            let frames = if self.capturing {
+                self.capture_frame
+            } else {
+                0
+            };
+            end_takes(&mut self.armed, &mut self.armed_midi, frames);
         }
         self.recording = false;
         self.capturing = false;

@@ -100,6 +100,15 @@ the next block; one more than a second ahead lands at the block's last frame. At
 buffer's spare capacity is taken each block; the rest waits
 ([ADR-0146](../adrs/0146-midi-devices-use-coremidi-through-objc2-core-midi.md)).
 
+An armed MIDI track's input is drained every block, monitored or not. While monitored, its
+messages enter the track's event source after the clip player's events for the block; in a block
+split by the end of a count-in, each part is stamped from its own host time. The engine keeps
+which live notes are sounding per event source: stop and pause send them note-offs in the next
+block after the reset, and so does a re-arm that leaves the track out; a re-arm that keeps the
+track on the same event source keeps its input and its sounding notes. Messages the event buffer
+refuses are counted with the clip players'
+([ADR-0150](../adrs/0150-midi-tracks-are-recorded-and-monitored-through-a.md)).
+
 ## Transport
 
 Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last

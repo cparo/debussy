@@ -19,7 +19,8 @@
 //! the real-time side ([`Take::write`]) fills and queues them, and the writer appends them. If the
 //! disk falls behind, frames are dropped, counted as an overrun, and written as silence so the
 //! take stays aligned. [`Take::end`] ends a take; the writer then finishes its file and reports a
-//! [`TakeEvent`].
+//! [`TakeEvent`]. [`Recorder::start_with_midi`] also returns a [`MidiTake`] per armed MIDI
+//! track, whose messages the same writer collects in memory.
 //!
 //! # Modules
 //!
@@ -29,6 +30,7 @@
 //! - `reader`: the reader thread.
 //! - `streamer`: [`Streamer`], the control side: start, seek, events, stop.
 //! - `take`: [`Take`], the real-time end of one recorded channel.
+//! - `midi_take`: [`MidiTake`], the real-time end of one MIDI take.
 //! - `recorder`: [`Recorder`], the control side of recording, and the writer thread.
 //! - `engine`: the bridge to `audio_engine` (ADR-0046): [`TimelineSource`], a track channel's clips
 //!   rendered as a stream; [`WavClipAudio`], stored files read for the renderer; and the engine's
@@ -40,6 +42,7 @@
 
 mod engine;
 mod error;
+mod midi_take;
 mod playback;
 mod reader;
 mod recorder;
@@ -50,6 +53,7 @@ mod take;
 
 pub use engine::{TimelineSource, WavClipAudio};
 pub use error::Error;
+pub use midi_take::{CapturedMessage, MIDI_TAKE_CAPACITY, MidiTake};
 pub use playback::Playback;
 pub use recorder::{Recorder, RecorderConfig, TakeEvent};
 pub use source::{FrameSource, open_wav};

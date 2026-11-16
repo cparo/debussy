@@ -95,7 +95,7 @@ impl Rig {
         let processor = &mut self.processor;
         assert_realtime(|| -> Result<(), EngineError> {
             for _ in 0..blocks {
-                processor.process(&[], 0, &mut left, &mut right)?;
+                processor.process(&[], 0, 0, &mut left, &mut right)?;
             }
             Ok(())
         })?;

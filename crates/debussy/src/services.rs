@@ -6,14 +6,17 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use audio_analysis::{BINS, Bucket, FRAME_SIZE, Spectrogram, WaveformReader};
 use audio_buffers::Layout;
-use audio_engine::{Processor, TakeInfo, TakeSink};
+use audio_engine::{NoteSink, Processor, TakeInfo, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
-    ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, PassMarker,
-    Recovered, RecoveredPass, Services, Spectrum, TakeFiles, TakeStatus, spectrum_bands,
+    ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, MidiInputChoice,
+    PassMarker, Recovered, RecoveredPass, Services, Spectrum, TakeFiles, TakeStatus, Takes,
+    spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
@@ -22,6 +25,8 @@ use disk_streaming::{
 use engine_bridge::{ClickSound, track_renderers};
 use import_export::{Lame, import, safe_stem, unique_names};
 use macos_platform::MacCodecs;
+use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
+use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
 use project_model::{Session, Source, State, TrackId};
 use project_storage::{
     ARCHIVE_SUFFIX, AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart,
@@ -85,6 +90,12 @@ pub struct AppServices {
     marker: Option<Recording>,
     /// The host's LAME, found at startup; MP3 export is offered only with it (ADR-0129).
     lame: Option<Lame>,
+    /// The MIDI endpoints, if the platform's MIDI service could be reached.
+    midi: Option<Box<dyn MidiDevices>>,
+    /// Whether the MIDI endpoints have changed since the interface last asked.
+    midi_changed: Arc<AtomicBool>,
+    /// Each armed MIDI track's open input.
+    midi_open: BTreeMap<TrackId, Box<dyn MidiInput>>,
 }
 
 /// A spectrogram calculator with a frame's samples and levels.
@@ -96,14 +107,20 @@ struct SpectrogramScratch {
 
 impl AppServices {
     /// Services over the open `bundle`, playing through `audio`, with the app settings at
-    /// `settings_path`.
+    /// `settings_path`, and MIDI input from `midi` if given.
     pub fn new(
         bundle: Bundle,
         audio: AudioOutput,
         settings: AppSettings,
         settings_path: PathBuf,
         lame: Option<Lame>,
+        midi: Option<Box<dyn MidiDevices>>,
     ) -> Self {
+        let midi_changed = Arc::new(AtomicBool::new(true));
+        if let Some(midi) = &midi {
+            let changed = Arc::clone(&midi_changed);
+            midi.on_change(Box::new(move || changed.store(true, Ordering::Release)));
+        }
         AppServices {
             bundle,
             audio,
@@ -117,6 +134,9 @@ impl AppServices {
             recorder: None,
             marker: None,
             lame,
+            midi,
+            midi_changed,
+            midi_open: BTreeMap::new(),
         }
     }
 }
@@ -449,17 +469,61 @@ impl Services for AppServices {
         self.audio.latency()
     }
 
-    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String> {
+    fn midi_latency(&mut self) -> u64 {
+        self.audio.midi_latency()
+    }
+
+    fn midi_inputs(&mut self) -> Vec<MidiInputChoice> {
+        let Some(midi) = &self.midi else {
+            return Vec::new();
+        };
+        match midi.endpoints() {
+            Ok(endpoints) => endpoints
+                .into_iter()
+                .filter(|e| e.direction == MidiDirection::Input && e.online)
+                .map(|e| MidiInputChoice {
+                    id: e.id.0,
+                    name: e.name,
+                })
+                .collect(),
+            Err(error) => {
+                eprintln!("debussy: listing MIDI inputs: {error}");
+                Vec::new()
+            }
+        }
+    }
+
+    fn midi_inputs_changed(&mut self) -> bool {
+        self.midi_changed.swap(false, Ordering::AcqRel)
+    }
+
+    fn open_midi_input(&mut self, track: TrackId, id: &str) -> Result<LiveInput, String> {
+        self.midi_open.remove(&track);
+        let midi = self.midi.as_ref().ok_or("MIDI is not available")?;
+        let (producer, input) = midi::channel(LIVE_QUEUE_CAPACITY).map_err(|e| e.to_string())?;
+        let opened = midi
+            .open_input(&MidiEndpointId(id.to_owned()), Box::new(producer))
+            .map_err(|e| e.to_string())?;
+        self.midi_open.insert(track, opened);
+        Ok(input)
+    }
+
+    fn close_midi_input(&mut self, track: TrackId) {
+        self.midi_open.remove(&track);
+    }
+
+    fn start_takes(&mut self, tracks: &[(String, usize)], midi: usize) -> Result<Takes, String> {
         let dir = self.bundle.audio_dir();
         let names = take_names(&dir, tracks);
         let paths: Vec<PathBuf> = names.iter().flatten().map(|n| dir.join(n)).collect();
         // A pass still held is finished first, keeping its files on disk.
         self.recorder = None;
         let config = RecorderConfig::new(self.bundle.sample_rate());
-        let (recorder, takes) = Recorder::start(&paths, config).map_err(|e| e.to_string())?;
+        let (recorder, takes, midi_takes) =
+            Recorder::start_with_midi(&paths, midi, config).map_err(|e| e.to_string())?;
         self.recorder = Some(recorder);
         let mut takes = takes.into_iter();
-        Ok(names
+        let audio = names
             .into_iter()
             .map(|files| TakeFiles {
                 sinks: takes
@@ -469,7 +533,19 @@ impl Services for AppServices {
                     .collect(),
                 files,
             })
-            .collect())
+            .collect();
+        let midi = midi_takes
+            .into_iter()
+            .map(|t| Box::new(t) as Box<dyn NoteSink>)
+            .collect();
+        Ok(Takes { audio, midi })
+    }
+
+    fn take_messages(&mut self, take: usize) -> Vec<(u64, [u8; 3])> {
+        self.recorder
+            .as_mut()
+            .and_then(|r| r.take_messages(take))
+            .unwrap_or_default()
     }
 
     fn take_status(&mut self) -> Vec<TakeStatus> {

@@ -12,14 +12,22 @@ use std::sync::{Arc, Mutex, PoisonError};
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_effects::Mode;
-use audio_engine::{Engine, Processor, Streams, TakeInfo, TakeSink, TrackFeeds, TransportState};
+use audio_engine::{
+    Engine, NoteSink, Processor, Streams, TakeInfo, TakeSink, TrackFeeds, TransportState,
+};
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
-    ImportedTrack, Menu, Message, MixerFocus, NewNode, PassMarker, Recovered, RecoveredPass,
-    Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    ImportedTrack, Menu, Message, MidiInputChoice, MixerFocus, NewNode, PassMarker, Recovered,
+    RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
+    Takes,
 };
 use engine_bridge::Bridge;
-use project_model::{AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId};
+use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
+use platform_interfaces::test_doubles::FakeMidi;
+use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
+use project_model::{
+    AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId, TrackKind,
+};
 use signal_graph::{Config, NodeId as GraphNodeId};
 
 /// What the fake services saw.
@@ -64,6 +72,10 @@ struct Calls {
     marker_clears: usize,
     /// What opening the project found of a pass a crash cut off.
     recovered: Option<Recovered>,
+    /// The MIDI endpoints each opened, in order.
+    midi_opened: Vec<String>,
+    /// The MIDI endpoints, shared with the fake services.
+    midi: FakeMidi,
     /// The click preferences remembered.
     click: ClickPreferences,
     /// How many times they were remembered.
@@ -101,6 +113,46 @@ impl TakeSink for FakeSink {
     }
 }
 
+/// Each MIDI take's messages, by take number.
+type Captured = Arc<Mutex<BTreeMap<usize, Vec<(u64, [u8; 3])>>>>;
+
+/// A note sink that keeps what it is given and reports it finished when it ends.
+struct FakeNotes {
+    take: usize,
+    captured: Captured,
+    ended: Option<Ended>,
+}
+
+impl NoteSink for FakeNotes {
+    fn write(&mut self, frame: u64, message: signal_graph::Message) -> bool {
+        if self.ended.is_some() {
+            let mut bytes = [0; 3];
+            for (to, from) in bytes.iter_mut().zip(message.bytes()) {
+                *to = *from;
+            }
+            self.captured
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(self.take)
+                .or_default()
+                .push((frame, bytes));
+        }
+        true
+    }
+
+    fn end(&mut self, frames: u64) {
+        if let Some(ended) = self.ended.take() {
+            ended
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(TakeStatus::Finished {
+                    take: self.take,
+                    frames,
+                });
+        }
+    }
+}
+
 struct NoStreams;
 
 impl Streams for NoStreams {
@@ -113,6 +165,9 @@ struct Fake {
     calls: Rc<RefCell<Calls>>,
     streams: NoStreams,
     ended: Ended,
+    captured: Captured,
+    midi: FakeMidi,
+    midi_open: BTreeMap<TrackId, Box<dyn MidiInput>>,
 }
 
 impl Services for Fake {
@@ -292,7 +347,52 @@ impl Services for Fake {
         LATENCY
     }
 
-    fn start_takes(&mut self, tracks: &[(String, usize)]) -> Result<Vec<TakeFiles>, String> {
+    fn midi_latency(&mut self) -> u64 {
+        MIDI_LATENCY
+    }
+
+    fn midi_inputs(&mut self) -> Vec<MidiInputChoice> {
+        self.midi
+            .endpoints()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.direction == MidiDirection::Input && e.online)
+            .map(|e| MidiInputChoice {
+                id: e.id.0,
+                name: e.name,
+            })
+            .collect()
+    }
+
+    fn midi_inputs_changed(&mut self) -> bool {
+        false
+    }
+
+    fn open_midi_input(&mut self, track: TrackId, id: &str) -> Result<LiveInput, String> {
+        self.midi_open.remove(&track);
+        let (producer, input) = midi::channel(LIVE_QUEUE_CAPACITY).map_err(|e| e.to_string())?;
+        let opened = self
+            .midi
+            .open_input(&MidiEndpointId(id.to_owned()), Box::new(producer))
+            .map_err(|e| e.to_string())?;
+        self.midi_open.insert(track, opened);
+        self.calls.borrow_mut().midi_opened.push(id.to_owned());
+        Ok(input)
+    }
+
+    fn close_midi_input(&mut self, track: TrackId) {
+        self.midi_open.remove(&track);
+    }
+
+    fn take_messages(&mut self, take: usize) -> Vec<(u64, [u8; 3])> {
+        self.captured
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&take)
+            .unwrap_or_default()
+    }
+
+    fn start_takes(&mut self, tracks: &[(String, usize)], midi: usize) -> Result<Takes, String> {
         let mut take = 0;
         let mut all = Vec::new();
         let takes = tracks
@@ -315,8 +415,17 @@ impl Services for Fake {
                 TakeFiles { files, sinks }
             })
             .collect();
+        let midi = (0..midi)
+            .map(|i| {
+                Box::new(FakeNotes {
+                    take: take + i,
+                    captured: Arc::clone(&self.captured),
+                    ended: Some(Arc::clone(&self.ended)),
+                }) as Box<dyn NoteSink>
+            })
+            .collect();
         self.calls.borrow_mut().started.push(all);
-        Ok(takes)
+        Ok(Takes { audio: takes, midi })
     }
 
     fn take_status(&mut self) -> Vec<TakeStatus> {
@@ -375,6 +484,8 @@ impl Drop for FakeSink {
 
 /// The fake device's input plus output latency.
 const LATENCY: u64 = 100;
+/// The fake device's output latency plus one block.
+const MIDI_LATENCY: u64 = 300;
 
 /// A project with one mono track at frame 4096 for 65536 frames, routed through a 1-channel
 /// mixer, and the app over it.
@@ -416,10 +527,14 @@ fn app_over(session: &Session, recovered: Option<Recovered>) -> Result<Fixture, 
         recovered,
         ..Calls::default()
     }));
+    let midi = calls.borrow().midi.clone();
     let services = Box::new(Fake {
         calls: Rc::clone(&calls),
         streams: NoStreams,
         ended: Ended::default(),
+        captured: Captured::default(),
+        midi,
+        midi_open: BTreeMap::new(),
     });
     Ok((
         App::new(session, 48_000, bridge, engine, services),
@@ -435,7 +550,7 @@ const MODE: &str = "channel 1 mode";
 
 fn block(processor: &mut Processor) -> Result<(), Box<dyn Error>> {
     let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
-    processor.process(&[], 0, &mut l, &mut r)?;
+    processor.process(&[], 0, 0, &mut l, &mut r)?;
     Ok(())
 }
 
@@ -1168,6 +1283,19 @@ fn test_tracks_are_added_renamed_and_deleted_as_steps() -> Result<(), Box<dyn Er
         app.update(Message::Undo);
     }
     assert_eq!(app.session().state().tracks[1].name, "Piano");
+    Ok(())
+}
+
+#[test]
+fn test_add_midi_track_adds_one_undoable_midi_track() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddMidiTrack);
+    let track = app.session().state().tracks[1].clone();
+    assert_eq!(track.name, "Track 2");
+    assert_eq!(track.kind, TrackKind::Midi);
+    let _ = app.view();
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().tracks.len(), 1);
     Ok(())
 }
 
@@ -2283,7 +2411,7 @@ fn test_input_meter_follows_the_track_input_and_falls() -> Result<(), Box<dyn Er
     // Input 2 at half scale (−6 dBFS); input 1 silent.
     let input: Vec<f32> = (0..256).flat_map(|_| [0.0, 0.5]).collect();
     let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
-    processor.process(&input, 2, &mut l, &mut r)?;
+    processor.process(&input, 2, 0, &mut l, &mut r)?;
     app.update(Message::Tick);
     let level = app.input_levels(track)[0];
     assert!((level - 20.0 * 0.5_f32.log10()).abs() < 1e-4, "{level}");
@@ -2336,7 +2464,7 @@ fn test_choosing_a_device_after_the_old_one_is_lost_rebuilds_the_engine()
     let mut processor = calls.borrow_mut().processor.take().ok_or("not adopted")?;
     let input: Vec<f32> = (0..256).flat_map(|_| [0.5, 0.0]).collect();
     let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
-    processor.process(&input, 2, &mut l, &mut r)?;
+    processor.process(&input, 2, 0, &mut l, &mut r)?;
     app.update(Message::Tick);
     assert!(app.input_levels(track)[0] > -7.0);
     Ok(())
@@ -2904,5 +3032,112 @@ fn test_wire_points_are_added_dragged_and_deleted_as_steps() -> Result<(), Box<d
     app.update(Message::Undo);
     app.update(Message::Undo);
     assert_eq!(shape_of(&app), Some(shape(vec![point(100.0)])));
+    Ok(())
+}
+
+/// A 256-frame block run at host time `BASE + block × PERIOD`, as a device would.
+fn block_at(processor: &mut Processor, block: u64) -> Result<(), Box<dyn Error>> {
+    let (mut l, mut r) = ([0.0; 256], [0.0; 256]);
+    processor.process(&[], 0, MIDI_BASE + block * MIDI_PERIOD, &mut l, &mut r)?;
+    Ok(())
+}
+
+/// The first block's host time, and a 256-frame block's length, in nanoseconds.
+const MIDI_BASE: u64 = 1_000_000_000;
+const MIDI_PERIOD: u64 = 256 * 1_000_000_000 / 48_000;
+
+/// The host time at which a message lands at frame `frame` of block `block`.
+fn landing(block: u64, frame: u64) -> u64 {
+    MIDI_BASE + block * MIDI_PERIOD - MIDI_PERIOD + frame * 20_834
+}
+
+#[test]
+fn test_record_midi_places_one_clip_of_the_notes_played() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let keys = session.add_midi_track("Keys")?;
+    let (mut app, mut processor, calls, _) = app_over(&session, None)?;
+    let midi = calls.borrow().midi.clone();
+    midi.add_endpoint("kb", "Keyboard", MidiDirection::Input);
+    app.update(Message::Arm(keys));
+    // Monitored on the first MIDI input, without opening the audio device's inputs.
+    assert_eq!(app.midi_arming(keys), Some((true, Some("kb"))));
+    assert!(
+        app.is_armed(keys),
+        "the Arm toggle shows a MIDI track armed"
+    );
+    assert_eq!(app.arming(keys), None, "it has no audio input choice");
+    assert_eq!(calls.borrow().midi_opened, ["kb"]);
+    assert!(calls.borrow().input.is_empty());
+    assert!(app.can_record());
+    app.update(Message::Seek(10_000));
+    app.update(Message::SetCountIn(0));
+    app.update(Message::Record);
+    assert!(app.is_recording());
+    // Re-arming with the take's sink kept the input open rather than reopening it.
+    assert_eq!(calls.borrow().midi_opened, ["kb"]);
+    let note = |host_nanos, bytes: &[u8]| midi.inject_bytes("kb", host_nanos, bytes);
+    note(landing(1, 10), &[0x90, 60, 100]);
+    note(landing(3, 0), &[0x80, 60, 0]);
+    note(landing(3, 5), &[0xE0, 0, 64]);
+    for k in 0..4 {
+        block_at(&mut processor, k)?;
+    }
+    app.update(Message::Tick);
+    assert!(app.midi_active(keys));
+    app.update(Message::Stop);
+    block_at(&mut processor, 4)?;
+    app.update(Message::Tick);
+    assert!(app.can_record());
+    assert!(calls.borrow().kept.is_empty(), "no audio files");
+    let clips = &app.session().state().track(keys).ok_or("no track")?.clips;
+    let (_, take) = clips.last().ok_or("no take")?;
+    assert_eq!(
+        (take.position, take.offset, take.length),
+        (10_000 - MIDI_LATENCY, 0, 4 * 256)
+    );
+    let Source::Midi(sequence) = &take.source else {
+        return Err("not a MIDI clip".into());
+    };
+    let notes: Vec<(u64, u64, u8)> = sequence
+        .notes()
+        .iter()
+        .map(|n| (n.start, n.length, n.pitch))
+        .collect();
+    assert_eq!(notes, [(256 + 10, 3 * 256 - 256 - 10, 60)]);
+    app.update(Message::Undo);
+    assert!(
+        app.session()
+            .state()
+            .track(keys)
+            .ok_or("no track")?
+            .clips
+            .is_empty()
+    );
+    assert!(!app.session().can_undo(), "added as one step");
+    Ok(())
+}
+
+#[test]
+fn test_record_midi_without_notes_adds_nothing() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let keys = session.add_midi_track("Keys")?;
+    let (mut app, mut processor, calls, _) = app_over(&session, None)?;
+    app.update(Message::Arm(keys));
+    assert_eq!(app.status(), Some("No MIDI input is connected."));
+    assert_eq!(app.midi_arming(keys), Some((true, None)));
+    app.update(Message::SetCountIn(0));
+    app.update(Message::Record);
+    for k in 0..2 {
+        block_at(&mut processor, k)?;
+    }
+    app.update(Message::Stop);
+    block_at(&mut processor, 2)?;
+    app.update(Message::Tick);
+    assert!(!app.session().can_undo());
+    assert_eq!(calls.borrow().marker_clears, 1);
+    // Disarming forgets the track.
+    app.update(Message::Arm(keys));
+    assert_eq!(app.midi_arming(keys), None);
     Ok(())
 }

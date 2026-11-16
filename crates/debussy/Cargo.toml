@@ -17,6 +17,7 @@ disk_streaming = { path = "../disk_streaming" }
 engine_bridge = { path = "../engine_bridge" }
 import_export = { path = "../import_export" }
 macos_platform = { path = "../macos_platform" }
+midi = { path = "../midi" }
 platform_interfaces = { path = "../platform_interfaces" }
 project_model = { path = "../project_model" }
 project_storage = { path = "../project_storage" }

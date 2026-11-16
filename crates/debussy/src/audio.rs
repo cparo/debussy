@@ -43,6 +43,8 @@ struct EngineCallback {
     beats: Arc<AtomicU64>,
     left: Vec<f32>,
     right: Vec<f32>,
+    /// The stream's sample rate, for each chunk's host time.
+    sample_rate: u32,
 }
 
 impl AudioCallback for EngineCallback {
@@ -76,8 +78,12 @@ impl AudioCallback for EngineCallback {
                 .input
                 .get(done * inputs..(done + n) * inputs)
                 .unwrap_or(&[]);
+            // The host time of the chunk's first frame, for stamping live MIDI input.
+            let offset =
+                (done as u64).saturating_mul(1_000_000_000) / u64::from(self.sample_rate.max(1));
+            let host_nanos = buffers.host_nanos.saturating_add(offset);
             // A failed block is silence, which `process` has already written.
-            let _ = processor.process(input, inputs, left, right);
+            let _ = processor.process(input, inputs, host_nanos, left, right);
             let out = &mut buffers.output[done * channels..(done + n) * channels];
             for (frame, (l, r)) in out
                 .chunks_exact_mut(channels)
@@ -218,6 +224,15 @@ impl AudioOutput {
         u64::from(input_frames) + u64::from(output_frames)
     }
 
+    /// The running stream's output latency plus one buffer, in frames: how long after the
+    /// output a live MIDI message is stamped (`docs/architecture/recording.md` "MIDI
+    /// recording"); 0 when none runs.
+    pub fn midi_latency(&self) -> u64 {
+        self.running.as_ref().map_or(0, |r| {
+            u64::from(r.stream.latency().output_frames) + u64::from(r.stream.config().buffer_frames)
+        })
+    }
+
     /// `preferred` if present, else the default output device.
     fn choose(&self, preferred: Option<&str>) -> Result<String> {
         let devices = self.devices.devices()?;
@@ -301,6 +316,7 @@ impl AudioOutput {
             back: back_tx,
             left: vec![0.0; buffer as usize],
             right: vec![0.0; buffer as usize],
+            sample_rate: self.sample_rate,
         };
         match self.devices.open(&config, Box::new(callback)) {
             Ok(stream) => {

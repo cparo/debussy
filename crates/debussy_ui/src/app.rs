@@ -27,7 +27,7 @@ use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialo
 use crate::node_parameters::{NodeParameters, ParameterCatalog};
 use crate::patch_board::{Pin, Selection, can_connect};
 use crate::range_selection::RangeSelection;
-use crate::recording::{Arming, InputChoice, Pass};
+use crate::recording::{Activity, Arming, InputChoice, OpenMidi, Pass};
 use crate::services::Services;
 use crate::theme::Tone;
 use crate::transport::{
@@ -160,6 +160,8 @@ pub enum Message {
     Monitor(TrackId),
     /// Record this armed track from this input.
     Input(TrackId, InputChoice),
+    /// Record this armed MIDI track from this MIDI input.
+    MidiInput(TrackId, crate::services::MidiInputChoice),
     /// Pause, holding the playhead.
     Pause,
     /// Stop, returning to the return point.
@@ -275,6 +277,8 @@ pub enum Message {
     ImportInto(TrackId),
     /// Add an empty track of this layout after the others.
     AddTrack(Layout),
+    /// Add an empty MIDI track after the others.
+    AddMidiTrack,
     /// Delete a track, its clips and its connections.
     DeleteTrack(TrackId),
     /// Add an automation curve lane, "Curve N", holding one point, below the others.
@@ -447,6 +451,12 @@ pub struct App {
     pub(crate) pass: Option<Pass>,
     /// Each armed track's input meter, one level per channel in dBFS.
     pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
+    /// The MIDI inputs present when last read.
+    pub(crate) midi_inputs: Vec<crate::services::MidiInputChoice>,
+    /// The MIDI input the engine has for each armed MIDI track.
+    pub(crate) midi_open: BTreeMap<TrackId, OpenMidi>,
+    /// Each armed MIDI track's activity light.
+    pub(crate) midi_activity: BTreeMap<TrackId, Activity>,
     /// The click, and the tempo being typed.
     pub(crate) click: Click,
     /// Every mixer's and built-in effect's parameters, read once at launch.
@@ -522,6 +532,9 @@ impl App {
             inputs: 0,
             pass: None,
             meters: BTreeMap::new(),
+            midi_inputs: Vec::new(),
+            midi_open: BTreeMap::new(),
+            midi_activity: BTreeMap::new(),
             click: Click::new(preferences),
             catalog: ParameterCatalog::new(),
             export_dialog: None,
@@ -896,6 +909,7 @@ impl App {
             Message::Arm(track) => self.toggle_arm(track),
             Message::Monitor(track) => self.toggle_monitor(track),
             Message::Input(track, choice) => self.set_input(track, choice.input),
+            Message::MidiInput(track, choice) => self.set_midi_input(track, choice),
             Message::Pause => {
                 let result = self.engine.pause();
                 self.report(result.map_err(|e| e.to_string()));
@@ -949,6 +963,7 @@ impl App {
                 self.engine.collect();
                 self.poll_recording();
                 self.update_meters();
+                self.refresh_midi_inputs();
                 self.stop_at_end();
                 self.follow_playhead();
                 let result = self.bridge.commit();
@@ -1044,6 +1059,17 @@ impl App {
                 let result = self
                     .bridge
                     .edit(&mut self.session, |s| s.add_track(&name, layout));
+                self.report(result.map(|_| ()).map_err(|e| e.to_string()));
+                self.refresh_lanes();
+            }
+            Message::AddMidiTrack => {
+                if self.refuse_while_playing("add a track") {
+                    return;
+                }
+                let name = format!("Track {}", self.session.state().tracks.len() + 1);
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.add_midi_track(&name));
                 self.report(result.map(|_| ()).map_err(|e| e.to_string()));
                 self.refresh_lanes();
             }

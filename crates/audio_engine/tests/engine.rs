@@ -76,7 +76,7 @@ fn run(processor: &mut Processor, blocks: usize) -> Result<(Vec<f32>, Vec<f32>),
     let mut right = vec![0.0; blocks * BLOCK];
     assert_realtime(|| -> Result<(), EngineError> {
         for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
-            processor.process(&[], 0, l, r)?;
+            processor.process(&[], 0, 0, l, r)?;
         }
         Ok(())
     })?;
@@ -347,7 +347,7 @@ fn test_process_rejects_mismatched_buffers_with_silence() -> Result<(), Box<dyn 
     let mut left = [1.0; 64];
     let mut right = [1.0; 32];
     assert!(matches!(
-        processor.process(&[], 0, &mut left, &mut right),
+        processor.process(&[], 0, 0, &mut left, &mut right),
         Err(EngineError::BufferLength {
             left: 64,
             right: 32
@@ -357,7 +357,7 @@ fn test_process_rejects_mismatched_buffers_with_silence() -> Result<(), Box<dyn 
     let mut big = vec![0.0; 1024];
     let mut big_right = vec![0.0; 1024];
     assert!(matches!(
-        processor.process(&[], 0, &mut big, &mut big_right),
+        processor.process(&[], 0, 0, &mut big, &mut big_right),
         Err(EngineError::Graph(_))
     ));
     Ok(())

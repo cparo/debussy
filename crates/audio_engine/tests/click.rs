@@ -28,7 +28,7 @@ fn run(
 ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
     let (mut left, mut right) = (vec![0.0; blocks * block], vec![0.0; blocks * block]);
     for (l, r) in left.chunks_mut(block).zip(right.chunks_mut(block)) {
-        assert_realtime(|| processor.process(&[], 0, l, r))?;
+        assert_realtime(|| processor.process(&[], 0, 0, l, r))?;
     }
     Ok((left, right))
 }
@@ -123,12 +123,15 @@ fn test_count_in_clicks_on_the_grid_even_with_the_click_off() -> Result<(), Box<
         let (mut engine, mut processor) = Engine::new(g.runner, g.output, RATE)?;
         engine.set_click(ClickTrack::new(sound(), 1000.0, 4)?)?;
         let (sink, _take) = memory_sink(100_000);
-        engine.arm(vec![ArmedTrack {
-            source: g.mono,
-            inputs: vec![0],
-            monitor: false,
-            sinks: vec![sink],
-        }])?;
+        engine.arm(
+            vec![ArmedTrack {
+                source: g.mono,
+                inputs: vec![0],
+                monitor: false,
+                sinks: vec![sink],
+            }],
+            Vec::new(),
+        )?;
         // Mid-bar: a bar is 4000 frames; count in one bar.
         let from = 5_500;
         engine.locate(from, &mut streams)?;

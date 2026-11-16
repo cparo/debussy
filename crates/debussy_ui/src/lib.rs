@@ -105,7 +105,7 @@ pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
     ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,
-    PassMarker, Recovered, RecoveredPass, Services, TakeFiles, TakeStatus,
+    MidiInputChoice, PassMarker, Recovered, RecoveredPass, Services, TakeFiles, TakeStatus, Takes,
 };
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;

@@ -209,6 +209,30 @@ fn input_meter<'a>(levels: &[f32]) -> Element<'a, Message> {
     column(bars).spacing(1).into()
 }
 
+/// An armed MIDI track's activity light: lit while messages arrive.
+fn midi_activity<'a>(lit: bool) -> Element<'a, Message> {
+    container(Space::new())
+        .width(Length::Fixed(8.0))
+        .height(Length::Fixed(8.0))
+        .style(move |theme: &iced::Theme| {
+            let palette = theme.extended_palette();
+            let color = if lit {
+                palette.success.base.color
+            } else {
+                palette.background.strong.color
+            };
+            container::Style {
+                background: Some(color.into()),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    ..iced::Border::default()
+                },
+                ..container::Style::default()
+            }
+        })
+        .into()
+}
+
 /// Buttons side by side as one strip, each a `(face, message, selected)` as for [`tool`].
 pub(crate) fn group<'a>(buttons: Vec<(Face<'a>, Option<Message>, bool)>) -> Element<'a, Message> {
     if let [(face, message, selected)] = buttons.as_slice() {
@@ -974,7 +998,7 @@ impl App {
         let mut controls = row![chip(
             "Arm",
             unless_playing(Message::Arm(id)),
-            arming.is_some(),
+            self.is_armed(id),
             Accent::Record
         )]
         .spacing(4)
@@ -995,6 +1019,28 @@ impl App {
                     .padding([1, 6]),
             );
             controls = controls.push(input_meter(self.input_levels(id)));
+        }
+        if let Some((monitor, input)) = self.midi_arming(id) {
+            controls = controls.push(chip(
+                "Monitor",
+                unless_playing(Message::Monitor(id)),
+                monitor,
+                Accent::Audio,
+            ));
+            let choices = self.midi_input_choices().to_vec();
+            let selected = choices
+                .iter()
+                .find(|c| Some(c.id.as_str()) == input)
+                .cloned();
+            controls = controls.push(
+                pick_list(choices, selected, move |choice| {
+                    Message::MidiInput(id, choice)
+                })
+                .placeholder("No MIDI input")
+                .text_size(12)
+                .padding([1, 6]),
+            );
+            controls = controls.push(midi_activity(self.midi_active(id)));
         }
         container(
             row![
@@ -1100,6 +1146,7 @@ impl App {
                     "Stereo track",
                     when_stopped(Message::AddTrack(Layout::Stereo)),
                 ),
+                Entry::item("MIDI track", when_stopped(Message::AddMidiTrack)),
                 Entry::item("Automation curve", when_stopped(Message::AddCurve)),
             ],
             Menu::Click => return self.click_dialog(),

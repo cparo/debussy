@@ -3,44 +3,116 @@
 //! the session and are not saved (ADR-0079).
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use audio_buffers::Layout;
-use audio_engine::{ArmedTrack, TakeInfo};
-use project_model::{AudioFile, Clip, Source, TrackId};
+use audio_engine::{ArmedMidi, ArmedTrack, NoteSink, TakeInfo, TakeSink};
+use project_model::{AudioFile, Clip, Sequence, Source, TrackId, TrackKind};
+use signal_graph::NodeId;
 
 use crate::app::App;
-use crate::services::{PassMarker, Recovered, TakeFiles, TakeStatus};
+use crate::services::{MidiInputChoice, PassMarker, Recovered, TakeFiles, TakeStatus};
 
 /// The quietest level an input meter shows, in dBFS.
 pub const METER_FLOOR_DB: f32 = -60.0;
 /// How far a meter falls per display frame when the input drops, in dB.
 const METER_FALL_DB: f32 = 1.5;
+/// How many display frames a MIDI track's activity light stays lit after a message.
+const ACTIVITY_FRAMES: u8 = 6;
 
 /// One armed track's settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Arming {
     /// Whether its input is heard through the graph.
     pub(crate) monitor: bool,
-    /// The device input channel (from 0) of its first channel; a stereo track takes the next one
-    /// for its second.
-    pub(crate) input: usize,
+    /// What it records from.
+    pub(crate) input: ArmedInput,
+}
+
+/// What an armed track records from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ArmedInput {
+    /// An audio track: the device input channel (from 0) of its first channel; a stereo track
+    /// takes the next one for its second.
+    Audio(usize),
+    /// A MIDI track: the id of its MIDI input endpoint, if one is chosen.
+    Midi(Option<String>),
+}
+
+/// An armed MIDI track's activity light: the engine's count of messages it has received.
+#[derive(Debug, Default)]
+pub(crate) struct Activity {
+    count: Arc<AtomicU64>,
+    seen: u64,
+    /// Display frames it stays lit for.
+    lit: u8,
+}
+
+/// The MIDI input the engine has for an armed MIDI track: its endpoint and the event source it
+/// plays into.
+pub(crate) type OpenMidi = (String, NodeId);
+
+/// A MIDI take's captured messages: take frame and bytes, as they arrived.
+type Captured = Vec<(u64, [u8; 3])>;
+
+/// One armed track's take in a recording pass.
+enum PassTrack {
+    /// An audio track's files.
+    Audio(TrackId, Vec<String>),
+    /// A MIDI track's take, numbered after every audio file.
+    Midi(TrackId),
 }
 
 /// A recording pass whose files are still being written.
 pub(crate) struct Pass {
-    /// Each armed track, its layout and its files, in the order the files are numbered.
-    tracks: Vec<(TrackId, Layout, Vec<String>)>,
-    /// What became of each file, by number.
+    /// Each armed track's take: the audio ones in the order their files are numbered, then the
+    /// MIDI ones.
+    tracks: Vec<PassTrack>,
+    /// What became of each take, by number.
     status: Vec<Option<Result<u64, String>>>,
     /// The device latency when the pass started.
     latency: u64,
+    /// The MIDI placement latency when the pass started.
+    midi_latency: u64,
     /// Where capture began, once it has; kept here in case the engine is rebuilt.
     info: Option<TakeInfo>,
 }
 
 impl Pass {
     fn files(&self) -> Vec<String> {
-        self.tracks.iter().flat_map(|(_, _, f)| f.clone()).collect()
+        self.tracks
+            .iter()
+            .flat_map(|t| match t {
+                PassTrack::Audio(_, files) => files.clone(),
+                PassTrack::Midi(_) => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// The audio tracks and their files.
+    fn audio(&self) -> Vec<(TrackId, Vec<String>)> {
+        self.tracks
+            .iter()
+            .filter_map(|t| match t {
+                PassTrack::Audio(id, files) => Some((*id, files.clone())),
+                PassTrack::Midi(_) => None,
+            })
+            .collect()
+    }
+
+    /// The MIDI tracks and their take numbers.
+    fn midi(&self) -> Vec<(TrackId, usize)> {
+        let first = self.files().len();
+        self.tracks
+            .iter()
+            .filter_map(|t| match t {
+                PassTrack::Midi(id) => Some(*id),
+                PassTrack::Audio(..) => None,
+            })
+            .enumerate()
+            .map(|(i, id)| (id, first + i))
+            .collect()
     }
 }
 
@@ -64,17 +136,39 @@ impl std::fmt::Display for InputChoice {
 }
 
 impl App {
-    /// The track's arm settings, if it is armed.
+    /// The audio track's arm settings, if it is armed.
     pub fn arming(&self, track: TrackId) -> Option<(bool, InputChoice)> {
         let arming = self.arming.get(&track)?;
+        let ArmedInput::Audio(input) = arming.input else {
+            return None;
+        };
         let stereo = self.track_layout(track) == Some(Layout::Stereo);
-        Some((
-            arming.monitor,
-            InputChoice {
-                input: arming.input,
-                stereo,
-            },
-        ))
+        Some((arming.monitor, InputChoice { input, stereo }))
+    }
+
+    /// Whether the track is armed, audio or MIDI.
+    pub fn is_armed(&self, track: TrackId) -> bool {
+        self.arming.contains_key(&track)
+    }
+
+    /// The MIDI track's arm settings, if it is armed: whether it is monitored, and its MIDI
+    /// input's endpoint id if one is chosen.
+    pub fn midi_arming(&self, track: TrackId) -> Option<(bool, Option<&str>)> {
+        let arming = self.arming.get(&track)?;
+        match &arming.input {
+            ArmedInput::Midi(input) => Some((arming.monitor, input.as_deref())),
+            ArmedInput::Audio(_) => None,
+        }
+    }
+
+    /// The MIDI inputs present when last read, for an armed MIDI track's input list.
+    pub fn midi_input_choices(&self) -> &[MidiInputChoice] {
+        &self.midi_inputs
+    }
+
+    /// Whether the armed MIDI track has received a message in the last few display frames.
+    pub fn midi_active(&self, track: TrackId) -> bool {
+        self.midi_activity.get(&track).is_some_and(|a| a.lit > 0)
     }
 
     /// The inputs a track can record from on the device in use: each channel, or each pair
@@ -94,17 +188,30 @@ impl App {
         self.meters.get(&track).map_or(&[], Vec::as_slice)
     }
 
-    /// Reads the engine's input peaks for the armed tracks' meters: each meter jumps up to a
-    /// louder peak and falls [`METER_FALL_DB`] per frame otherwise. Called each display frame.
+    /// Reads the engine's input peaks for the armed audio tracks' meters: each meter jumps up to
+    /// a louder peak and falls [`METER_FALL_DB`] per frame otherwise; and the armed MIDI tracks'
+    /// message counts for their activity lights. Called each display frame.
     pub(crate) fn update_meters(&mut self) {
+        for activity in self.midi_activity.values_mut() {
+            let count = activity.count.load(Ordering::Relaxed);
+            if count != activity.seen {
+                activity.seen = count;
+                activity.lit = ACTIVITY_FRAMES;
+            } else {
+                activity.lit = activity.lit.saturating_sub(1);
+            }
+        }
         let mut peaks: BTreeMap<usize, f32> = BTreeMap::new();
         let mut meters = BTreeMap::new();
         for (id, arming) in &self.arming {
+            let ArmedInput::Audio(first) = arming.input else {
+                continue;
+            };
             let channels = self.track_layout(*id).map_or(0, Layout::channels);
             let old = self.meters.get(id);
             let levels = (0..channels)
                 .map(|c| {
-                    let input = arming.input + c;
+                    let input = first + c;
                     let peak = *peaks
                         .entry(input)
                         .or_insert_with(|| self.engine.take_input_peak(input));
@@ -130,12 +237,19 @@ impl App {
     }
 
     /// Whether Record can start now: stopped or paused, a track armed, the device's inputs open
-    /// and the last pass saved.
+    /// if an audio track is armed, and the last pass saved.
     pub fn can_record(&self) -> bool {
         !self.engine.is_playing()
             && !self.arming.is_empty()
-            && self.inputs > 0
+            && (self.inputs > 0 || !self.audio_armed())
             && self.pass.is_none()
+    }
+
+    /// Whether an audio track is armed.
+    fn audio_armed(&self) -> bool {
+        self.arming
+            .values()
+            .any(|a| matches!(a.input, ArmedInput::Audio(_)))
     }
 
     /// Whether a recording pass's files are still being written.
@@ -143,21 +257,37 @@ impl App {
         self.pass.is_some()
     }
 
-    /// Arms the track, defaulting to input 1 (1–2 for stereo) without monitoring, or disarms
-    /// it. Opens the device's inputs with the first armed track and closes them with the last.
-    /// A MIDI track is never armed: MIDI recording is not built yet.
+    /// Arms the track or disarms it. An audio track defaults to input 1 (1–2 for stereo)
+    /// without monitoring; the device's inputs open with the first armed audio track and close
+    /// with the last. A MIDI track defaults to the first MIDI input, monitored
+    /// (`docs/architecture/recording.md` "MIDI recording").
     pub(crate) fn toggle_arm(&mut self, track: TrackId) {
         if self.refuse_while_playing("arm a track") {
             return;
         }
-        if self.arming.remove(&track).is_none() && self.track_layout(track).is_some() {
-            self.arming.insert(
-                track,
-                Arming {
+        if self.arming.remove(&track).is_none() {
+            let kind = self.session.state().track(track).map(|t| t.kind);
+            let arming = match kind {
+                Some(TrackKind::Audio(_)) => Some(Arming {
                     monitor: false,
-                    input: 0,
-                },
-            );
+                    input: ArmedInput::Audio(0),
+                }),
+                Some(TrackKind::Midi) => {
+                    self.midi_inputs = self.services.midi_inputs();
+                    let input = self.midi_inputs.first().map(|c| c.id.clone());
+                    if input.is_none() {
+                        self.status = Some("No MIDI input is connected.".into());
+                    }
+                    Some(Arming {
+                        monitor: true,
+                        input: ArmedInput::Midi(input),
+                    })
+                }
+                None => None,
+            };
+            if let Some(arming) = arming {
+                self.arming.insert(track, arming);
+            }
         }
         self.sync_arming();
     }
@@ -173,14 +303,48 @@ impl App {
         }
     }
 
-    /// Sets the armed track's input.
+    /// Sets the armed audio track's input.
     pub(crate) fn set_input(&mut self, track: TrackId, input: usize) {
         if self.refuse_while_playing("change a track's input") {
             return;
         }
-        if let Some(arming) = self.arming.get_mut(&track) {
-            arming.input = input;
+        if let Some(arming) = self.arming.get_mut(&track)
+            && let ArmedInput::Audio(current) = &mut arming.input
+        {
+            *current = input;
             self.sync_arming();
+        }
+    }
+
+    /// Sets the armed MIDI track's MIDI input.
+    pub(crate) fn set_midi_input(&mut self, track: TrackId, choice: MidiInputChoice) {
+        if self.refuse_while_playing("change a track's input") {
+            return;
+        }
+        if let Some(arming) = self.arming.get_mut(&track)
+            && let ArmedInput::Midi(current) = &mut arming.input
+        {
+            *current = Some(choice.id);
+            self.sync_arming();
+        }
+    }
+
+    /// Re-reads the MIDI inputs if they have changed. Called each display frame while a MIDI
+    /// track is armed.
+    pub(crate) fn refresh_midi_inputs(&mut self) {
+        let midi_armed = self
+            .arming
+            .values()
+            .any(|a| matches!(a.input, ArmedInput::Midi(_)));
+        if midi_armed && self.services.midi_inputs_changed() {
+            self.midi_inputs = self.services.midi_inputs();
+        }
+    }
+
+    /// Forgets the MIDI inputs the engine had, closing them: the engine has been rebuilt.
+    pub(crate) fn forget_midi_inputs(&mut self) {
+        for track in std::mem::take(&mut self.midi_open).into_keys() {
+            self.services.close_midi_input(track);
         }
     }
 
@@ -194,7 +358,7 @@ impl App {
         }
         let state = self.session.state();
         self.arming.retain(|id, _| state.track(*id).is_some());
-        let want_input = !self.arming.is_empty();
+        let want_input = self.audio_armed();
         if want_input != self.input_open {
             let result = self.services.set_input(want_input);
             self.input_open = want_input;
@@ -213,9 +377,10 @@ impl App {
         if let Err(error) = self.bridge.set_monitored(monitored) {
             self.status = Some(error.to_string());
         }
-        let armed = self.armed_tracks(None);
-        if let Err(error) = self.engine.arm(armed) {
+        let (audio, midi) = self.armed_tracks(None, None);
+        if let Err(error) = self.engine.arm(audio, midi) {
             self.status = Some(error.to_string());
+            self.forget_midi_inputs();
         }
         if want_input && self.inputs == 0 && self.status.is_none() {
             self.status = Some("The audio device has no inputs to record from.".into());
@@ -236,26 +401,34 @@ impl App {
             self.status = Some("Arm a track to record.".into());
             return;
         }
-        if self.inputs == 0 {
+        if self.inputs == 0 && self.audio_armed() {
             self.status = Some("The audio device has no inputs to record from.".into());
             return;
         }
         if !self.load_feeds() {
             return;
         }
-        let tracks: Vec<(TrackId, String, Layout)> = self
+        let state = self.session.state();
+        let audio: Vec<(TrackId, String, Layout)> = self
             .arming
-            .keys()
-            .filter_map(|id| {
-                let track = self.session.state().track(*id)?;
+            .iter()
+            .filter(|(_, a)| matches!(a.input, ArmedInput::Audio(_)))
+            .filter_map(|(id, _)| {
+                let track = state.track(*id)?;
                 Some((*id, track.name.clone(), track.layout()?))
             })
             .collect();
-        let requests: Vec<(String, usize)> = tracks
+        let midi: Vec<TrackId> = self
+            .arming
+            .iter()
+            .filter(|(id, a)| matches!(a.input, ArmedInput::Midi(_)) && state.track(**id).is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        let requests: Vec<(String, usize)> = audio
             .iter()
             .map(|(_, name, layout)| (name.clone(), layout.channels()))
             .collect();
-        let takes = match self.services.start_takes(&requests) {
+        let takes = match self.services.start_takes(&requests, midi.len()) {
             Ok(takes) => takes,
             Err(message) => {
                 self.status = Some(format!("Recording could not start: {message}"));
@@ -263,37 +436,46 @@ impl App {
             }
         };
         let latency = self.services.device_latency();
-        let mut pass_tracks = Vec::with_capacity(tracks.len());
+        let midi_latency = self.services.midi_latency();
+        let mut pass_tracks = Vec::with_capacity(audio.len() + midi.len());
         let mut sinks = BTreeMap::new();
-        for ((id, _, layout), TakeFiles { files, sinks: s }) in tracks.into_iter().zip(takes) {
-            pass_tracks.push((id, layout, files));
+        for ((id, _, _), TakeFiles { files, sinks: s }) in audio.into_iter().zip(takes.audio) {
+            pass_tracks.push(PassTrack::Audio(id, files));
             sinks.insert(id, s);
         }
+        let mut note_sinks = BTreeMap::new();
+        for (id, sink) in midi.into_iter().zip(takes.midi) {
+            pass_tracks.push(PassTrack::Midi(id));
+            note_sinks.insert(id, sink);
+        }
+        let mut pass = Pass {
+            status: Vec::new(),
+            tracks: pass_tracks,
+            latency,
+            midi_latency,
+            info: None,
+        };
+        pass.status = vec![None; pass.files().len() + pass.midi().len()];
+        // MIDI takes are not in the crash marker yet: a crash loses them.
         let marker = PassMarker {
             device_latency: latency,
-            tracks: pass_tracks
-                .iter()
-                .map(|(id, _, files)| (*id, files.clone()))
-                .collect(),
+            tracks: pass.audio(),
         };
-        if let Err(message) = self.services.mark_pass(&marker) {
+        if !marker.tracks.is_empty()
+            && let Err(message) = self.services.mark_pass(&marker)
+        {
             self.status = Some(unprotected(&message));
         }
-        let armed = self.armed_tracks(Some(sinks));
+        let (audio, midi) = self.armed_tracks(Some(sinks), Some(note_sinks));
         let count_in = self.count_in_frames();
         let result = self
             .engine
-            .arm(armed)
+            .arm(audio, midi)
             .and_then(|()| self.engine.record(self.services.streams(), count_in));
-        let pass = Pass {
-            status: vec![None; pass_tracks.iter().map(|(_, _, f)| f.len()).sum()],
-            tracks: pass_tracks,
-            latency,
-            info: None,
-        };
         if let Err(error) = result {
             self.status = Some(format!("Recording could not start: {error}"));
             // Re-arming ends the unused takes.
+            self.forget_midi_inputs();
             self.sync_arming();
             self.services.discard_takes(&pass.files());
             self.services.clear_pass_marker();
@@ -360,12 +542,20 @@ impl App {
                 None => frames = 0,
             }
         }
-        let tracks: Vec<(TrackId, Vec<String>)> = pass
-            .tracks
+        let midi: Vec<(TrackId, Captured)> = pass
+            .midi()
             .into_iter()
-            .map(|(id, _, files)| (id, files))
+            .map(|(id, take)| (id, self.services.take_messages(take)))
             .collect();
-        match self.add_takes(&tracks, frames, pass.info, pass.latency) {
+        let takes = Takes {
+            audio: pass.audio(),
+            midi,
+            frames,
+            info: pass.info,
+            latency: pass.latency,
+            midi_latency: pass.midi_latency,
+        };
+        match self.add_takes(takes) {
             Ok(true) if overruns > 0 => {
                 self.status = Some(format!(
                     "The disk fell behind {overruns} times while recording; the gaps are silent."
@@ -393,12 +583,14 @@ impl App {
         let placed = match recovered {
             Recovered::Discarded => false,
             Recovered::Takes(pass) => {
-                let added = self.add_takes(
-                    &pass.tracks,
-                    pass.frames,
-                    Some(pass.info),
-                    pass.device_latency,
-                );
+                let added = self.add_takes(Takes {
+                    audio: pass.tracks.clone(),
+                    midi: Vec::new(),
+                    frames: pass.frames,
+                    info: Some(pass.info),
+                    latency: pass.device_latency,
+                    midi_latency: 0,
+                });
                 if !matches!(added, Ok(true)) {
                     let files: Vec<String> = pass.tracks.into_iter().flat_map(|(_, f)| f).collect();
                     self.services.discard_takes(&files);
@@ -415,26 +607,29 @@ impl App {
         self.refresh_lanes();
     }
 
-    /// Adds a clip for each of `tracks`' takes of `frames` frames as one step, placed where
-    /// `info` says for a device latency of `device_latency` (`docs/architecture/recording.md`
-    /// "Take placement"), summarises their files, and saves at once, so the step is on disk
-    /// before the crash marker goes. Tracks no longer in the project, or whose layout does not
-    /// match their files, are skipped. Returns whether anything was added; the caller discards
-    /// the files otherwise.
-    fn add_takes(
-        &mut self,
-        tracks: &[(TrackId, Vec<String>)],
-        frames: u64,
-        info: Option<TakeInfo>,
-        device_latency: u64,
-    ) -> Result<bool, String> {
-        let placement = info.map(|info| info.placement(device_latency));
-        let Some((position, offset)) = placement.filter(|&(_, offset)| frames > offset) else {
+    /// Adds a clip for each take as one step, placed where `takes.info` says
+    /// (`docs/architecture/recording.md` "Take placement", "MIDI recording"), summarises the
+    /// audio files, and saves at once, so the step is on disk before the crash marker goes.
+    /// Tracks no longer in the project, or whose kind or layout does not match their take, and
+    /// MIDI takes with no notes, are skipped. Returns whether anything was added; the caller
+    /// discards the files otherwise.
+    fn add_takes(&mut self, takes: Takes) -> Result<bool, String> {
+        let Takes {
+            audio,
+            midi,
+            frames,
+            info,
+            latency,
+            midi_latency,
+        } = takes;
+        let Some(info) = info else {
             return Ok(false);
         };
         let state = self.session.state();
+        let (position, offset) = info.placement(latency);
+        let audio = if frames > offset { audio } else { Vec::new() };
         let mut placed = Vec::new();
-        let clips: Vec<(TrackId, Clip)> = tracks
+        let mut clips: Vec<(TrackId, Clip)> = audio
             .iter()
             .filter(|(id, names)| {
                 state
@@ -459,10 +654,24 @@ impl App {
                 Some((*id, Clip::new(source, offset, frames - offset, position)))
             })
             .collect();
+        let (position, offset) = info.midi_placement(midi_latency);
+        for (id, messages) in midi {
+            let is_midi = state.track(id).is_some_and(|t| t.kind == TrackKind::Midi);
+            let Ok(sequence) = Sequence::from_capture(&messages, frames) else {
+                continue;
+            };
+            if !is_midi || sequence.notes().is_empty() || frames <= offset {
+                continue;
+            }
+            let source = Source::Midi(Arc::new(sequence));
+            clips.push((id, Clip::new(source, offset, frames - offset, position)));
+        }
         if clips.is_empty() {
             return Ok(false);
         }
-        if let Err(message) = self.services.keep_takes(&placed) {
+        if !placed.is_empty()
+            && let Err(message) = self.services.keep_takes(&placed)
+        {
             self.status = Some(format!("The take's waveform could not be drawn: {message}"));
         }
         self.bridge
@@ -487,39 +696,113 @@ impl App {
     /// Re-arms without takes, releasing the spent ones, unless playback has started again.
     fn after_pass(&mut self) {
         if !self.engine.is_playing() {
-            let armed = self.armed_tracks(None);
-            let _ = self.engine.arm(armed);
+            let (audio, midi) = self.armed_tracks(None, None);
+            if self.engine.arm(audio, midi).is_err() {
+                self.forget_midi_inputs();
+            }
         }
     }
 
-    /// The engine's armed tracks for the arm settings, with each track's sinks from `sinks`.
+    /// The engine's armed tracks for the arm settings, audio then MIDI, with each audio track's
+    /// sinks from `sinks` and each MIDI track's from `note_sinks`. Opens each armed MIDI
+    /// track's input unless the engine already has it, and closes those of tracks no longer
+    /// armed; one the engine has is carried over by the engine.
     fn armed_tracks(
-        &self,
-        mut sinks: Option<BTreeMap<TrackId, Vec<Box<dyn audio_engine::TakeSink>>>>,
-    ) -> Vec<ArmedTrack> {
+        &mut self,
+        mut sinks: Option<BTreeMap<TrackId, Vec<Box<dyn TakeSink>>>>,
+        mut note_sinks: Option<BTreeMap<TrackId, Box<dyn NoteSink>>>,
+    ) -> (Vec<ArmedTrack>, Vec<ArmedMidi>) {
         let sources = self.bridge.sources();
-        self.arming
+        let event_sources = self.bridge.event_sources();
+        let mut audio = Vec::new();
+        let mut midi = Vec::new();
+        let mut wanted: BTreeMap<TrackId, OpenMidi> = BTreeMap::new();
+        for (id, arming) in &self.arming {
+            match &arming.input {
+                ArmedInput::Audio(first) => {
+                    let (Some(&source), Some(layout)) = (sources.get(id), self.track_layout(*id))
+                    else {
+                        continue;
+                    };
+                    audio.push(ArmedTrack {
+                        source,
+                        inputs: (*first..*first + layout.channels()).collect(),
+                        monitor: arming.monitor,
+                        sinks: sinks
+                            .as_mut()
+                            .and_then(|s| s.remove(id))
+                            .unwrap_or_default(),
+                    });
+                }
+                ArmedInput::Midi(endpoint) => {
+                    let Some(&source) = event_sources.get(id) else {
+                        continue;
+                    };
+                    if let Some(endpoint) = endpoint {
+                        wanted.insert(*id, (endpoint.clone(), source));
+                    }
+                    let sink = note_sinks.as_mut().and_then(|s| s.remove(id));
+                    midi.push((*id, source, arming.monitor, sink));
+                }
+            }
+        }
+        let gone: Vec<TrackId> = self
+            .midi_open
             .iter()
-            .filter_map(|(id, arming)| {
-                let source = *sources.get(id)?;
-                let channels = self.track_layout(*id)?.channels();
-                Some(ArmedTrack {
-                    source,
-                    inputs: (arming.input..arming.input + channels).collect(),
-                    monitor: arming.monitor,
-                    sinks: sinks
-                        .as_mut()
-                        .and_then(|s| s.remove(id))
-                        .unwrap_or_default(),
-                })
+            .filter(|(id, open)| wanted.get(id) != Some(open))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in gone {
+            self.midi_open.remove(&id);
+            self.services.close_midi_input(id);
+        }
+        self.midi_activity.retain(|id, _| wanted.contains_key(id));
+        let midi = midi
+            .into_iter()
+            .map(|(id, source, monitor, sink)| {
+                let input = match wanted.get(&id) {
+                    Some(open) if !self.midi_open.contains_key(&id) => {
+                        match self.services.open_midi_input(id, &open.0) {
+                            Ok(input) => {
+                                self.midi_open.insert(id, open.clone());
+                                Some(input)
+                            }
+                            Err(message) => {
+                                self.status =
+                                    Some(format!("The MIDI input could not be opened: {message}"));
+                                None
+                            }
+                        }
+                    }
+                    _ => None,
+                };
+                let activity = Arc::clone(&self.midi_activity.entry(id).or_default().count);
+                ArmedMidi::new(source, input, monitor, sink, activity)
             })
-            .collect()
+            .collect();
+        (audio, midi)
     }
 
     /// An audio track's layout; `None` for a MIDI track or one that is gone.
     fn track_layout(&self, track: TrackId) -> Option<Layout> {
         self.session.state().track(track).and_then(|t| t.layout())
     }
+}
+
+/// A pass's takes to place: see [`App::add_takes`].
+struct Takes {
+    /// Each audio track and its files, left first.
+    audio: Vec<(TrackId, Vec<String>)>,
+    /// Each MIDI track and the messages captured.
+    midi: Vec<(TrackId, Captured)>,
+    /// The length every take is placed with, in frames.
+    frames: u64,
+    /// Where capture began; nothing is placed without it.
+    info: Option<TakeInfo>,
+    /// The device latency, for audio takes.
+    latency: u64,
+    /// The MIDI placement latency, for MIDI takes.
+    midi_latency: u64,
 }
 
 /// The status line's warning when the crash marker could not be written.

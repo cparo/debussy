@@ -13,7 +13,9 @@
 //!
 //! For recording, the layer above arms tracks with an [`ArmedTrack`] each, whose
 //! [`TakeSink`]s take the captured input (normally a disk recorder), and places each finished
-//! take where [`TakeInfo::placement`] says.
+//! take where [`TakeInfo::placement`] says. A MIDI track is armed with an [`ArmedMidi`], which
+//! plays a live MIDI input into its event source and captures it into a [`NoteSink`]; its take
+//! is placed where [`TakeInfo::midi_placement`] says.
 //!
 //! Each MIDI track's clips, flattened onto the timeline as a [`MidiTrack`] and set with
 //! [`Engine::set_midi_tracks`], are played into its event source with frame-accurate events.
@@ -30,7 +32,8 @@
 //! - `timeline`: [`ChannelClip`], [`ClipAudio`] and [`TrackRenderer`], a track channel's clips
 //!   mixed into one signal.
 //! - `click`: [`ClickTrack`], the metronome click.
-//! - `capture`: [`ArmedTrack`], [`TakeSink`], [`TakeInfo`] and the device input.
+//! - `capture`: [`ArmedTrack`], [`TakeSink`], [`ArmedMidi`], [`NoteSink`], [`TakeInfo`] and the
+//!   device input.
 //! - `feed`: [`TrackFeed`], [`TrackFeeds`], [`Streams`] and [`RenderFeed`].
 //! - `midi`: [`MidiTrack`], [`NoteSpan`] and [`ControlPoint`], a MIDI track's clips played into
 //!   its event source.
@@ -53,7 +56,7 @@ mod processor;
 mod render;
 mod timeline;
 
-pub use capture::{ArmedTrack, MAX_INPUTS, TakeInfo, TakeSink};
+pub use capture::{ArmedMidi, ArmedTrack, MAX_INPUTS, NoteSink, TakeInfo, TakeSink};
 pub use click::{ClickTrack, OFFBEAT_GAIN};
 pub use engine::{Engine, TransportState};
 pub use error::Error;

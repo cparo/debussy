@@ -44,6 +44,8 @@ impl App {
         if let Err(message) = self.services.adopt_engine(processor, device) {
             self.status = Some(message);
         }
+        // The lost processor held the MIDI inputs too.
+        self.forget_midi_inputs();
         if !self.arming.is_empty() {
             self.sync_arming();
         }

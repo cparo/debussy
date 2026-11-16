@@ -228,3 +228,42 @@ fn test_start_refuses_an_existing_file_and_removes_those_created() -> Result<(),
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }
+
+#[test]
+fn test_midi_take_is_collected_alongside_audio() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("midi")?;
+    let paths = [dir.join("a.wav")];
+    let (mut recorder, mut takes, mut midi) =
+        Recorder::start_with_midi(&paths, 2, RecorderConfig::new(RATE))?;
+    assert_eq!(recorder.takes(), 3);
+    let a: Vec<f32> = (0..1000).map(value).collect();
+    write(&mut takes[0], &a)?;
+    assert_realtime(|| {
+        midi[0].write(5, [0x90, 60, 100]);
+        midi[0].write(700, [0x80, 60, 0]);
+        midi[0].end(1000);
+        midi[1].end(1000);
+    });
+    assert!(recorder.take_messages(1).is_none(), "not before its event");
+    assert_realtime(|| takes.iter_mut().for_each(Take::end));
+    let mut got = events(&mut recorder, 3)?;
+    got.sort_by_key(|e| match e {
+        TakeEvent::Finished { take, .. } | TakeEvent::Failed { take, .. } => *take,
+    });
+    let finished = |take| TakeEvent::Finished { take, frames: 1000 };
+    assert_eq!(got, [finished(0), finished(1), finished(2)]);
+    assert_eq!(
+        recorder.take_messages(1),
+        Some(vec![(5, [0x90, 60, 100]), (700, [0x80, 60, 0])])
+    );
+    assert_eq!(recorder.take_messages(2), Some(Vec::new()));
+    assert_eq!(recorder.take_messages(1), None, "taken once");
+    assert_eq!(recorder.take_messages(0), None, "an audio take");
+    assert_eq!(recorder.overruns(1), Some(0));
+    assert_eq!(recorder.overruns(3), None);
+    drop(midi);
+    drop(takes);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
