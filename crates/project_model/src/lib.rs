@@ -36,7 +36,7 @@
 //! - `routing`: [`Node`], [`NodeKind`], [`Connection`], [`Endpoint`] and their ids.
 //! - `edit`: [`Edit`].
 //! - `range`: [`Range`], [`Excerpt`], [`Lane`].
-//! - `tempo`: [`Tempo`], [`Beat`] and the grid math.
+//! - `tempo`: [`Tempo`], [`Beat`], [`Grid`] and the grid math.
 //! - `session`: [`Session`].
 //! - `error`: [`Error`].
 
@@ -62,5 +62,5 @@ pub use routing::{
 };
 pub use session::Session;
 pub use state::{Clip, CurveLane, State, Track};
-pub use tempo::{Beat, Tempo};
+pub use tempo::{Beat, Grid, Tempo};
 pub use types::{AudioFile, ClipId, CurveId, Source, TrackId, TrackKind};

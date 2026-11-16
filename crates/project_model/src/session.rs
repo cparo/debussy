@@ -2,6 +2,7 @@
 //! (`docs/architecture/project.md` "Undo history" and "Named versions").
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use audio_buffers::Layout;
 
@@ -12,7 +13,8 @@ use crate::routing::{
     Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side, WireShape,
 };
 use crate::state::{Clip, CurveLane, State, Track};
-use crate::types::{ClipId, CurveId, TrackId};
+use crate::tempo::Grid;
+use crate::types::{ClipId, CurveId, Source, TrackId, TrackKind};
 
 /// A project open for editing. Every change goes through [`Session::apply`] (or a method built
 /// on it) and is one step of an unlimited undo history, which is never saved.
@@ -191,7 +193,7 @@ impl Session {
     }
 
     /// Adds an empty MIDI track after the others, as one step. Its event output is left
-    /// unconnected: nothing the model knows of takes events yet.
+    /// unconnected; [`Session::set_instrument`] gives it an instrument.
     ///
     /// # Errors
     ///
@@ -210,19 +212,44 @@ impl Session {
         let index = self.state.tracks.len();
         let track = Track::new(id, name, layout);
         let mut edits = vec![Edit::InsertTrack { index, track }];
-        // New connections go at the end of the list, one after another.
-        let mut next_index = self.state.connections.len();
+        edits.extend(self.join_output_edits(Endpoint::Track(id), layout, &BTreeSet::new()));
+        (id, edits)
+    }
+
+    /// The edits that route output 0 of `from`, of `layout`, to the project: with a project
+    /// mixer ([`State::project_mixer`]), a mono output on the first free channel and a stereo
+    /// output's left and right on two channels panned hard left and right, adding channels as
+    /// needed (ADR-0058); without one, straight to the project output. Channels whose only
+    /// connections are in `leaving` count as free. The connections go at the end of the list.
+    fn join_output_edits(
+        &mut self,
+        from: Endpoint,
+        layout: Layout,
+        leaving: &BTreeSet<ConnectionId>,
+    ) -> Vec<Edit> {
+        let mut edits = Vec::new();
+        // New connections go at the end of the list, one after another, once those leaving are
+        // gone.
+        let mut next_index = self.state.connections.len() - leaving.len();
         match self.state.project_mixer() {
             Some(mixer) => {
                 let sides: &[(Option<Side>, f32)] = match layout {
                     Layout::Mono => &[(None, 0.0)],
                     Layout::Stereo => &[(Some(Side::Left), -1.0), (Some(Side::Right), 1.0)],
                 };
-                let mut free = self.state.free_mixer_channels(mixer);
                 let channels = match self.state.node(mixer).map(|n| &n.kind) {
                     Some(NodeKind::Mixer { channels, .. }) => *channels,
                     _ => 0,
                 };
+                let mut free: Vec<usize> = (0..channels)
+                    .filter(|&ch| {
+                        !self.state.connections.iter().any(|c| {
+                            c.to == Endpoint::Node(mixer)
+                                && c.input == ch
+                                && !leaving.contains(&c.id)
+                        })
+                    })
+                    .collect();
                 let missing = sides.len().saturating_sub(free.len());
                 if missing > 0 {
                     edits.push(Edit::SetMixerChannels {
@@ -234,7 +261,7 @@ impl Session {
                 for (&(side, pan), &channel) in sides.iter().zip(&free) {
                     let connection = Connection::new(
                         self.new_connection_id(),
-                        Endpoint::Track(id),
+                        from,
                         0,
                         Endpoint::Node(mixer),
                         channel,
@@ -245,7 +272,7 @@ impl Session {
                         connection,
                     });
                     next_index += 1;
-                    // A free channel may hold an old value; set the pan this track wants and
+                    // A free channel may hold an old value; set the pan this output wants and
                     // clear the rest.
                     for control in ["gain", "mode"] {
                         edits.push(Edit::SetParameter {
@@ -262,20 +289,96 @@ impl Session {
                 }
             }
             None => {
-                let connection = Connection::new(
-                    self.new_connection_id(),
-                    Endpoint::Track(id),
-                    0,
-                    Endpoint::Output,
-                    0,
-                );
+                let connection =
+                    Connection::new(self.new_connection_id(), from, 0, Endpoint::Output, 0);
                 edits.push(Edit::Connect {
                     index: next_index,
                     connection,
                 });
             }
         }
-        (id, edits)
+        edits
+    }
+
+    /// Gives MIDI track `track` a new instrument of kind `kind` at its defaults, as one step,
+    /// and returns the instrument's id (`docs/architecture/track-pane.md` "Instrument choice"):
+    ///
+    /// - The track's event output is disconnected. An instrument it fed that nothing else feeds
+    ///   is removed, with its connections.
+    /// - The new instrument is laid out automatically on the patch board, takes the track's
+    ///   events on its event input, and its stereo output joins the project as a stereo track's
+    ///   does ([`Session::add_track`]), reusing the channels a removed instrument held.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], or [`Error::KindMismatch`] for an audio track.
+    pub fn set_instrument(&mut self, track: TrackId, kind: &str) -> Result<NodeId, Error> {
+        let target = self.state.track(track).ok_or(Error::UnknownTrack(track))?;
+        if target.kind != TrackKind::Midi {
+            return Err(Error::KindMismatch);
+        }
+        let mut leaving: BTreeSet<ConnectionId> = BTreeSet::new();
+        let mut removed = Vec::new();
+        let fed: Vec<&Connection> = self.state.connections_of(Endpoint::Track(track)).collect();
+        for connection in &fed {
+            leaving.insert(connection.id);
+            let Endpoint::Node(node) = connection.to else {
+                continue;
+            };
+            let is_instrument = self
+                .state
+                .node(node)
+                .is_some_and(|n| matches!(n.kind, NodeKind::Instrument { .. }));
+            let shared = self
+                .state
+                .connections
+                .iter()
+                .any(|c| c.to == Endpoint::Node(node) && c.from != Endpoint::Track(track));
+            if is_instrument && !shared && !removed.contains(&node) {
+                removed.push(node);
+            }
+        }
+        for &node in &removed {
+            leaving.extend(
+                self.state
+                    .connections_of(Endpoint::Node(node))
+                    .map(|c| c.id),
+            );
+        }
+        let mut edits: Vec<Edit> = leaving.iter().map(|&id| Edit::Disconnect(id)).collect();
+        edits.extend(removed.iter().map(|&node| Edit::RemoveNode(node)));
+        let id = NodeId(self.take_id());
+        edits.push(Edit::InsertNode {
+            index: self.state.nodes.len() - removed.len(),
+            node: Node::new(
+                id,
+                NodeKind::Instrument {
+                    kind: kind.to_owned(),
+                    parameters: BTreeMap::new(),
+                },
+            ),
+        });
+        let events = Connection::new(
+            self.new_connection_id(),
+            Endpoint::Track(track),
+            0,
+            Endpoint::Node(id),
+            0,
+        );
+        edits.push(Edit::Connect {
+            index: self.state.connections.len() - leaving.len(),
+            connection: events,
+        });
+        // One more connection than `leaving` accounts for is now at the end of the list.
+        let mut joining = self.join_output_edits(Endpoint::Node(id), Layout::Stereo, &leaving);
+        for edit in &mut joining {
+            if let Edit::Connect { index, .. } = edit {
+                *index += 1;
+            }
+        }
+        edits.extend(joining);
+        self.apply(Edit::Batch(edits))?;
+        Ok(id)
     }
 
     /// Connects `from_side` of output `output` of `from` (or the whole port, with `None`) to
@@ -732,6 +835,80 @@ impl Session {
         })?;
         self.apply_new_ids(edits, next)?;
         Ok(ids)
+    }
+
+    /// Quantizes the notes of the MIDI clips on `tracks` that start inside `range`, as one step
+    /// (`docs/architecture/project.md` "Editing model"): each moves `strength` (0 to 1) of the
+    /// way to the nearest line of `grid` at `rate` Hz, keeping its length, but never out of its
+    /// clip. Each changed clip gets its own new sequence, at its own layer and position. Audio
+    /// tracks are skipped. Returns how many notes started inside the range; no step if none
+    /// moved.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], or [`Error::InvalidValue`] for a strength outside 0 to 1.
+    pub fn quantize(
+        &mut self,
+        tracks: &[TrackId],
+        range: Range,
+        grid: Grid,
+        strength: f32,
+        rate: u32,
+    ) -> Result<usize, Error> {
+        if !(0.0..=1.0).contains(&strength) {
+            return Err(Error::InvalidValue);
+        }
+        let tempo = self.state.tempo;
+        let mut found = 0;
+        let mut edits = Vec::new();
+        for &id in tracks {
+            let track = self.state.track(id).ok_or(Error::UnknownTrack(id))?;
+            for (clip_id, clip) in &track.clips {
+                let Source::Midi(sequence) = &clip.source else {
+                    continue;
+                };
+                let (start, end) = (
+                    range.start().max(clip.position),
+                    range.end().min(clip.end()),
+                );
+                if start >= end {
+                    continue;
+                }
+                // Sequence frame `t` plays at timeline frame `t - offset + position`.
+                let (from, to) = (
+                    start - clip.position + clip.offset,
+                    end - clip.position + clip.offset,
+                );
+                found += sequence
+                    .notes()
+                    .iter()
+                    .filter(|n| (from..to).contains(&n.start))
+                    .count();
+                let (position, offset) = (clip.position, clip.offset);
+                let last = clip.offset + clip.length - 1;
+                let target = |at: u64| {
+                    let timeline = at - offset + position;
+                    let line = tempo.nearest_grid(timeline, grid, rate);
+                    let shift = (f64::from(strength) * (line as f64 - timeline as f64)).round();
+                    let moved = (timeline as f64 + shift).max(position as f64) as u64;
+                    (moved - position + offset).min(last)
+                };
+                let quantized = sequence.quantized(from, to, target);
+                if quantized != **sequence {
+                    edits.push(Edit::ReplaceClip {
+                        id: *clip_id,
+                        clip: Clip {
+                            source: Source::Midi(Arc::new(quantized)),
+                            ..clip.clone()
+                        },
+                    });
+                }
+            }
+        }
+        if !edits.is_empty() {
+            self.apply(Edit::Batch(edits))?;
+        }
+        Ok(found)
     }
 
     /// Applies `edits` as one step, if there are any, and on success takes the ids below

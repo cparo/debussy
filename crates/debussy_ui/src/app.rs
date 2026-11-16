@@ -199,6 +199,17 @@ pub enum Message {
     Paste,
     /// Delete the selected range, as one step.
     DeleteRange,
+    /// Open the quantize dialog, if quantize is available.
+    OpenQuantize,
+    /// Quantize to this grid.
+    QuantizeGrid(project_model::Grid),
+    /// Quantize this far, in percent.
+    QuantizeStrength(f32),
+    /// Quantize the notes in the selected range with the dialog's choices, as one step.
+    Quantize,
+    /// Give this MIDI track a new instrument of this kind, wired to the project mixer, as one
+    /// step.
+    SetInstrument(TrackId, &'static str),
     /// Turn mono listening on (`true`) or off.
     SetMono(bool),
     /// Turn the click on (`true`) or off.
@@ -459,6 +470,8 @@ pub struct App {
     pub(crate) midi_activity: BTreeMap<TrackId, Activity>,
     /// The click, and the tempo being typed.
     pub(crate) click: Click,
+    /// The quantize dialog's choices.
+    pub(crate) quantize: crate::midi_edit::QuantizeSettings,
     /// Every mixer's and built-in effect's parameters, read once at launch.
     catalog: ParameterCatalog,
     /// The open Export dialog.
@@ -536,6 +549,7 @@ impl App {
             midi_open: BTreeMap::new(),
             midi_activity: BTreeMap::new(),
             click: Click::new(preferences),
+            quantize: crate::midi_edit::QuantizeSettings::default(),
             catalog: ParameterCatalog::new(),
             export_dialog: None,
             export_settings,
@@ -848,7 +862,7 @@ impl App {
         // A frame tick, a scroll or typing leaves the status line and the open menu alone;
         // anything else replaces the status and closes the menu, except the click dialog's own
         // controls, which leave it open.
-        let in_click_dialog = self.menu == Some(Menu::Click)
+        let in_click_dialog = (self.menu == Some(Menu::Click)
             && matches!(
                 message,
                 Message::SetClick(_)
@@ -857,7 +871,12 @@ impl App {
                     | Message::SetBeatUnit(_)
                     | Message::SetClickSound(_)
                     | Message::SetCountIn(_)
-            );
+            ))
+            || (self.menu == Some(Menu::Quantize)
+                && matches!(
+                    message,
+                    Message::QuantizeGrid(_) | Message::QuantizeStrength(_)
+                ));
         let quiet = matches!(&message, Message::Dialog(m) if m.is_focus_key());
         if !quiet
             && !matches!(
@@ -948,6 +967,17 @@ impl App {
             }
             Message::Paste => self.paste(),
             Message::DeleteRange => self.delete_range(),
+            Message::OpenQuantize => {
+                if self.can_quantize() {
+                    self.menu = Some(Menu::Quantize);
+                }
+            }
+            Message::QuantizeGrid(grid) => self.quantize.grid = grid,
+            Message::QuantizeStrength(percent) => {
+                self.quantize.strength = (percent / 5.0).round().clamp(0.0, 20.0) * 5.0;
+            }
+            Message::Quantize => self.quantize(),
+            Message::SetInstrument(track, kind) => self.set_instrument(track, kind),
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::SetClick(on) => self.engine.set_click_on(on),
             Message::TempoText(text) => self.click.tempo_text = Some(text),

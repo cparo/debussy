@@ -10,7 +10,7 @@ use std::cell::Cell;
 use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
 use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse};
-use project_model::{Clip, Source, Tempo, Track, TrackId};
+use project_model::{Clip, Source, Tempo, Track, TrackId, TrackKind};
 
 use crate::app::Message;
 use crate::grid::grid_lines;
@@ -69,6 +69,70 @@ pub struct Lane {
     pub samples_per_column: u64,
     /// The spectrogram columns, left to right; empty in waveform display.
     pub spectrum: Vec<Option<Spectrum>>,
+    /// A MIDI track's notes and clips; `None` on an audio track.
+    pub midi: Option<NoteLane>,
+}
+
+/// One note in a MIDI lane, in waveform columns from the lane's left edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoteBar {
+    /// Where it starts, or the lane's left edge if it started earlier.
+    pub x0: f32,
+    /// Where it ends, or the lane's right edge if it ends later.
+    pub x1: f32,
+    /// Its MIDI note number.
+    pub pitch: u8,
+}
+
+/// What a MIDI lane shows (`docs/architecture/track-pane.md` "MIDI clip display"): the notes
+/// that play, and where the clips are, in waveform columns.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoteLane {
+    /// The notes in view, as the engine plays them.
+    pub notes: Vec<NoteBar>,
+    /// Each clip's visible stretch, `(from, to)`, bottom layer first.
+    pub spans: Vec<(f32, f32)>,
+    /// The lowest pitch the lane's height spans.
+    pub low: u8,
+    /// The highest pitch the lane's height spans, at least 11 above `low`.
+    pub high: u8,
+}
+
+/// The fewest semitones a MIDI lane's height spans, so a short melody is not stretched.
+const MIN_PITCH_SPAN: u8 = 12;
+
+/// The MIDI lane of `track` from timeline frame `start` at `spc` frames per waveform column.
+fn note_lane(track: &Track, start: u64, spc: u64) -> NoteLane {
+    let end = start.saturating_add(spc.saturating_mul(LANE_COLUMNS as u64));
+    let column = |frame: u64| (frame.clamp(start, end) - start) as f32 / spc as f32;
+    let spans = track
+        .clips
+        .iter()
+        .filter(|(_, clip)| clip.end() > start && clip.position < end)
+        .map(|(_, clip)| (column(clip.position), column(clip.end())))
+        .collect();
+    let notes: Vec<NoteBar> = engine_bridge::track_notes(track)
+        .into_iter()
+        .filter(|note| note.end > start && note.start < end)
+        .map(|note| NoteBar {
+            x0: column(note.start),
+            x1: column(note.end),
+            pitch: note.pitch,
+        })
+        .collect();
+    let lowest = notes.iter().map(|n| n.pitch).min().unwrap_or(60);
+    let highest = notes.iter().map(|n| n.pitch).max().unwrap_or(60);
+    // Widen to the least span, evenly either side, within MIDI's range.
+    let short = (MIN_PITCH_SPAN - 1).saturating_sub(highest - lowest);
+    let low = lowest.saturating_sub(short / 2);
+    let high = (low + (MIN_PITCH_SPAN - 1)).max(highest).min(127);
+    let low = low.min(high - (MIN_PITCH_SPAN - 1));
+    NoteLane {
+        notes,
+        spans,
+        low,
+        high,
+    }
 }
 
 /// Reduces one spectrogram frame's bins (in dB, 0 Hz first) to [`SPECTRUM_BANDS`] log-spaced
@@ -155,6 +219,13 @@ pub fn lanes(
     services: &mut dyn Services,
 ) -> Vec<Lane> {
     let spc = samples_per_column.max(MIN_SAMPLES_PER_COLUMN);
+    if track.kind == TrackKind::Midi {
+        return vec![Lane {
+            samples_per_column: spc,
+            midi: Some(note_lane(track, start, spc)),
+            ..Lane::default()
+        }];
+    }
     (0..channels(track))
         .map(|channel| match display {
             Display::Waveform if spc < BASE_BUCKET => {
@@ -325,7 +396,9 @@ impl Program<Message> for LaneView<'_> {
         let lane = state.cache.draw(renderer, size, |frame| {
             let mut raster = Raster::new(size.width, size.height, self.scale);
             raster.fill_rect(0.0, 0.0, size.width, size.height, background);
-            if !self.lane.spectrum.is_empty() {
+            if let Some(notes) = &self.lane.midi {
+                draw_notes(&mut raster, notes, size, audio);
+            } else if !self.lane.spectrum.is_empty() {
                 draw_spectrum(&mut raster, self.lane, size, background, audio);
             } else if !self.lane.trace.is_empty() {
                 draw_trace(&mut raster, self.lane, size, audio);
@@ -438,6 +511,32 @@ impl Program<Message> for CursorView {
             CURSOR,
         );
         vec![frame.into_geometry()]
+    }
+}
+
+/// A MIDI lane: each clip's stretch a faint band, and each note a bar in the audio colour, at a
+/// height by its pitch between the lane's lowest and highest.
+fn draw_notes(raster: &mut Raster, lane: &NoteLane, size: Size, audio: iced::Color) {
+    let width = size.width / LANE_COLUMNS as f32;
+    for &(from, to) in &lane.spans {
+        let band = iced::Color { a: 0.12, ..audio };
+        raster.fill_rect(
+            from * width,
+            0.0,
+            ((to - from) * width).max(1.0),
+            size.height,
+            band,
+        );
+    }
+    let rows = f32::from(lane.high - lane.low) + 1.0;
+    let row = size.height / rows;
+    let bar = row.clamp(1.0, 3.0);
+    for note in &lane.notes {
+        // The highest pitch at the top.
+        let step = f32::from(lane.high.saturating_sub(note.pitch));
+        let y = step * row + (row - bar) / 2.0;
+        let w = ((note.x1 - note.x0) * width).max(1.0);
+        raster.fill_rect(note.x0 * width, y, w, bar, audio);
     }
 }
 
@@ -614,6 +713,86 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn midi_track(clips: Vec<Clip>) -> Track {
+        let mut track = Track::new_midi(TrackId(1), "keys");
+        track.clips = clips
+            .into_iter()
+            .enumerate()
+            .map(|(i, clip)| (project_model::ClipId(10 + i as u64), clip))
+            .collect();
+        track
+    }
+
+    fn midi_clip(notes: &[(u64, u64, u8)], position: u64) -> Result<Clip, project_model::Error> {
+        let notes = notes
+            .iter()
+            .map(|&(start, length, pitch)| project_model::Note {
+                start,
+                length,
+                channel: 0,
+                pitch,
+                velocity: 100,
+            })
+            .collect();
+        let sequence = project_model::Sequence::new(10_000, notes, Vec::new())?;
+        Ok(Clip::new(
+            Source::Midi(std::sync::Arc::new(sequence)),
+            0,
+            10_000,
+            position,
+        ))
+    }
+
+    #[test]
+    fn test_note_lane_places_notes_in_columns() -> Result<(), project_model::Error> {
+        let track = midi_track(vec![midi_clip(&[(0, 100, 60), (400, 200, 72)], 1_000)?]);
+        let lane = note_lane(&track, 0, 100);
+        assert_eq!(
+            lane.notes,
+            [
+                NoteBar {
+                    x0: 10.0,
+                    x1: 11.0,
+                    pitch: 60
+                },
+                NoteBar {
+                    x0: 14.0,
+                    x1: 16.0,
+                    pitch: 72
+                }
+            ]
+        );
+        assert_eq!(lane.spans, [(10.0, 110.0)]);
+        assert_eq!((lane.low, lane.high), (60, 72));
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_lane_pads_the_pitch_span_and_clips_to_view() -> Result<(), project_model::Error> {
+        let track = midi_track(vec![midi_clip(&[(0, 500, 64)], 0)?]);
+        let lane = note_lane(&track, 300, 100);
+        // The note started before the view, so it starts at the left edge.
+        assert_eq!(lane.notes[0].x0, 0.0);
+        assert_eq!(lane.notes[0].x1, 2.0);
+        assert_eq!(lane.high - lane.low, MIN_PITCH_SPAN - 1);
+        assert!((lane.low..=lane.high).contains(&64));
+        // At the top of MIDI's range the span stays within it.
+        let track = midi_track(vec![midi_clip(&[(0, 500, 127)], 0)?]);
+        let lane = note_lane(&track, 0, 100);
+        assert_eq!((lane.low, lane.high), (127 - (MIN_PITCH_SPAN - 1), 127));
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_lane_hides_notes_under_a_higher_clip() -> Result<(), project_model::Error> {
+        let below = midi_clip(&[(0, 100, 60), (5_000, 100, 62)], 0)?;
+        let above = midi_clip(&[], 4_000)?;
+        let lane = note_lane(&midi_track(vec![below, above]), 0, 100);
+        let pitches: Vec<u8> = lane.notes.iter().map(|n| n.pitch).collect();
+        assert_eq!(pitches, [60]);
+        Ok(())
     }
 
     #[test]

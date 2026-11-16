@@ -10,7 +10,7 @@ use iced::widget::{
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Padding, Size};
-use project_model::{CurveId, Endpoint, NodeKind, Side, TrackId};
+use project_model::{CurveId, Endpoint, NodeKind, Side, TrackId, TrackKind};
 
 use crate::app::{App, Message, NewNode, PaneRow, Renaming};
 use crate::click::{COUNT_IN_BARS, format_bpm};
@@ -68,6 +68,8 @@ const TEMPO_WIDTH: f32 = 64.0;
 const METER_WIDTH: f32 = 56.0;
 /// Where the click dialog opens from the window's left edge: about over the click button.
 const CLICK_DIALOG_X: f32 = 370.0;
+/// The quantize dialog's left edge, under the edit buttons in the top bar.
+const QUANTIZE_DIALOG_X: f32 = 420.0;
 /// The click dialog's width.
 const CLICK_DIALOG_WIDTH: f32 = 290.0;
 /// The click dialog's height, to open it above the bottom bar.
@@ -367,6 +369,13 @@ impl App {
                     false
                 ),
             ]),
+            gap(4.0),
+            tool(
+                Face::Icon(Icon::Quantize),
+                self.can_quantize()
+                    .then_some(Message::OpenMenu(Menu::Quantize)),
+                self.menu == Some(Menu::Quantize)
+            ),
             gap(16.0),
             group(vec![
                 (
@@ -991,7 +1000,20 @@ impl App {
     }
 
     fn track_header<'a>(&'a self, id: TrackId, name: &'a str) -> Element<'a, Message> {
-        let label = self.header_label(Renaming::Track(id), name);
+        let state = self.session().state();
+        let instrument = state
+            .track(id)
+            .is_some_and(|t| t.kind == TrackKind::Midi)
+            .then(|| match crate::midi_edit::instrument_of(state, id) {
+                Some(kind) => crate::midi_edit::instrument_name(kind).to_owned(),
+                None => "No instrument".to_owned(),
+            });
+        let mut label = row![self.header_label(Renaming::Track(id), name)]
+            .spacing(8)
+            .align_y(Alignment::Center);
+        if let Some(instrument) = instrument {
+            label = label.push(text(instrument).size(12));
+        }
         let playing = self.engine().is_playing();
         let unless_playing = |message: Message| (!playing).then_some(message);
         let arming = self.arming(id);
@@ -1094,6 +1116,7 @@ impl App {
                 CLICK_DIALOG_X,
                 size.height - BAR_HEIGHT - CLICK_DIALOG_HEIGHT,
             ),
+            Menu::Quantize => (QUANTIZE_DIALOG_X, BAR_HEIGHT),
             Menu::Device => {
                 let items = self.devices.0.len().max(1) as f32;
                 (
@@ -1131,11 +1154,28 @@ impl App {
                     Entry::item("Quit", Some(Message::Quit)),
                 ]
             }
-            Menu::Track(id) => vec![
-                Entry::item("Rename", Some(Message::StartRename(Renaming::Track(id)))),
-                Entry::item("Import audio into…", when_stopped(Message::ImportInto(id))),
-                Entry::item("Delete", when_stopped(Message::DeleteTrack(id))),
-            ],
+            Menu::Track(id) => {
+                let midi = self
+                    .session()
+                    .state()
+                    .track(id)
+                    .is_some_and(|t| t.kind == TrackKind::Midi);
+                let mut entries = vec![
+                    Entry::item("Rename", Some(Message::StartRename(Renaming::Track(id)))),
+                    Entry::item(
+                        "Import audio into…",
+                        (!midi)
+                            .then(|| when_stopped(Message::ImportInto(id)))
+                            .flatten(),
+                    ),
+                    Entry::item("Delete", when_stopped(Message::DeleteTrack(id))),
+                ];
+                if midi {
+                    entries.push(Entry::Separator);
+                    entries.extend(self.instrument_entries(id));
+                }
+                entries
+            }
             Menu::Curve(id) => vec![
                 Entry::item("Rename", Some(Message::StartRename(Renaming::Curve(id)))),
                 Entry::item("Delete", when_stopped(Message::DeleteCurve(id))),
@@ -1150,6 +1190,7 @@ impl App {
                 Entry::item("Automation curve", when_stopped(Message::AddCurve)),
             ],
             Menu::Click => return self.click_dialog(),
+            Menu::Quantize => return self.quantize_dialog(),
             Menu::Device => self.device_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),

@@ -35,6 +35,15 @@ within the sequence; notes are sorted by (start, channel, pitch) and controls by
 notes on the same channel and pitch overlap. A MIDI clip has no gain and no fades, and a clip's
 source must match its track's kind ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)).
 
+Quantizing a range moves each note of a MIDI clip on the chosen tracks that starts inside the
+range a strength (0 to 1) of the way to the nearest grid line ("Musical time"), rounded to a
+frame, keeping its length; a note is never moved before its clip's start or past its last frame.
+Control changes do not move. A note then running past its sequence's end is cut there, and where
+two notes on the same channel and pitch overlap, the earlier ends where the later starts, a note
+left no frames long being dropped. Each changed clip gets a new sequence of its own, keeping its
+position and layer; a sibling sharing the old sequence keeps it. The change is one undo step, and
+one that moves nothing adds no step ([ADR-0152](../adrs/0152-midi-clips-are-edited-through-range-selection.md)).
+
 ## Musical time
 
 A project has one tempo and meter for its whole length: `bpm` beats per minute (20 to 300, to
@@ -45,6 +54,12 @@ grid over them and moves nothing. Beat `n` falls on frame `round(n × 60 × rate
 from `n` each time and never accumulated; bar 1 beat 1 is frame 0, and the grid extends before
 frame 0 with negative beats. `project_model::tempo` holds the conversions
 ([ADR-0082](../adrs/0082-the-project-has-one-tempo-and-meter-saved-in.md)).
+
+Quantize grid lines are bars, beats, eighth notes or sixteenth notes. Line `n` of a bar or beat
+grid is bar or beat `n`; line `n` of a note-value grid falls on frame
+`round(n × frames per whole note / 8 or 16)`, a whole note being `beat_unit` beats. Each line is
+computed from its index, never accumulated; a frame's nearest line is the earlier of two equally
+near ([ADR-0152](../adrs/0152-midi-clips-are-edited-through-range-selection.md)).
 
 ## Range edits
 

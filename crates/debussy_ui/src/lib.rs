@@ -30,6 +30,7 @@
 //! - `grid`: the bars and beats grid's lines over the lanes.
 //! - `device`: rebuilding the engine when its audio device is lost.
 //! - `range_selection`: the range selected in the lanes.
+//! - `midi_edit`: the quantize dialog and each MIDI track's instrument.
 //! - `recording`: arming, monitoring and recording passes, and [`InputChoice`].
 //! - `shortcuts`: keyboard shortcuts.
 //! - `waveform`: track lanes from the stored files, and their canvas.
@@ -64,6 +65,7 @@ mod icon;
 mod impulse_display;
 mod launcher;
 mod menu;
+mod midi_edit;
 mod mixer_strip;
 mod node_dialog;
 mod node_parameters;
@@ -98,6 +100,7 @@ pub use effect_display::{DisplayContext, Pixels};
 pub use export_dialog::{AAC_BITRATES, ExportDepth, ExportKind, ExportSettings, MP3_BITRATES};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
+pub use midi_edit::QuantizeSettings;
 pub use mixer_strip::MixerFocus;
 pub use node_dialog::{DialogFocus, DialogMessage};
 pub use open_requests::OpenRequests;
@@ -111,8 +114,8 @@ pub use services::{
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;
 pub use waveform::{
-    Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, SPECTRUM_BANDS, SPECTRUM_COLUMNS,
-    Spectrum, spectrum_bands,
+    Display, LANE_COLUMNS, Lane, MIN_SAMPLES_PER_COLUMN, NoteBar, NoteLane, SPECTRUM_BANDS,
+    SPECTRUM_COLUMNS, Spectrum, spectrum_bands,
 };
 pub use wire_edit::Grip;
 
