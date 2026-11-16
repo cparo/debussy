@@ -109,6 +109,10 @@ pub enum Error {
     /// A parameter value, pan or delay time that is not finite or is out of range.
     #[error("the value is not finite or is out of range")]
     InvalidValue,
+    /// A sampler zone outside its limits, or zones on an instrument other than the sampler
+    /// (`docs/architecture/instruments.md` "Sampler").
+    #[error("not a valid sampler zone: {0}")]
+    InvalidZone(&'static str),
     /// A tempo or meter outside the limits (`project_model::tempo`).
     #[error("the tempo or meter is out of range")]
     InvalidTempo,

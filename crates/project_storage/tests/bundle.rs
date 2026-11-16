@@ -189,6 +189,7 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
     let synth = session.add_node(NodeKind::Instrument {
         kind: "from-the-future".to_owned(),
         parameters: synth_parameters,
+        zones: Vec::new(),
     })?;
     session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
     session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;

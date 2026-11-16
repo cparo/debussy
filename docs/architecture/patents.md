@@ -45,4 +45,8 @@ without PolyBLEP or hard sync; the ADSR envelope of exponential one-pole segment
 its current level; voice allocation of a free, then the quietest released, then the oldest held
 voice with a fade-out of a stolen voice, without unison, legato or mono note priority; and 12-TET
 pitch with ranged pitch bend, velocity scaling and sustain
-([ADR-0148](../adrs/0148-the-synth-s-oscillators-use-minblep-with-polyblep.md)).
+([ADR-0148](../adrs/0148-the-synth-s-oscillators-use-minblep-with-polyblep.md)), and the sampler:
+varispeed playback of whole in-memory samples stepped by the note's ratio to a root key and read
+by 4-point Hermite interpolation, first-match key-range zones without velocity layers or
+round-robin, one-shot or gated playback, choke groups faded over 3 ms, and velocity to gain
+([ADR-0155](../adrs/0155-the-sampler-s-varispeed-playback-zones-one-shot.md)).

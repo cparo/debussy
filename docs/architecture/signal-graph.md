@@ -134,7 +134,8 @@ An instrument is its own node kind with a stable kind id, from the `instruments`
 Every instrument has event input 0 and stereo audio output 0, and parameters declared and set as an
 effect's are. An instrument kind id this build does not know is kept and plays as silence through a
 stand-in with the same ports ([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)).
-The built-in instruments are described in `docs/architecture/instruments.md`.
+A sampler instrument also carries its zones, the key map of audio files it plays
+([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)). The built-in instruments are described in `docs/architecture/instruments.md`.
 
 ## Delay compensation
 

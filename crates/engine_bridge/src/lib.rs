@@ -11,6 +11,7 @@
 //! - `click_sounds`: [`ClickSound`], [`prepare_click`] and [`click_track`].
 //! - `clips`: [`track_renderers`], [`TrackRenderers`] and [`FileTable`].
 //! - `midi`: [`midi_tracks`] and [`track_notes`], MIDI tracks' clips flattened onto the timeline.
+//! - `sample_loader`: [`Samples`], sampler zone files read whole, off the audio thread.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -21,6 +22,7 @@ mod clips;
 mod error;
 mod midi;
 mod mirror;
+pub mod sample_loader;
 mod target;
 
 pub use bridge::{Bridge, RenderGraph, render_graph};
@@ -28,3 +30,4 @@ pub use click_sounds::{ClickSound, click_track, prepare as prepare_click};
 pub use clips::{FileTable, TrackRenderers, track_renderers};
 pub use error::Error;
 pub use midi::{midi_tracks, track_notes};
+pub use sample_loader::Samples;

@@ -3,6 +3,9 @@
 
 use signal_graph::{Node, ParameterInfo};
 
+use std::sync::Arc;
+
+use crate::sampler::{Sampler, Zone};
 use crate::synth::Synth;
 
 /// A built-in instrument kind.
@@ -18,14 +21,34 @@ pub struct InstrumentKind {
 }
 
 /// Every built-in instrument kind, in the order a menu lists them.
-pub const INSTRUMENTS: &[InstrumentKind] = &[InstrumentKind {
-    id: "synth",
-    name: "Synthesizer",
-    build: build_synth,
-}];
+pub const INSTRUMENTS: &[InstrumentKind] = &[
+    InstrumentKind {
+        id: "synth",
+        name: "Synthesizer",
+        build: build_synth,
+    },
+    InstrumentKind {
+        id: "sampler",
+        name: "Sampler",
+        build: build_empty_sampler,
+    },
+];
 
 fn build_synth() -> Option<Box<dyn Node>> {
     Synth::new().ok().map(|s| Box::new(s) as Box<dyn Node>)
+}
+
+/// A sampler with no zones, which is silent until the engine bridge builds one with its zones.
+fn build_empty_sampler() -> Option<Box<dyn Node>> {
+    sampler(Arc::from([]))
+}
+
+/// A new sampler playing `zones` (`docs/architecture/instruments.md` "Sampler"), at its
+/// defaults. Allocates.
+pub fn sampler(zones: Arc<[Zone]>) -> Option<Box<dyn Node>> {
+    Sampler::new(zones)
+        .ok()
+        .map(|s| Box::new(s) as Box<dyn Node>)
 }
 
 /// A new instrument of kind `kind` at its defaults, or `None` if this build does not know it.

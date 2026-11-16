@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 10;
+pub const FORMAT_VERSION: u32 = 11;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -203,6 +203,36 @@ pub(crate) enum SavedSource {
     },
 }
 
+/// Since version 11: the audio a sampler zone plays.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SavedSample {
+    Mono { file: SavedFile },
+    Stereo { left: SavedFile, right: SavedFile },
+}
+
+/// Since version 11: how a sampler zone plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SavedZoneMode {
+    OneShot,
+    Gated,
+}
+
+/// Since version 11: one sampler zone (`docs/architecture/instruments.md` "Sampler").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedZone {
+    pub file: SavedSample,
+    pub low: u8,
+    pub high: u8,
+    pub root: u8,
+    pub mode: SavedZoneMode,
+    /// The choke group, 1–16; absent for none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choke: Option<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SavedClip {
@@ -250,6 +280,9 @@ pub(crate) enum SavedNodeKind {
     Instrument {
         instrument: String,
         parameters: BTreeMap<String, f32>,
+        /// Since version 11: a sampler's zones, first match first; absent when there are none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        zones: Vec<SavedZone>,
     },
     Mixer {
         channels: usize,

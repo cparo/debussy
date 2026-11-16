@@ -11,10 +11,11 @@ use dsp::{
     note_to_hz,
 };
 use midi::Kind;
-use modulation::{Adsr, EnvelopeStage, Lfo, Shape};
+use modulation::{Adsr, Lfo, Shape};
 use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Scale};
 
 use crate::error::Error;
+use crate::voices::{EnvelopeParameters, Pool, SUSTAIN_PEDAL, Sound, Voice};
 
 /// The most voices a synth plays at once; the `voices` parameter limits it further.
 pub const MAX_VOICES: usize = 16;
@@ -23,16 +24,12 @@ const CUTOFF_RANGE: (f32, f32) = (20.0, 20_000.0);
 /// The highest cutoff as a share of the sample rate, kept below the filter's limit
 /// (`docs/research/synth-patents.md`, element 3).
 const MAX_CUTOFF_RATIO: f32 = 0.49;
-/// How long a stolen voice fades out before its new note starts, in seconds.
-const STEAL_FADE_SECONDS: f32 = 0.003;
 /// The corner of each voice's DC blocker, in Hz.
 const DC_BLOCK_HZ: f32 = 5.0;
 /// The pitch range of the LFO at full depth, in semitones each way.
 const LFO_PITCH_SEMITONES: f32 = 2.0;
 /// The cutoff range of the LFO at full depth, in octaves each way.
 const LFO_CUTOFF_OCTAVES: f32 = 4.0;
-/// The controller number of the sustain pedal.
-const SUSTAIN_PEDAL: u8 = 64;
 /// The pitch-bend value at rest, and its half range.
 const BEND_CENTRE: f32 = 8192.0;
 /// The LFO's random seed, fixed so a render repeats.
@@ -114,51 +111,6 @@ impl OscillatorParameters {
             &self.width,
             &self.level,
         ]
-    }
-}
-
-/// An envelope's parameters, named `prefix` and grouped as `group`.
-struct EnvelopeParameters {
-    attack: Parameter,
-    decay: Parameter,
-    sustain: Parameter,
-    release: Parameter,
-}
-
-impl EnvelopeParameters {
-    fn new(prefix: &str, group: &str, defaults: [f32; 4]) -> Result<Self, Error> {
-        let time = |name: &str, default| {
-            Parameter::new(
-                ParameterInfo::new(format!("{prefix} {name}"), 0.001, 10.0, default)
-                    .with_unit("s")
-                    .with_scale(Scale::Logarithmic)
-                    .with_group(group),
-            )
-        };
-        Ok(EnvelopeParameters {
-            attack: time("attack", defaults[0])?,
-            decay: time("decay", defaults[1])?,
-            sustain: Parameter::new(
-                ParameterInfo::new(format!("{prefix} sustain"), 0.0, 1.0, defaults[2])
-                    .with_group(group),
-            )?,
-            release: time("release", defaults[3])?,
-        })
-    }
-
-    fn all(&self) -> [&Parameter; 4] {
-        [&self.attack, &self.decay, &self.sustain, &self.release]
-    }
-
-    /// Sets `env`'s times and sustain from the parameters, at `sample_rate`.
-    fn apply(&self, env: &mut Adsr, sample_rate: f32) {
-        env.set(
-            self.attack.get(),
-            self.decay.get(),
-            self.sustain.get(),
-            self.release.get(),
-            sample_rate,
-        );
     }
 }
 
@@ -345,137 +297,80 @@ struct Frame {
     tremolo: f32,
 }
 
-/// A note waiting for its stolen voice to fade out.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Pending {
-    note: u8,
-    velocity: f32,
-    /// When the note was started, counted in notes started.
-    age: u64,
-    /// Whether its key is still down.
-    held: bool,
-}
-
-/// One voice: its oscillators, filter, envelopes and the note it plays.
+/// The synth's part of a voice: its oscillators, filter and filter envelope.
 #[derive(Debug, Clone)]
-struct Voice {
+struct Tone {
     osc: [Oscillator; 2],
     dc: OnePole,
     svf: Svf,
-    amp: Adsr,
     filter_env: Adsr,
-    note: u8,
-    /// The strike velocity, 0 to 1.
-    velocity: f32,
-    /// When the note started, counted in notes started.
-    age: u64,
-    /// Whether the key is down.
-    held: bool,
-    /// Whether the key is up but the sustain pedal holds the note.
-    sustained: bool,
-    /// Samples left in a steal's fade-out; 0 when not fading.
-    fade: u32,
-    /// The note to start when the fade ends.
-    pending: Option<Pending>,
 }
 
-impl Voice {
+impl Tone {
     fn new() -> Self {
-        Voice {
+        Tone {
             osc: [Oscillator::new(), Oscillator::new()],
             dc: OnePole::new(),
             svf: Svf::new(),
-            amp: Adsr::new(),
             filter_env: Adsr::new(),
-            note: 0,
-            velocity: 0.0,
-            age: 0,
-            held: false,
-            sustained: false,
-            fade: 0,
-            pending: None,
         }
     }
+}
 
-    /// Whether the voice is silent and free.
-    fn is_free(&self) -> bool {
-        self.amp.is_idle() && self.pending.is_none()
+impl Sound for Tone {
+    type Start = ();
+
+    fn start(&mut self, _note: u8, _velocity: f32, _start: ()) {
+        self.filter_env.gate_on(1.0);
     }
 
-    /// Returns to silence at once.
+    fn release(&mut self) {
+        self.filter_env.gate_off();
+    }
+
     fn reset(&mut self) {
         for osc in &mut self.osc {
             osc.reset();
         }
         self.dc.reset();
         self.svf.reset();
-        self.amp.reset();
         self.filter_env.reset();
-        self.held = false;
-        self.sustained = false;
-        self.fade = 0;
-        self.pending = None;
     }
+}
 
-    /// Starts `note` at `velocity` from the envelopes' current levels, with the amplitude peak
-    /// `peak`.
-    fn start(&mut self, note: u8, velocity: f32, peak: f32, age: u64) {
-        self.note = note;
-        self.velocity = velocity;
-        self.age = age;
-        self.held = true;
-        self.sustained = false;
-        self.amp.gate_on(peak);
-        self.filter_env.gate_on(1.0);
+/// The next sample of `voice`.
+fn render(voice: &mut Voice<Tone>, f: &Frame, table: &MinBlep, dc: &OnePoleCoefficients) -> f32 {
+    let pitch = f32::from(voice.note) + f.pitch;
+    let tone = &mut voice.sound;
+    let mut sum = 0.0;
+    for (i, osc) in tone.osc.iter_mut().enumerate() {
+        let note = pitch + 12.0 * f.octave[i] + f.detune[i] / 100.0;
+        osc.set_frequency(note_to_hz(note), f.sample_rate);
+        osc.set_pulse_width(f.width[i]);
+        sum += f.level[i] * osc.next(table);
     }
-
-    /// Releases the note.
-    fn release(&mut self) {
-        self.held = false;
-        self.sustained = false;
-        self.amp.gate_off();
-        self.filter_env.gate_off();
-    }
-
-    /// The next sample.
-    fn render(&mut self, f: &Frame, table: &MinBlep, dc: &OnePoleCoefficients) -> f32 {
-        let pitch = f32::from(self.note) + f.pitch;
-        let mut sum = 0.0;
-        for (i, osc) in self.osc.iter_mut().enumerate() {
-            let note = pitch + 12.0 * f.octave[i] + f.detune[i] / 100.0;
-            osc.set_frequency(note_to_hz(note), f.sample_rate);
-            osc.set_pulse_width(f.width[i]);
-            sum += f.level[i] * osc.next(table);
-        }
-        let sample = self.dc.process(sum, dc);
-        let filter_env = self.filter_env.next_value();
-        let amp = self.amp.next_value();
-        let cutoff = (f.cutoff
-            + f.filter_amount * filter_env
-            + f.filter_velocity * self.velocity
-            + f.lfo_cutoff)
-            .exp2()
-            .clamp(CUTOFF_RANGE.0, f.max_cutoff);
-        let coefficients = SvfCoefficients::low_pass(cutoff, f.resonance, f.sample_rate);
-        let sample = self.svf.process(sample, &coefficients);
-        sample * amp * f.tremolo
-    }
+    let sample = tone.dc.process(sum, dc);
+    let filter_env = tone.filter_env.next_value();
+    let amp = voice.amp.next_value();
+    let cutoff = (f.cutoff
+        + f.filter_amount * filter_env
+        + f.filter_velocity * voice.velocity
+        + f.lfo_cutoff)
+        .exp2()
+        .clamp(CUTOFF_RANGE.0, f.max_cutoff);
+    let coefficients = SvfCoefficients::low_pass(cutoff, f.resonance, f.sample_rate);
+    let sample = tone.svf.process(sample, &coefficients);
+    sample * amp * f.tremolo
 }
 
 /// The running state, made in `prepare`.
 struct Running {
     sample_rate: f32,
     table: MinBlep,
-    voices: Box<[Voice]>,
+    pool: Pool<Tone>,
     lfo: Lfo,
     ramps: Ramps,
     dc: OnePoleCoefficients,
-    /// Samples a steal's fade lasts.
-    fade: u32,
-    /// Notes started so far, for the voices' ages.
-    started: u64,
-    /// Whether the sustain pedal is down.
-    pedal: bool,
     /// The pitch-bend position, −1 to 1.
     bend: f32,
 }
@@ -503,99 +398,6 @@ impl Synth {
     }
 }
 
-impl Running {
-    /// The voice for a new note `note`: the voice already playing it, else a free voice among
-    /// the first `limit`, else the quietest released one, else the oldest held one. The second
-    /// value says whether the voice must be stolen.
-    fn choose(&self, note: u8, limit: usize) -> Option<(usize, bool)> {
-        let playing = |v: &Voice| !v.is_free() && v.fade == 0;
-        if let Some(i) = self
-            .voices
-            .iter()
-            .position(|v| playing(v) && v.note == note)
-        {
-            return Some((i, false));
-        }
-        let candidates = || self.voices.iter().enumerate().take(limit);
-        if let Some((i, _)) = candidates().find(|(_, v)| v.is_free()) {
-            return Some((i, false));
-        }
-        let quietest_released = candidates()
-            .filter(|(_, v)| v.fade == 0 && v.amp.stage() == EnvelopeStage::Release)
-            .min_by(|a, b| a.1.amp.level().total_cmp(&b.1.amp.level()));
-        if let Some((i, _)) = quietest_released {
-            return Some((i, true));
-        }
-        candidates()
-            .filter(|(_, v)| v.fade == 0)
-            .min_by_key(|(_, v)| v.age)
-            .or_else(|| candidates().min_by_key(|(_, v)| v.fade))
-            .map(|(i, _)| (i, true))
-    }
-
-    /// Handles a note-on.
-    fn note_on(&mut self, note: u8, velocity: f32, limit: usize, amp_velocity: f32) {
-        let Some((i, steal)) = self.choose(note, limit) else {
-            return;
-        };
-        self.started += 1;
-        let voice = &mut self.voices[i];
-        if steal {
-            voice.fade = self.fade;
-            voice.pending = Some(Pending {
-                note,
-                velocity,
-                age: self.started,
-                held: true,
-            });
-        } else {
-            let peak = 1.0 - amp_velocity * (1.0 - velocity);
-            voice.start(note, velocity, peak, self.started);
-        }
-    }
-
-    /// Handles a note-off.
-    fn note_off(&mut self, note: u8) {
-        let pedal = self.pedal;
-        for voice in self.voices.iter_mut() {
-            if let Some(pending) = voice.pending.as_mut().filter(|p| p.note == note && p.held) {
-                pending.held = false;
-            }
-            if voice.held && voice.note == note && voice.fade == 0 {
-                if pedal {
-                    voice.held = false;
-                    voice.sustained = true;
-                } else {
-                    voice.release();
-                }
-            }
-        }
-    }
-
-    /// Handles the sustain pedal going down (`true`) or up.
-    fn set_pedal(&mut self, down: bool) {
-        self.pedal = down;
-        if !down {
-            for voice in self.voices.iter_mut().filter(|v| v.sustained) {
-                voice.release();
-            }
-        }
-    }
-
-    /// Ends each finished fade by starting its pending note from silence.
-    fn finish_fade(voice: &mut Voice, amp_velocity: f32) {
-        let Some(pending) = voice.pending.take() else {
-            return;
-        };
-        voice.reset();
-        let peak = 1.0 - amp_velocity * (1.0 - pending.velocity);
-        voice.start(pending.note, pending.velocity, peak, pending.age);
-        if !pending.held {
-            voice.release();
-        }
-    }
-}
-
 impl Node for Synth {
     fn inputs(&self) -> Vec<Port> {
         vec![Port::event("notes")]
@@ -617,30 +419,21 @@ impl Node for Synth {
         // Sample rates are exact in `f32` well past any audio rate.
         #[allow(clippy::cast_precision_loss)]
         let rate = sample_rate.max(1) as f32;
-        // A few hundred samples at most.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let fade = (STEAL_FADE_SECONDS * rate).ceil().max(1.0) as u32;
         self.running = Some(Running {
             sample_rate: rate,
             table,
-            voices: (0..MAX_VOICES).map(|_| Voice::new()).collect(),
+            pool: Pool::new(MAX_VOICES, rate, Tone::new),
             lfo: Lfo::new(sample_rate, LFO_SEED),
             ramps: Ramps::new(&self.parameters, sample_rate),
             dc: OnePoleCoefficients::high_pass(DC_BLOCK_HZ, rate),
-            fade,
-            started: 0,
-            pedal: false,
             bend: 0.0,
         });
     }
 
     fn reset(&mut self) {
         if let Some(running) = self.running.as_mut() {
-            for voice in running.voices.iter_mut() {
-                voice.reset();
-            }
+            running.pool.reset();
             running.lfo.reset(0.0);
-            running.pedal = false;
             running.bend = 0.0;
             running.ramps.bend.set_target_over(0.0, 1);
             running.ramps.bend.next_value();
@@ -661,11 +454,11 @@ impl Node for Synth {
         };
         // Read once per block (ADR-0128).
         running.ramps.read(p);
-        for voice in running.voices.iter_mut() {
+        for voice in running.pool.voices.iter_mut() {
             p.amp_env.apply(&mut voice.amp, running.sample_rate);
             p.filter_env
-                .apply(&mut voice.filter_env, running.sample_rate);
-            for (i, osc) in voice.osc.iter_mut().enumerate() {
+                .apply(&mut voice.sound.filter_env, running.sample_rate);
+            for (i, osc) in voice.sound.osc.iter_mut().enumerate() {
                 osc.set_wave(WAVES[choice(p.osc[i].wave.get(), WAVES.len())].1);
             }
         }
@@ -686,13 +479,16 @@ impl Node for Synth {
                 match event.message.kind() {
                     Kind::NoteOn { note, velocity } if velocity > 0 => {
                         let velocity = f32::from(velocity) / 127.0;
-                        running.note_on(note, velocity, limit, running.ramps.amp_velocity.target());
+                        let amount = running.ramps.amp_velocity.target();
+                        running
+                            .pool
+                            .note_on(note, velocity, limit, amount, false, ());
                     }
                     Kind::NoteOn { note, .. } | Kind::NoteOff { note, .. } => {
-                        running.note_off(note);
+                        running.pool.note_off(note);
                     }
                     Kind::ControlChange { controller, value } if controller == SUSTAIN_PEDAL => {
-                        running.set_pedal(value >= 64);
+                        running.pool.set_pedal(value >= 64);
                     }
                     Kind::PitchBend { value } => {
                         running.bend =
@@ -733,18 +529,13 @@ impl Node for Synth {
             let amp_velocity = r.amp_velocity.next_value();
             let gain = r.gain.next_value();
             let mut sum = 0.0;
-            for voice in running.voices.iter_mut().filter(|v| !v.is_free()) {
-                let mut sample = voice.render(&frame, &running.table, &running.dc);
-                if voice.fade > 0 {
-                    #[allow(clippy::cast_precision_loss)] // a few hundred samples
-                    let share = voice.fade as f32 / running.fade as f32;
-                    sample *= share;
-                    voice.fade -= 1;
-                    if voice.fade == 0 {
-                        Running::finish_fade(voice, amp_velocity);
-                    }
+            for i in 0..running.pool.voices.len() {
+                let voice = &mut running.pool.voices[i];
+                if voice.is_free() {
+                    continue;
                 }
-                sum += sample;
+                let sample = render(voice, &frame, &running.table, &running.dc);
+                sum += sample * running.pool.step_fade(i, amp_velocity);
             }
             let out = sum * gain;
             left[n] = out;
@@ -786,55 +577,5 @@ mod tests {
         assert_eq!(choice(9.0, 3), 2);
         assert_eq!(choice(-1.0, 3), 0);
         assert_eq!(choice(f32::NAN, 3), 0);
-    }
-
-    type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-    fn running() -> Result<Running, Box<dyn std::error::Error>> {
-        let mut synth = Synth::new()?;
-        synth.prepare(48_000, 128);
-        Ok(synth.running.ok_or("not prepared")?)
-    }
-
-    #[test]
-    fn test_choose_prefers_same_note_then_free_then_quietest_released_then_oldest() -> TestResult {
-        let mut r = running()?;
-        let amp = 0.7;
-        r.note_on(60, 1.0, 3, amp);
-        r.note_on(62, 1.0, 3, amp);
-        r.note_on(64, 1.0, 3, amp);
-        // A repeated note takes its own voice.
-        assert_eq!(r.choose(62, 3), Some((1, false)));
-        // All three held: the oldest (note 60) is stolen.
-        assert_eq!(r.choose(65, 3), Some((0, true)));
-        // Release 64 and 62; let 62 fall further: it is the quietest released.
-        for v in r.voices.iter_mut() {
-            v.amp.set(0.0, 0.0, 1.0, 0.5, 48_000.0);
-            v.amp.next_value();
-        }
-        r.note_off(62);
-        for _ in 0..2_000 {
-            r.voices[1].amp.next_value();
-        }
-        r.note_off(64);
-        r.voices[2].amp.next_value();
-        assert_eq!(r.choose(65, 3), Some((1, true)));
-        // A higher voice limit offers a free voice first.
-        assert_eq!(r.choose(65, 4), Some((3, false)));
-        Ok(())
-    }
-
-    #[test]
-    fn test_sustain_pedal_holds_released_notes_until_lifted() -> TestResult {
-        let mut r = running()?;
-        r.note_on(60, 1.0, 8, 0.0);
-        r.voices[0].amp.next_value();
-        r.set_pedal(true);
-        r.note_off(60);
-        assert!(r.voices[0].sustained);
-        assert_ne!(r.voices[0].amp.stage(), EnvelopeStage::Release);
-        r.set_pedal(false);
-        assert_eq!(r.voices[0].amp.stage(), EnvelopeStage::Release);
-        Ok(())
     }
 }

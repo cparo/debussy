@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, bail};
 use audio_engine::Engine;
 use debussy_ui::{App, Launcher, ProjectEntry, Start};
-use engine_bridge::Bridge;
+use engine_bridge::{Bridge, Samples};
 use import_export::Lame;
 use macos_platform::{MacDevices, MacMidi, folders};
 use platform_interfaces::MidiDevices;
@@ -66,7 +66,11 @@ impl AppLauncher {
             || "Untitled".to_owned(),
             |s| s.to_string_lossy().into_owned(),
         );
-        let (bridge, runner) = Bridge::new(session.state(), Config::new(rate, project::MAX_BLOCK))?;
+        let (bridge, runner) = Bridge::new(
+            session.state(),
+            Config::new(rate, project::MAX_BLOCK),
+            Samples::new(bundle.audio_dir()),
+        )?;
         let output = bridge.output().context("the project has no output")?;
         let (engine, processor) = Engine::new(runner, output, rate)?;
         let settings_path = self.settings_path.clone();

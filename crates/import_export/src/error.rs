@@ -47,6 +47,14 @@ pub enum Error {
         /// What is wrong.
         reason: String,
     },
+    /// A sampler zone's file is longer than `project_model::MAX_ZONE_SECONDS`.
+    #[error("{path}: a sample can be at most {limit} seconds long")]
+    SampleTooLong {
+        /// The file.
+        path: PathBuf,
+        /// The limit, in seconds.
+        limit: u32,
+    },
     /// MP3 export was asked for, but no LAME was found at startup (ADR-0129).
     #[error("MP3 export needs LAME: `brew install lame`")]
     Mp3Unavailable,

@@ -14,6 +14,7 @@ use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, Nod
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Tempo;
 use crate::types::{ClipId, CurveId, TrackId, TrackKind};
+use crate::zones::{SampleZone, check_zones};
 
 /// One reversible change to the project state. A gesture made of several changes is a
 /// [`Edit::Batch`], undone as one.
@@ -86,6 +87,13 @@ pub enum Edit {
         name: String,
         /// The value.
         value: Option<f32>,
+    },
+    /// Replaces a sampler's zones (`docs/architecture/instruments.md` "Sampler").
+    SetZones {
+        /// The sampler node.
+        node: NodeId,
+        /// Its new zones, first match first.
+        zones: Vec<SampleZone>,
     },
     /// Sets a mixer's number of channels. Channels are added at the end; fewer channels, as when
     /// undoing an addition, are refused while a removed channel is connected. Parameter values
@@ -301,6 +309,20 @@ impl Edit {
                     name,
                     value: old,
                 })
+            }
+            Edit::SetZones { node, zones } => {
+                let index = node_index(state, node)?;
+                let NodeKind::Instrument {
+                    kind,
+                    zones: current,
+                    ..
+                } = &mut state.nodes[index].kind
+                else {
+                    return Err(Error::WrongNodeKind(node));
+                };
+                check_zones(kind, &zones)?;
+                let old = std::mem::replace(current, zones);
+                Ok(Edit::SetZones { node, zones: old })
             }
             Edit::SetMixerChannels { node, channels } => {
                 routing::check_channels(channels)?;

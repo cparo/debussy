@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use audio_buffers::Layout;
 use audio_engine::{ClipAudio, RenderFeed, TrackFeed, TrackFeeds, render};
-use engine_bridge::{Bridge, Error as BridgeError, render_graph, track_renderers};
+use engine_bridge::{Bridge, Error as BridgeError, Samples, render_graph, track_renderers};
 use modulation::{Curve, Handle, Point};
 use project_model::{AudioFile, Clip, Edit, Endpoint, NodeKind, Session, Side, Source, State};
 use signal_graph::Config;
@@ -99,7 +99,7 @@ fn endpoints(state: &State) -> (Vec<Endpoint>, Vec<Endpoint>) {
 fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dyn Error>> {
     let mut random = Random(0xB41D_6E00_1234_5678);
     let mut session = Session::new();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let (mut accepted, mut refused) = (0, 0);
     for _ in 0..1500 {
         let before = session.state().clone();
@@ -136,6 +136,7 @@ fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dy
                     4 => NodeKind::Instrument {
                         kind: "unknown-synth".to_owned(),
                         parameters: BTreeMap::new(),
+                        zones: Vec::new(),
                     },
                     _ => NodeKind::Effect {
                         kind: "unknown-reverb".to_owned(),
@@ -227,7 +228,7 @@ fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dy
 #[test]
 fn test_cycle_without_delay_is_refused_and_through_delay_accepted() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let a = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Stereo)))?;
     let b = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Stereo)))?;
     bridge.edit(&mut session, |s| {
@@ -267,7 +268,7 @@ fn test_cycle_without_delay_is_refused_and_through_delay_accepted() -> Result<()
 #[test]
 fn test_mixer_growth_keeps_connections_and_parameters() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let track = bridge.edit(&mut session, |s| s.add_track("vox", Layout::Mono))?;
     let mixer = bridge.edit(&mut session, |s| {
         s.add_node(NodeKind::Mixer {
@@ -301,7 +302,7 @@ fn test_mixer_growth_keeps_connections_and_parameters() -> Result<(), Box<dyn Er
 #[test]
 fn test_lookahead_change_replaces_the_node_and_its_latency() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config(), Samples::none())?;
     // Runs a block, so the real-time side takes the waiting plans, then commits any held back.
     let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
         runner.begin_block(256).map_err(|_| "block refused")?;
@@ -353,7 +354,7 @@ fn test_lookahead_change_replaces_the_node_and_its_latency() -> Result<(), Box<d
 #[test]
 fn test_set_monitored_leaves_monitored_track_out_of_latency() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
         runner.begin_block(256).map_err(|_| "block refused")?;
         runner.process();
@@ -395,7 +396,7 @@ fn test_set_monitored_leaves_monitored_track_out_of_latency() -> Result<(), Box<
 #[test]
 fn test_set_monitored_leaves_a_monitored_midi_track_out_of_latency() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let mut settle = |bridge: &mut Bridge| -> Result<(), Box<dyn Error>> {
         runner.begin_block(256).map_err(|_| "block refused")?;
         runner.process();
@@ -408,6 +409,7 @@ fn test_set_monitored_leaves_a_monitored_midi_track_out_of_latency() -> Result<(
         s.add_node(NodeKind::Instrument {
             kind: "synth".to_owned(),
             parameters: BTreeMap::new(),
+            zones: Vec::new(),
         })
     })?;
     let limiter = bridge.edit(&mut session, |s| {
@@ -440,7 +442,7 @@ fn test_set_monitored_leaves_a_monitored_midi_track_out_of_latency() -> Result<(
 #[test]
 fn test_tempo_change_replaces_only_nodes_that_use_it() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let add = |bridge: &mut Bridge, session: &mut Session, kind: &str| {
         bridge.edit(session, |s| {
             s.add_node(NodeKind::Effect {
@@ -553,7 +555,7 @@ fn test_project_renders_through_its_routing() -> Result<(), Box<dyn Error>> {
     stored.insert("r.wav".to_owned(), vec![-0.25; 1000]);
     let stored = Arc::new(stored);
 
-    let mut graph = render_graph(session.state(), config())?;
+    let mut graph = render_graph(session.state(), config(), &mut Samples::none())?;
     let (renderers, files) = track_renderers(session.state(), &graph.sources, 48_000)?;
     assert_eq!(files.names(), ["m.wav", "l.wav", "r.wav"]);
     let mut tracks: Vec<TrackFeeds> = renderers
@@ -601,7 +603,7 @@ fn test_project_renders_through_its_routing() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test_stereo_track_through_the_project_mixer_keeps_its_image() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new_project();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let guitar = bridge.edit(&mut session, |s| s.add_track("guitar", Layout::Stereo))?;
     let vocal = bridge.edit(&mut session, |s| s.add_track("vocal", Layout::Mono))?;
     assert_in_step(&bridge, session.state())?;
@@ -627,7 +629,7 @@ fn test_stereo_track_through_the_project_mixer_keeps_its_image() -> Result<(), B
     stored.insert("r.wav".to_owned(), vec![-0.5; 512]);
     stored.insert("v.wav".to_owned(), vec![0.0; 512]);
     let stored = Arc::new(stored);
-    let mut graph = render_graph(session.state(), config())?;
+    let mut graph = render_graph(session.state(), config(), &mut Samples::none())?;
     let (renderers, files) = track_renderers(session.state(), &graph.sources, 48_000)?;
     let mut tracks: Vec<TrackFeeds> = renderers
         .into_iter()
@@ -672,7 +674,7 @@ fn test_stereo_track_through_the_project_mixer_keeps_its_image() -> Result<(), B
 #[test]
 fn test_sided_connections_sync_through_edits_and_undo() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let stereo = bridge.edit(&mut session, |s| s.add_track("s", Layout::Stereo))?;
     let bus = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Stereo)))?;
     let mono_bus = bridge.edit(&mut session, |s| s.add_node(NodeKind::Bus(Layout::Mono)))?;
@@ -751,7 +753,11 @@ fn render_left(session: &Session, frames: u64, block: usize) -> Result<Vec<f32>,
     let mut stored = BTreeMap::new();
     stored.insert("m.wav".to_owned(), vec![0.5; frames as usize]);
     let stored = Arc::new(stored);
-    let mut graph = render_graph(session.state(), Config::new(48_000, 512))?;
+    let mut graph = render_graph(
+        session.state(),
+        Config::new(48_000, 512),
+        &mut Samples::none(),
+    )?;
     let (renderers, files) = track_renderers(session.state(), &graph.sources, 48_000)?;
     let mut tracks: Vec<TrackFeeds> = renderers
         .into_iter()
@@ -808,7 +814,7 @@ fn test_curve_on_mixer_gain_renders_the_same_at_any_block_size() -> Result<(), B
 #[test]
 fn test_bridge_follows_curve_edits() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new_project();
-    let (mut bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let mixer = session.state().project_mixer().ok_or("no project mixer")?;
     let curve = bridge.edit(&mut session, |s| s.add_curve("Curve 1", Curve::default()))?;
     let port = bridge.edit(&mut session, |s| {
@@ -854,7 +860,7 @@ fn test_midi_track_becomes_event_source_without_renderer() -> Result<(), Box<dyn
     }];
     let sequence = Arc::new(project_model::Sequence::new(100, notes, Vec::new())?);
     session.add_clip(midi, Clip::new(Source::Midi(sequence), 0, 100, 0))?;
-    let (bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     assert_in_step(&bridge, session.state())?;
 
     let node = bridge
@@ -878,12 +884,13 @@ fn test_midi_track_becomes_event_source_without_renderer() -> Result<(), Box<dyn
 #[test]
 fn test_midi_track_drives_unknown_instrument_stand_in() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new();
-    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let midi = bridge.edit(&mut session, |s| s.add_midi_track("keys"))?;
     let synth = bridge.edit(&mut session, |s| {
         s.add_node(NodeKind::Instrument {
             kind: "from-the-future".to_owned(),
             parameters: BTreeMap::from([("cutoff".to_owned(), 500.0)]),
+            zones: Vec::new(),
         })
     })?;
     bridge.edit(&mut session, |s| {

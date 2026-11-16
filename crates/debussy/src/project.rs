@@ -10,7 +10,7 @@ use audio_analysis::WaveformWriter;
 use audio_buffers::Layout;
 use audio_engine::{RenderFeed, TrackFeed, TrackFeeds};
 use disk_streaming::WavClipAudio;
-use engine_bridge::{midi_tracks, render_graph, track_renderers};
+use engine_bridge::{Samples, midi_tracks, render_graph, track_renderers};
 use import_export::{
     ExportChannels, ExportFormat, Lame, Mp3Bitrate, OfflineRender, WavDepth, export, import,
 };
@@ -191,7 +191,8 @@ pub fn export_state(
     lame: Option<&Lame>,
 ) -> Result<()> {
     let rate = bundle.sample_rate();
-    let mut graph = render_graph(state, Config::new(rate, MAX_BLOCK))?;
+    let mut samples = Samples::new(bundle.audio_dir());
+    let mut graph = render_graph(state, Config::new(rate, MAX_BLOCK), &mut samples)?;
     let (renderers, files) = track_renderers(state, &graph.sources, rate)?;
     let paths: Vec<_> = files
         .names()

@@ -82,6 +82,7 @@ impl NewNode {
             NewNode::Instrument(kind) => NodeKind::Instrument {
                 kind: kind.to_owned(),
                 parameters: std::collections::BTreeMap::new(),
+                zones: Vec::new(),
             },
         }
     }

@@ -3,6 +3,7 @@
 //! from what it holds to a new target with as few graph calls as it can.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use audio_buffers::Layout;
 use project_model::{ConnectionId, Side, Tempo};
@@ -69,8 +70,12 @@ pub(crate) struct Mirror {
 fn processor(shape: &Shape) -> Option<Box<dyn Node>> {
     match shape {
         Shape::Effect(kind) => audio_effects::effect(kind),
-        Shape::Instrument(kind) => instruments::instrument(kind)
-            .or_else(|| Some(Box::new(instruments::Silence) as Box<dyn Node>)),
+        Shape::Instrument(kind, zones) => if kind == project_model::SAMPLER_KIND {
+            instruments::sampler(Arc::clone(&zones.loaded))
+        } else {
+            instruments::instrument(kind)
+        }
+        .or_else(|| Some(Box::new(instruments::Silence) as Box<dyn Node>)),
         Shape::UnknownInstrument => Some(Box::new(instruments::Silence)),
         Shape::Unknown { inputs, outputs } => {
             Some(Box::new(audio_effects::Silence::new(*inputs, *outputs)))

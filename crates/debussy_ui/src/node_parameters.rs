@@ -67,7 +67,9 @@ impl ParameterCatalog {
                 self.effects.get(kind.as_str())?.as_slice(),
                 parameters,
             ),
-            NodeKind::Instrument { kind, parameters } => (
+            NodeKind::Instrument {
+                kind, parameters, ..
+            } => (
                 Some(kind.as_str()),
                 self.instruments.get(kind.as_str())?.as_slice(),
                 parameters,
