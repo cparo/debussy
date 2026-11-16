@@ -11,7 +11,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Fill, Length, Padding, Size};
 use project_model::notation::note_label;
-use project_model::{CurveId, Endpoint, NodeKind, Side, TrackId, TrackKind};
+use project_model::{CurveId, Endpoint, NodeKind, SAMPLER_KIND, Side, TrackId, TrackKind};
 
 use crate::app::{App, Message, NewNode, PaneRow, Renaming};
 use crate::click::{COUNT_IN_BARS, format_bpm};
@@ -788,6 +788,30 @@ impl App {
                 .spacing(10)
                 .align_y(Alignment::Center)
                 .into()
+            }
+            NodeKind::Instrument { kind, zones, .. } if kind == SAMPLER_KIND => {
+                let key = crate::sampler_zones::spelling(self.session().state(), id);
+                let stopped = !self.engine().is_playing();
+                let zones = crate::sampler_zones::zone_panel(id, zones, key, stopped);
+                match self.parameters(id) {
+                    Some(parameters) => column![
+                        zones,
+                        crate::effect_panel::effect_panel(
+                            &parameters,
+                            self.focus(),
+                            self.tone(),
+                            self.sample_rate(),
+                            self.session()
+                                .state()
+                                .tempo
+                                .frames_per_whole_note(self.sample_rate()),
+                            self.scale_factor(),
+                        )
+                    ]
+                    .spacing(16)
+                    .into(),
+                    None => zones,
+                }
             }
             NodeKind::Effect { .. } | NodeKind::Instrument { .. } => match self.parameters(id) {
                 Some(parameters) => crate::effect_panel::effect_panel(

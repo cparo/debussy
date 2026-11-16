@@ -70,3 +70,18 @@ parameter with a declared step; gain declares 1 dB and pan 0.01
 In any node dialog, Tab or Shift-Tab scrolls the newly focused control into view, by the
 least that shows it whole with a 12-pixel margin; the body keeps room on its right for its
 vertical scrollbar, which never covers a control ([ADR-0109](../adrs/0109-moving-a-node-dialog-s-focus-with-tab-scrolls-the.md)).
+
+## Sampler zones
+
+A sampler's dialog has a "Zones" section above its parameters: one row per zone, in the
+sampler's order, with its file's name; pick lists for its low key, high key and root key, named as
+the lanes name pitches in the key of the first MIDI track feeding the sampler (sharps if none;
+`docs/architecture/track-pane.md` "Key and pitch names"); a button naming its mode, One-shot or
+Gated, that switches it; a choke pick list, "No choke" or groups 1 to 16; and Remove. A low key
+chosen above the high key raises the high key with it, and the reverse. Each change is one step.
+Below the rows, "Add sample…" asks for one file and adds a gated zone on C3 (48) with root C3;
+"Add kit…" asks for several and adds one-shot zones on consecutive single keys from C1 (24), up to
+the top key. Each adds all its zones as one step after the existing ones, and both are disabled
+while playing. Choosing a different instrument for the track removes the zones with the sampler
+([ADR-0156](../adrs/0156-sampler-zones-are-edited-in-rows-in-the-sampler-s.md)).
+

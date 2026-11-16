@@ -96,6 +96,7 @@ The principles every crate and module follows are in [Design Principles](princip
 - [Dialogs](node-dialogs.md)
   - [Node dialogs](node-dialogs.md#node-dialogs)
   - [Mixer dialogs](node-dialogs.md#mixer-dialogs)
+  - [Sampler zones](node-dialogs.md#sampler-zones)
 - [Patents](patents.md)
   - [Patent policy](patents.md#patent-policy)
 - [Platform Integration](platform.md)

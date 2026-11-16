@@ -23,7 +23,7 @@ use disk_streaming::{
     WavClipAudio,
 };
 use engine_bridge::{ClickSound, track_renderers};
-use import_export::{Lame, import, safe_stem, unique_names};
+use import_export::{Lame, import, import_sample, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
@@ -386,6 +386,51 @@ impl Services for AppServices {
             };
             let names: Vec<&str> = result.files.iter().map(|f| f.name.as_str()).collect();
             build_waveform_caches_for(&self.bundle, &names).map_err(|e| e.to_string())?;
+            imported.push(ImportedTrack {
+                name,
+                layout,
+                source,
+                frames: result.frames,
+            });
+        }
+        Ok(imported)
+    }
+
+    fn import_samples(&mut self, several: bool) -> Result<Vec<ImportedTrack>, String> {
+        let dialog = rfd::FileDialog::new()
+            .set_title(if several { "Add kit" } else { "Add sample" })
+            .add_filter("Audio", &IMPORT_TYPES);
+        let paths = if several {
+            dialog.pick_files().unwrap_or_default()
+        } else {
+            dialog.pick_file().into_iter().collect()
+        };
+        let mut imported = Vec::with_capacity(paths.len());
+        for path in paths {
+            let result = import_sample(
+                &path,
+                &self.bundle.audio_dir(),
+                self.bundle.sample_rate(),
+                &MacCodecs::new(),
+            )
+            .map_err(|e| e.to_string())?;
+            if result.frames == 0 {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .map_or_else(|| "Sample".to_owned(), |s| s.to_string_lossy().into_owned());
+            let (layout, source) = match result.files.as_slice() {
+                [mono] => (Layout::Mono, Source::Mono(mono.clone())),
+                [left, right] => (
+                    Layout::Stereo,
+                    Source::Stereo {
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                ),
+                _ => return Err(format!("{} imported oddly", path.display())),
+            };
             imported.push(ImportedTrack {
                 name,
                 layout,

@@ -528,6 +528,9 @@ mod tests {
         fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
             Ok(Vec::new())
         }
+        fn import_samples(&mut self, _: bool) -> Result<Vec<ImportedTrack>, String> {
+            Ok(Vec::new())
+        }
         fn export_settings(&mut self) -> crate::ExportSettings {
             crate::ExportSettings::default()
         }

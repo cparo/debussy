@@ -252,6 +252,16 @@ pub trait Services {
     /// in the message's place only if none failed.
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
 
+    /// Asks the user for one sample file, or several with `several`, then imports each as a
+    /// sampler zone's sample, at most `project_model::MAX_ZONE_SECONDS` long
+    /// (`docs/architecture/instruments.md` "Sampler"). An empty list if the user cancelled.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line, such as for a file that is too long; files imported
+    /// before the failure stay in the bundle until cleanup.
+    fn import_samples(&mut self, several: bool) -> Result<Vec<ImportedTrack>, String>;
+
     /// The last export's settings, remembered between launches; the Export dialog opens on
     /// them (ADR-0130).
     fn export_settings(&mut self) -> ExportSettings;

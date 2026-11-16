@@ -1452,7 +1452,44 @@ impl App {
                 }
                 Command::DeleteNode(node) => self.delete_node(node),
                 Command::TogglePort { node, name } => self.toggle_port(node, &name),
+                Command::ImportSamples { node, kit } => self.import_samples(node, kit),
             }
+        }
+    }
+
+    /// Asks for sample files, imports them and adds their zones to sampler `node` as one step
+    /// (`docs/architecture/node-dialogs.md` "Sampler zones"); a zone whose file the engine could
+    /// not load is reported on the status line.
+    fn import_samples(&mut self, node: NodeId, kit: bool) {
+        if self.refuse_while_playing("add samples") {
+            return;
+        }
+        let imported = match self.services.import_samples(kit) {
+            Ok(imported) if imported.is_empty() => return,
+            Ok(imported) => imported,
+            Err(message) => {
+                self.status = Some(message);
+                return;
+            }
+        };
+        let Some(NodeKind::Instrument { zones, .. }) =
+            self.session.state().node(node).map(|n| &n.kind)
+        else {
+            return;
+        };
+        let mut zones = zones.clone();
+        zones.extend(crate::sampler_zones::new_zones(imported, kit));
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.set_zones(node, zones));
+        self.report(result.map_err(|e| e.to_string()));
+        self.report_bridge_warnings();
+    }
+
+    /// Shows the engine bridge's latest warning, if any, on the status line.
+    fn report_bridge_warnings(&mut self) {
+        if let Some(warning) = self.bridge.take_warnings().pop() {
+            self.status = Some(warning);
         }
     }
 

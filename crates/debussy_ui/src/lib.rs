@@ -77,6 +77,7 @@ mod raster;
 mod recording;
 mod response_display;
 mod reveal;
+mod sampler_zones;
 mod services;
 mod shell;
 mod shortcuts;
