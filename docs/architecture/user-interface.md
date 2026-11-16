@@ -23,8 +23,8 @@ The window is laid out as described under [Layout](#layout).
 
 The window is a top bar, a track pane beside a right pane, and a bottom bar.
 
-- **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste
-  (disabled until clip editing exists), zoom out and in, the project's name (read-only), the
+- **Top bar:** a logo, the waveform/spectrogram toggle, the bars and beats grid toggle, undo and redo, cut, copy and paste,
+  quantize (see [Quantize](track-pane.md#quantize)), zoom out and in, the project's name (read-only), the
   light/dark toggle, and the ≡ application menu: new project and open (see
   [Application startup](startup.md#application-startup)), import, export, export mono, share/archive
   (see [Project archives](project.md#project-archives)), and quit.
@@ -39,12 +39,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   typed tempo is recorded on Enter or the next other action; changing the tempo or meter is
   refused while playing ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md),
   [ADR-0086](../adrs/0086-the-bottom-bar-opens-the-audio-device-list-and-the.md)).
-- **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
-  toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
-  or stereo track, a MIDI track, or an automation curve ("Curve N", the lowest N not in use, holding one point
-  at frame 0 halfway up). A red cursor marks the playhead in
-  every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
-  importing into a track are refused while playing.
+- **Track pane:** the tracks, their headers and lanes, and the edits made from them: see
+  [Track pane](track-pane.md#track-pane).
 - **Curve lanes** follow the tracks: each a header (its name and a ≡ menu: rename, delete) over
   one 128-pixel lane drawing the curve in lavender, value 0 at the bottom and 1 at the top, with
   8-pixel square anchors and, for the selected point, its handles as small circles on stems. A
@@ -237,6 +233,7 @@ Cut, delete and paste are refused while the transport is playing; copy is not.
 | ⌘X, ⌘C, ⌘V | Cut, copy, paste |
 | Delete, Backspace | Delete the patch board's selected wire; nothing with a node selected; otherwise the range |
 | ⌘Z, ⇧⌘Z | Undo, redo |
+| Q | Open the quantize dialog ([Quantize](track-pane.md#quantize)) |
 | Escape | Clear the range selection |
 
 ⌘ is Ctrl off macOS. A key typed into a text field goes to the field

@@ -175,4 +175,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0149](0149-the-synthesizer-is-a-fixed-pool-of-two-oscillator.md) | The synthesizer is a fixed pool of two-oscillator voices summed to mono | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
 | [ADR-0150](0150-midi-tracks-are-recorded-and-monitored-through-a.md) | MIDI tracks are recorded and monitored through a live event source | Accepted | [MIDI recording](../architecture/recording.md#midi-recording) |
 | [ADR-0151](0151-midi-takes-are-journaled-to-a-fixed-record-log-so.md) | MIDI takes are journaled to a fixed-record log so a crash cannot lose them | Accepted | [Take recovery](../architecture/recording.md#take-recovery) |
+| [ADR-0152](0152-midi-clips-are-edited-through-range-selection.md) | MIDI clips are edited through range selection: quantize by grid and strength, a note miniature, and a per-track instrument menu | Accepted | [Track Pane](../architecture/track-pane.md#track-pane) |
 
