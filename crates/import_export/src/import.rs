@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use dsp::{Quality, Resampler};
 use platform_interfaces::{CodecFormat, Codecs, Decoder};
-use project_model::AudioFile;
+use project_model::{AudioFile, MAX_ZONE_SECONDS};
 use wav_files::{Channels, SampleFormat, Spec, WavReader, WavWriter};
 
 use crate::error::Error;
@@ -326,4 +326,30 @@ fn store(source: &mut dyn Source, paths: &[PathBuf], from: u32, to: u32) -> Resu
         })?;
     }
     Ok(frames)
+}
+
+/// Imports `path` as a sampler zone's sample (`docs/architecture/instruments.md` "Sampler"), as
+/// [`import`] does, refusing a file longer than [`MAX_ZONE_SECONDS`] at `project_rate`. A refused
+/// file leaves nothing behind.
+///
+/// # Errors
+///
+/// [`Error::SampleTooLong`], or any error of [`import`].
+pub fn import_sample(
+    path: &Path,
+    audio_dir: &Path,
+    project_rate: u32,
+    codecs: &dyn Codecs,
+) -> Result<Imported, Error> {
+    let imported = import(path, audio_dir, project_rate, codecs)?;
+    if imported.frames > u64::from(MAX_ZONE_SECONDS) * u64::from(project_rate) {
+        for file in &imported.files {
+            let _ = std::fs::remove_file(audio_dir.join(&file.name));
+        }
+        return Err(Error::SampleTooLong {
+            path: path.to_owned(),
+            limit: MAX_ZONE_SECONDS,
+        });
+    }
+    Ok(imported)
 }

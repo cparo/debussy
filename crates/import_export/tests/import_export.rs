@@ -10,7 +10,7 @@ use audio_buffers::Layout;
 use audio_engine::{ChannelClip, ClipAudio, RenderFeed, TrackFeed, TrackFeeds, TrackRenderer};
 use import_export::{
     Error as IoError, ExportChannels, ExportFormat, ImportFormat, Lame, Mp3Bitrate, OfflineRender,
-    WavDepth, export, import,
+    WavDepth, export, import, import_sample,
 };
 use platform_interfaces::test_doubles::{FakeCodecs, FakeFile};
 use platform_interfaces::{CodecFormat, FlacDepth, SourceInfo};
@@ -92,6 +92,35 @@ fn test_import_wav_at_project_rate_stores_exact_mono_files() -> Result<(), Box<d
     // A second import of the same name takes the next number.
     let again = import(&path, &audio, 48_000, &FakeCodecs::new())?;
     assert_eq!(again.files[0].name, "Take_ one 2 L.wav");
+    Ok(())
+}
+
+#[test]
+fn test_import_sample_refuses_longer_than_the_cap() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("sample-cap")?;
+    let audio = dir.join("audio");
+    let rate = 1_000;
+    let limit = project_model::MAX_ZONE_SECONDS as usize * rate as usize;
+    let fits = dir.join("fits.wav");
+    write_wav(&fits, rate, SampleFormat::Float32, &[&vec![0.25; limit]])?;
+    assert_eq!(
+        import_sample(&fits, &audio, rate, &FakeCodecs::new())?.frames,
+        limit as u64
+    );
+    let long = dir.join("long.wav");
+    write_wav(
+        &long,
+        rate,
+        SampleFormat::Float32,
+        &[&vec![0.25; limit + 1]],
+    )?;
+    let error = import_sample(&long, &audio, rate, &FakeCodecs::new());
+    assert!(matches!(
+        error,
+        Err(IoError::SampleTooLong { limit: 60, .. })
+    ));
+    let left: Vec<_> = std::fs::read_dir(&audio)?.collect::<Result<_, _>>()?;
+    assert_eq!(left.len(), 1, "only the sample that fits is kept");
     Ok(())
 }
 

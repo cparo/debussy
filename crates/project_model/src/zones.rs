@@ -10,6 +10,10 @@ pub const MAX_KEY: u8 = 127;
 /// The highest choke group number; groups are 1 to this.
 pub const MAX_CHOKE_GROUP: u8 = 16;
 
+/// The longest zone sample, in seconds at the project rate: longer imports are refused, and a
+/// longer file found in the bundle is cut to this length (ADR-0154).
+pub const MAX_ZONE_SECONDS: u32 = 60;
+
 /// The most zones a sampler may have.
 pub const MAX_ZONES: usize = 128;
 

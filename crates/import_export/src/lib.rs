@@ -28,6 +28,6 @@ mod naming;
 
 pub use error::Error;
 pub use export::{ExportChannels, ExportFormat, Mp3Bitrate, OfflineRender, WavDepth, export};
-pub use import::{ImportFormat, Imported, import};
+pub use import::{ImportFormat, Imported, import, import_sample};
 pub use lame::{Lame, LameEncoder};
 pub use naming::{safe_stem, unique_names};
