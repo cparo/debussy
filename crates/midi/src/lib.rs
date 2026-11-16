@@ -12,10 +12,12 @@
 //!   buffer of them with a fixed capacity.
 //! - `live`: [`TimedMessage`] and the lock-free [`LiveProducer`]/[`LiveInput`] pair that carries
 //!   live input to the audio thread and stamps it with frames (ADR-0146).
+//! - `journal`: the byte format of a MIDI take's crash journal, `take-N.midilog` (ADR-0151).
 
 #![forbid(unsafe_code)]
 
 mod buffer;
+mod journal;
 mod live;
 mod message;
 
@@ -25,5 +27,9 @@ mod message;
 static ALLOCATOR: realtime_guard::GuardAllocator = realtime_guard::GuardAllocator;
 
 pub use buffer::{EVENT_CAPACITY, Event, EventBuffer};
+pub use journal::{
+    JOURNAL_HEADER_BYTES, JOURNAL_MAGIC, JOURNAL_RECORD_BYTES, JOURNAL_VERSION, JournalError,
+    journal_header, journal_record, parse_journal_header, parse_journal_record,
+};
 pub use live::{LIVE_QUEUE_CAPACITY, LiveInput, LiveProducer, TimedMessage, channel};
 pub use message::{Kind, Message};

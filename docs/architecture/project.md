@@ -238,16 +238,19 @@ Opening or creating a bundle first takes its lock, creating a missing `lock` fil
 by another process, or whose lock cannot be taken, is refused
 ([ADR-0133](../adrs/0133-one-process-at-a-time-opens-a-project-enforced-by.md)).
 
-A recording marker, `recording.json`, is limited to 1 MB, 10,000 tracks, one or two files per
-track, plain `.wav` file names inside `audio/`, no file named twice, and the format version this
-build writes. A marker outside these limits, or naming a MIDI track, is discarded, never refusing the bundle
-([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
+A recording marker, `recording.json`, is limited to 1 MB, 10,000 tracks, one or two plain `.wav`
+file names inside `audio/` per track or, from version 2, one plain `.midilog` journal name, no file
+named twice, and format version 1 or 2; version 2 adds `midi_latency` and journals. A marker
+outside these limits is discarded, never refusing the bundle
+([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md),
+[ADR-0151](../adrs/0151-midi-takes-are-journaled-to-a-fixed-record-log-so.md)).
 
 ## Cleanup
 
 Audio files in `audio/` that neither the current state nor any version uses are deleted when a
 project is opened and when it is closed, never while it is open, so undo can always reach its
-audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
+audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)),
+and every plain `.midilog` MIDI take journal.
 Takes recovered from a recording marker are kept until the interface places them
 ([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
 

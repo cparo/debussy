@@ -60,8 +60,8 @@ type Captured = Vec<(u64, [u8; 3])>;
 enum PassTrack {
     /// An audio track's files.
     Audio(TrackId, Vec<String>),
-    /// A MIDI track's take, numbered after every audio file.
-    Midi(TrackId),
+    /// A MIDI track's take, numbered after every audio file, and its journal.
+    Midi(TrackId, String),
 }
 
 /// A recording pass whose files are still being written.
@@ -80,12 +80,31 @@ pub(crate) struct Pass {
 }
 
 impl Pass {
+    /// Every file of the pass: the audio files, then the MIDI journals.
     fn files(&self) -> Vec<String> {
+        let mut files: Vec<String> = self.audio().into_iter().flat_map(|(_, f)| f).collect();
+        files.extend(self.journals());
+        files
+    }
+
+    /// The MIDI takes' journals.
+    fn journals(&self) -> Vec<String> {
         self.tracks
             .iter()
-            .flat_map(|t| match t {
-                PassTrack::Audio(_, files) => files.clone(),
-                PassTrack::Midi(_) => Vec::new(),
+            .filter_map(|t| match t {
+                PassTrack::Midi(_, journal) => Some(journal.clone()),
+                PassTrack::Audio(..) => None,
+            })
+            .collect()
+    }
+
+    /// Every track and its files, as the crash marker records them.
+    fn marked(&self) -> Vec<(TrackId, Vec<String>)> {
+        self.tracks
+            .iter()
+            .map(|t| match t {
+                PassTrack::Audio(id, files) => (*id, files.clone()),
+                PassTrack::Midi(id, journal) => (*id, vec![journal.clone()]),
             })
             .collect()
     }
@@ -96,18 +115,18 @@ impl Pass {
             .iter()
             .filter_map(|t| match t {
                 PassTrack::Audio(id, files) => Some((*id, files.clone())),
-                PassTrack::Midi(_) => None,
+                PassTrack::Midi(..) => None,
             })
             .collect()
     }
 
     /// The MIDI tracks and their take numbers.
     fn midi(&self) -> Vec<(TrackId, usize)> {
-        let first = self.files().len();
+        let first = self.audio().iter().map(|(_, f)| f.len()).sum::<usize>();
         self.tracks
             .iter()
             .filter_map(|t| match t {
-                PassTrack::Midi(id) => Some(*id),
+                PassTrack::Midi(id, _) => Some(*id),
                 PassTrack::Audio(..) => None,
             })
             .enumerate()
@@ -444,9 +463,9 @@ impl App {
             sinks.insert(id, s);
         }
         let mut note_sinks = BTreeMap::new();
-        for (id, sink) in midi.into_iter().zip(takes.midi) {
-            pass_tracks.push(PassTrack::Midi(id));
-            note_sinks.insert(id, sink);
+        for (id, take) in midi.into_iter().zip(takes.midi) {
+            pass_tracks.push(PassTrack::Midi(id, take.file));
+            note_sinks.insert(id, take.sink);
         }
         let mut pass = Pass {
             status: Vec::new(),
@@ -455,15 +474,13 @@ impl App {
             midi_latency,
             info: None,
         };
-        pass.status = vec![None; pass.files().len() + pass.midi().len()];
-        // MIDI takes are not in the crash marker yet: a crash loses them.
+        pass.status = vec![None; pass.files().len()];
         let marker = PassMarker {
             device_latency: latency,
-            tracks: pass.audio(),
+            midi_latency,
+            tracks: pass.marked(),
         };
-        if !marker.tracks.is_empty()
-            && let Err(message) = self.services.mark_pass(&marker)
-        {
+        if let Err(message) = self.services.mark_pass(&marker) {
             self.status = Some(unprotected(&message));
         }
         let (audio, midi) = self.armed_tracks(Some(sinks), Some(note_sinks));
@@ -542,10 +559,10 @@ impl App {
                 None => frames = 0,
             }
         }
-        let midi: Vec<(TrackId, Captured)> = pass
+        let midi: Vec<(TrackId, Captured, u64)> = pass
             .midi()
             .into_iter()
-            .map(|(id, take)| (id, self.services.take_messages(take)))
+            .map(|(id, take)| (id, self.services.take_messages(take), frames))
             .collect();
         let takes = Takes {
             audio: pass.audio(),
@@ -556,12 +573,15 @@ impl App {
             midi_latency: pass.midi_latency,
         };
         match self.add_takes(takes) {
-            Ok(true) if overruns > 0 => {
-                self.status = Some(format!(
-                    "The disk fell behind {overruns} times while recording; the gaps are silent."
-                ));
+            Ok(true) => {
+                self.services.discard_takes(&pass.journals());
+                if overruns > 0 {
+                    self.status = Some(format!(
+                        "The disk fell behind {overruns} times while recording; the gaps are \
+                         silent."
+                    ));
+                }
             }
-            Ok(true) => {}
             Ok(false) => self.services.discard_takes(&files),
             Err(message) => {
                 self.status = Some(format!("The take could not be added: {message}"));
@@ -583,19 +603,26 @@ impl App {
         let placed = match recovered {
             Recovered::Discarded => false,
             Recovered::Takes(pass) => {
+                let journals: Vec<String> = pass.midi.iter().map(|m| m.file.clone()).collect();
                 let added = self.add_takes(Takes {
                     audio: pass.tracks.clone(),
-                    midi: Vec::new(),
+                    midi: pass
+                        .midi
+                        .into_iter()
+                        .map(|m| (m.track, m.messages, m.frames))
+                        .collect(),
                     frames: pass.frames,
                     info: Some(pass.info),
                     latency: pass.device_latency,
-                    midi_latency: 0,
+                    midi_latency: pass.midi_latency,
                 });
-                if !matches!(added, Ok(true)) {
+                let added = matches!(added, Ok(true));
+                if !added {
                     let files: Vec<String> = pass.tracks.into_iter().flat_map(|(_, f)| f).collect();
                     self.services.discard_takes(&files);
                 }
-                matches!(added, Ok(true))
+                self.services.discard_takes(&journals);
+                added
             }
         };
         self.services.clear_pass_marker();
@@ -655,16 +682,23 @@ impl App {
             })
             .collect();
         let (position, offset) = info.midi_placement(midi_latency);
-        for (id, messages) in midi {
-            let is_midi = state.track(id).is_some_and(|t| t.kind == TrackKind::Midi);
+        for (id, messages, frames) in midi {
+            let Some(track) = state.track(id).filter(|t| t.kind == TrackKind::Midi) else {
+                continue;
+            };
             let Ok(sequence) = Sequence::from_capture(&messages, frames) else {
                 continue;
             };
-            if !is_midi || sequence.notes().is_empty() || frames <= offset {
+            if sequence.notes().is_empty() || frames <= offset {
                 continue;
             }
             let source = Source::Midi(Arc::new(sequence));
-            clips.push((id, Clip::new(source, offset, frames - offset, position)));
+            let clip = Clip::new(source, offset, frames - offset, position);
+            // A recovered take placed just before the crash is not placed again.
+            if track.clips.iter().any(|(_, c)| *c == clip) {
+                continue;
+            }
+            clips.push((id, clip));
         }
         if clips.is_empty() {
             return Ok(false);
@@ -793,9 +827,9 @@ impl App {
 struct Takes {
     /// Each audio track and its files, left first.
     audio: Vec<(TrackId, Vec<String>)>,
-    /// Each MIDI track and the messages captured.
-    midi: Vec<(TrackId, Captured)>,
-    /// The length every take is placed with, in frames.
+    /// Each MIDI track, the messages captured, and the take's length in frames.
+    midi: Vec<(TrackId, Captured, u64)>,
+    /// The length every audio take is placed with, in frames.
     frames: u64,
     /// Where capture began; nothing is placed without it.
     info: Option<TakeInfo>,

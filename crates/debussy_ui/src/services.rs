@@ -57,13 +57,23 @@ impl std::fmt::Display for MidiInputChoice {
 }
 
 /// A recording pass's takes: each armed audio track's files and sinks, then each armed MIDI
-/// track's sink.
+/// track's journal and sink.
 pub struct Takes {
     /// One per armed audio track, in the order asked for.
     pub audio: Vec<TakeFiles>,
     /// One per armed MIDI track, in the order asked for. MIDI take `i` is numbered after every
     /// audio file in [`TakeStatus`].
-    pub midi: Vec<Box<dyn NoteSink>>,
+    pub midi: Vec<MidiTakeFile>,
+}
+
+/// One armed MIDI track's take: its crash journal's new file, and the sink the engine records
+/// it through.
+pub struct MidiTakeFile {
+    /// The journal's file name in the project (`docs/architecture/project.md` "Recording
+    /// marker").
+    pub file: String,
+    /// Where the engine sends the track's messages.
+    pub sink: Box<dyn NoteSink>,
 }
 
 /// The new files of one armed track's take, and the sinks the engine records them through, one
@@ -101,21 +111,40 @@ pub enum TakeStatus {
 pub struct PassMarker {
     /// The device's input plus output latency when the pass started, in frames.
     pub device_latency: u64,
-    /// Each armed track and its files, left first.
+    /// The MIDI placement latency when the pass started, in frames.
+    pub midi_latency: u64,
+    /// Each armed track and its files: an audio track's, left first, or a MIDI track's journal.
     pub tracks: Vec<(TrackId, Vec<String>)>,
 }
 
 /// Takes of a pass a crash cut off, repaired and ready to place.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveredPass {
-    /// Each track still in the project, and its files, left first.
+    /// Each audio track still in the project, and its files, left first.
     pub tracks: Vec<(TrackId, Vec<String>)>,
-    /// The length every take is placed with, in frames.
+    /// The length every audio take is placed with, in frames.
     pub frames: u64,
+    /// Each MIDI track still in the project, and its take.
+    pub midi: Vec<RecoveredMidi>,
     /// Where capture began.
     pub info: TakeInfo,
     /// The device latency when the pass started, in frames.
     pub device_latency: u64,
+    /// The MIDI placement latency when the pass started, in frames.
+    pub midi_latency: u64,
+}
+
+/// A MIDI take read back from its crash journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredMidi {
+    /// The track it was recorded on.
+    pub track: TrackId,
+    /// The journal's file name, deleted once the take is placed or discarded.
+    pub file: String,
+    /// Each message's take frame and bytes, in frame order.
+    pub messages: Vec<(u64, [u8; 3])>,
+    /// The take's length, in frames.
+    pub frames: u64,
 }
 
 /// What opening the project found of a pass a crash cut off.
@@ -311,7 +340,8 @@ pub trait Services {
 
     /// Starts recording one take per armed track: for each of `tracks`, an audio take named
     /// after the track and holding `channels` channels, whose files are created and written;
-    /// and `midi` MIDI takes, whose messages are collected.
+    /// and `midi` MIDI takes, whose messages are collected and written to a new crash journal
+    /// each.
     ///
     /// # Errors
     ///

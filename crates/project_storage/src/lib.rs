@@ -36,7 +36,9 @@ pub use bundle::{Bundle, MAX_FILE_BYTES, MAX_VERSIONS};
 pub use error::Error;
 pub use format::FORMAT_VERSION;
 pub use migrate::MAX_DEPTH;
-pub use recovery::{MAX_RECORDING_BYTES, Recording, RecordingStart, RecoveredPass, Recovery};
+pub use recovery::{
+    MAX_RECORDING_BYTES, Recording, RecordingStart, RecoveredMidi, RecoveredPass, Recovery,
+};
 pub use settings::{
     AppSettings, ClickSound, ExportDepth, ExportFormatName, ExportPreferences, MAX_CLICK_LEVEL_DB,
     MIN_CLICK_LEVEL_DB, SETTINGS_VERSION,

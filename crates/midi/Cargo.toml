@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 audio_buffers = { path = "../audio_buffers" }
+thiserror = "2.0.21"
 
 [dev-dependencies]
 realtime_guard = { path = "../realtime_guard" }

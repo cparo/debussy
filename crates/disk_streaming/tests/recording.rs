@@ -11,6 +11,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use disk_streaming::{Recorder, RecorderConfig, Take, TakeEvent};
+use midi::{journal_header, journal_record};
 use realtime_guard::{GuardAllocator, assert_realtime};
 use wav_files::{Channels, SampleFormat, WavReader};
 
@@ -233,8 +234,9 @@ fn test_start_refuses_an_existing_file_and_removes_those_created() -> Result<(),
 fn test_midi_take_is_collected_alongside_audio() -> Result<(), Box<dyn Error>> {
     let dir = scratch("midi")?;
     let paths = [dir.join("a.wav")];
+    let journals = [dir.join("k.midilog"), dir.join("l.midilog")];
     let (mut recorder, mut takes, mut midi) =
-        Recorder::start_with_midi(&paths, 2, RecorderConfig::new(RATE))?;
+        Recorder::start_with_midi(&paths, &journals, RecorderConfig::new(RATE))?;
     assert_eq!(recorder.takes(), 3);
     let a: Vec<f32> = (0..1000).map(value).collect();
     write(&mut takes[0], &a)?;
@@ -264,6 +266,52 @@ fn test_midi_take_is_collected_alongside_audio() -> Result<(), Box<dyn Error>> {
     drop(midi);
     drop(takes);
     drop(recorder);
+    // Each journal holds its header and a record per message, synced when the take ended.
+    let mut expected = journal_header(RATE).to_vec();
+    expected.extend(journal_record(5, [0x90, 60, 100]));
+    expected.extend(journal_record(700, [0x80, 60, 0]));
+    assert_eq!(std::fs::read(&journals[0])?, expected);
+    assert_eq!(std::fs::read(&journals[1])?, journal_header(RATE));
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+#[test]
+fn test_midi_journal_is_synced_while_the_take_goes_on() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("midi-sync")?;
+    let journals = [dir.join("k.midilog")];
+    let config = RecorderConfig {
+        sync_interval: Duration::from_millis(10),
+        ..RecorderConfig::new(RATE)
+    };
+    let (recorder, _, mut midi) = Recorder::start_with_midi(&[], &journals, config)?;
+    assert_realtime(|| {
+        midi[0].write(5, [0x90, 60, 100]);
+    });
+    let mut expected = journal_header(RATE).to_vec();
+    expected.extend(journal_record(5, [0x90, 60, 100]));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while std::fs::read(&journals[0])? != expected {
+        if Instant::now() > deadline {
+            return Err("the journal was not written while the take was open".into());
+        }
+        sleep(Duration::from_millis(5));
+    }
+    drop(midi);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+#[test]
+fn test_start_with_midi_refuses_an_existing_journal() -> Result<(), Box<dyn Error>> {
+    let dir = scratch("midi-exists")?;
+    let paths = [dir.join("a.wav")];
+    let journals = [dir.join("k.midilog")];
+    std::fs::write(&journals[0], b"keep")?;
+    assert!(Recorder::start_with_midi(&paths, &journals, RecorderConfig::new(RATE)).is_err());
+    assert!(!paths[0].exists());
+    assert_eq!(std::fs::read(&journals[0])?, b"keep");
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }
