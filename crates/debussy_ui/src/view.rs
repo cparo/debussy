@@ -744,7 +744,7 @@ impl App {
                 .align_y(Alignment::Center)
                 .into()
             }
-            NodeKind::Effect { .. } => match self.parameters(id) {
+            NodeKind::Effect { .. } | NodeKind::Instrument { .. } => match self.parameters(id) {
                 Some(parameters) => crate::effect_panel::effect_panel(
                     &parameters,
                     self.focus(),
@@ -1120,6 +1120,17 @@ impl App {
                     Some(Message::AddNode(NewNode::Effect(effect.id))),
                 )
             }))
+            .chain(
+                (!instruments::INSTRUMENTS.is_empty())
+                    .then_some(Entry::Separator)
+                    .into_iter()
+                    .chain(instruments::INSTRUMENTS.iter().map(|instrument| {
+                        Entry::item(
+                            instrument.name,
+                            Some(Message::AddNode(NewNode::Instrument(instrument.id))),
+                        )
+                    })),
+            )
             .collect(),
         };
         dropdown(entries)

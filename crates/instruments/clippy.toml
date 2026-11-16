@@ -1,0 +1,31 @@
+# Real-time bans: docs/architecture/engine.md "Real-time thread" (ADR-0010).
+disallowed-types = [
+    { path = "std::sync::Mutex", reason = "locks are forbidden on the real-time thread" },
+    { path = "std::sync::RwLock", reason = "locks are forbidden on the real-time thread" },
+    { path = "std::sync::Condvar", reason = "blocking is forbidden on the real-time thread" },
+    { path = "std::sync::Barrier", reason = "blocking is forbidden on the real-time thread" },
+    { path = "std::fs::File", reason = "file I/O is forbidden on the real-time thread" },
+    { path = "std::fs::OpenOptions", reason = "file I/O is forbidden on the real-time thread" },
+    { path = "std::net::TcpStream", reason = "network I/O is forbidden on the real-time thread" },
+    { path = "std::net::TcpListener", reason = "network I/O is forbidden on the real-time thread" },
+    { path = "std::net::UdpSocket", reason = "network I/O is forbidden on the real-time thread" },
+]
+disallowed-methods = [
+    { path = "std::thread::sleep", reason = "sleeping is forbidden on the real-time thread" },
+    { path = "std::thread::park", reason = "blocking is forbidden on the real-time thread" },
+    { path = "std::thread::JoinHandle::join", reason = "blocking is forbidden on the real-time thread" },
+    { path = "std::sync::mpsc::Receiver::recv", reason = "blocking is forbidden on the real-time thread" },
+    { path = "std::fs::read", reason = "file I/O is forbidden on the real-time thread" },
+    { path = "std::fs::read_to_string", reason = "file I/O is forbidden on the real-time thread" },
+    { path = "std::fs::write", reason = "file I/O is forbidden on the real-time thread" },
+    { path = "std::io::stdout", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::io::stderr", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::io::stdin", reason = "blocking I/O is forbidden on the real-time thread" },
+]
+disallowed-macros = [
+    { path = "std::print", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::println", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::eprint", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::eprintln", reason = "printing is forbidden on the real-time thread" },
+    { path = "std::dbg", reason = "printing is forbidden on the real-time thread" },
+]

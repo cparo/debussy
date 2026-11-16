@@ -130,6 +130,11 @@ Notes are voiced by built-in instrument nodes (a synthesizer and a sampler playi
 audio files) or sent to external MIDI ports. Third-party plug-ins (Audio Units) are not hosted
 ([ADR-0139](../adrs/0139-midi-starts-with-performance-capture-voiced-by-a.md)).
 
+An instrument is its own node kind with a stable kind id, from the `instruments` crate's registry.
+Every instrument has event input 0 and stereo audio output 0, and parameters declared and set as an
+effect's are. An instrument kind id this build does not know is kept and plays as silence through a
+stand-in with the same ports ([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)).
+
 ## Delay compensation
 
 Each node reports the latency it adds. The engine delays parallel paths so that signals meeting at

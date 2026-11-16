@@ -106,22 +106,23 @@ fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dy
         let state = session.state().clone();
         let (from, to) = endpoints(&state);
         let result = match random.below(12) {
-            0 => {
-                let layout = if random.below(2) == 0 {
-                    Layout::Mono
-                } else {
-                    Layout::Stereo
-                };
-                bridge
-                    .edit(&mut session, |s| s.add_track("t", layout))
-                    .map(|_| ())
-            }
+            0 => match random.below(3) {
+                0 => bridge
+                    .edit(&mut session, |s| s.add_track("t", Layout::Mono))
+                    .map(|_| ()),
+                1 => bridge
+                    .edit(&mut session, |s| s.add_track("t", Layout::Stereo))
+                    .map(|_| ()),
+                _ => bridge
+                    .edit(&mut session, |s| s.add_midi_track("m"))
+                    .map(|_| ()),
+            },
             1 if !state.tracks.is_empty() => {
                 let id = state.tracks[random.below(state.tracks.len())].id;
                 bridge.edit(&mut session, |s| s.remove_track(id))
             }
             2 => {
-                let kind = match random.below(5) {
+                let kind = match random.below(6) {
                     0 => NodeKind::Bus(Layout::Stereo),
                     1 => NodeKind::Bus(Layout::Mono),
                     2 => NodeKind::Mixer {
@@ -131,6 +132,10 @@ fn test_random_routing_edits_keep_model_and_graph_in_step() -> Result<(), Box<dy
                     3 => NodeKind::FeedbackDelay {
                         layout: Layout::Stereo,
                         seconds: 0.001 + random.below(100) as f64 / 1000.0,
+                    },
+                    4 => NodeKind::Instrument {
+                        kind: "unknown-synth".to_owned(),
+                        parameters: BTreeMap::new(),
                     },
                     _ => NodeKind::Effect {
                         kind: "unknown-reverb".to_owned(),
@@ -822,5 +827,42 @@ fn test_midi_track_becomes_event_source_without_renderer() -> Result<(), Box<dyn
         renderers.iter().map(|r| r.track).collect::<Vec<_>>(),
         vec![audio]
     );
+    Ok(())
+}
+
+#[test]
+fn test_midi_track_drives_unknown_instrument_stand_in() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new();
+    let (mut bridge, mut runner) = Bridge::new(session.state(), config())?;
+    let midi = bridge.edit(&mut session, |s| s.add_midi_track("keys"))?;
+    let synth = bridge.edit(&mut session, |s| {
+        s.add_node(NodeKind::Instrument {
+            kind: "from-the-future".to_owned(),
+            parameters: BTreeMap::from([("cutoff".to_owned(), 500.0)]),
+        })
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Track(midi), 0, Endpoint::Node(synth), 0)
+    })?;
+    bridge.edit(&mut session, |s| {
+        s.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)
+    })?;
+    runner.begin_block(256).map_err(|_| "block refused")?;
+    runner.process();
+    bridge.commit()?;
+    assert_in_step(&bridge, session.state())?;
+    let node = bridge
+        .node(Endpoint::Node(synth))
+        .ok_or("instrument not mirrored")?;
+    let inputs = bridge.graph().inputs(node).ok_or("no inputs")?;
+    let outputs = bridge.graph().outputs(node).ok_or("no outputs")?;
+    assert_eq!(inputs[0].kind, signal_graph::PortType::Event);
+    assert_eq!(outputs[0].layout, Layout::Stereo);
+    // Undoing the wire and redoing it keep the graph in step.
+    assert!(bridge.undo(&mut session)?);
+    assert!(bridge.undo(&mut session)?);
+    assert_in_step(&bridge, session.state())?;
+    assert!(bridge.redo(&mut session)?);
+    assert_in_step(&bridge, session.state())?;
     Ok(())
 }

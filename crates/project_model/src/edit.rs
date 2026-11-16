@@ -266,8 +266,9 @@ impl Edit {
                     return Err(Error::InvalidValue);
                 }
                 let index = node_index(state, node)?;
-                let (NodeKind::Effect { parameters, .. } | NodeKind::Mixer { parameters, .. }) =
-                    &mut state.nodes[index].kind
+                let (NodeKind::Effect { parameters, .. }
+                | NodeKind::Instrument { parameters, .. }
+                | NodeKind::Mixer { parameters, .. }) = &mut state.nodes[index].kind
                 else {
                     return Err(Error::WrongNodeKind(node));
                 };
@@ -518,7 +519,7 @@ fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
 
 /// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
 /// not known to the model and are checked by `signal_graph`; a mixer has an input per channel and
-/// one output. A curve has one output and a curve port one input, each port 0. A track, audio or
+/// one output; an instrument has one input and one output, each port 0. A curve has one output and a curve port one input, each port 0. A track, audio or
 /// MIDI, has one output, port 0.
 fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
@@ -532,14 +533,16 @@ fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> boo
                 true => port == 0,
                 false => port < *channels,
             },
-            Some(NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. }) => port == 0,
+            Some(
+                NodeKind::Instrument { .. } | NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. },
+            ) => port == 0,
             None => false,
         },
     }
 }
 
 /// The layout of an audio or control port, where the model knows it; effects' ports are
-/// `signal_graph`'s. A MIDI track's event output has none.
+/// `signal_graph`'s. A MIDI track's event output and an instrument's event input have none.
 fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout> {
     match endpoint {
         Endpoint::Track(id) => state.track(id).and_then(|t| t.layout()),
@@ -549,17 +552,25 @@ fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout
                 Some(if output { Layout::Stereo } else { Layout::Mono })
             }
             Some(NodeKind::Bus(layout) | NodeKind::FeedbackDelay { layout, .. }) => Some(*layout),
+            Some(NodeKind::Instrument { .. }) => output.then_some(Layout::Stereo),
             Some(NodeKind::Effect { .. }) | None => None,
         },
         Endpoint::Curve(_) | Endpoint::CurvePort(..) => Some(Layout::Mono),
     }
 }
 
-/// Whether a port carries events: a MIDI track's output. No input the model knows of takes events
-/// yet, so a MIDI track cannot be connected.
-fn is_event(state: &State, endpoint: Endpoint, output: bool) -> bool {
+/// Whether a port carries events: a MIDI track's output, or an instrument's input 0.
+fn is_event(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
         Endpoint::Track(id) => output && state.track(id).is_some_and(|t| t.kind == TrackKind::Midi),
+        Endpoint::Node(id) => {
+            !output
+                && port == 0
+                && matches!(
+                    state.node(id).map(|node| &node.kind),
+                    Some(NodeKind::Instrument { .. })
+                )
+        }
         _ => false,
     }
 }
@@ -577,7 +588,8 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         (connection.to, false, connection.input),
     ];
     if connection.from.is_control() != connection.to.is_control()
-        || is_event(state, connection.from, true) != is_event(state, connection.to, false)
+        || is_event(state, connection.from, true, connection.output)
+            != is_event(state, connection.to, false, connection.input)
     {
         return Err(Error::WrongPortType);
     }
@@ -603,11 +615,18 @@ fn check_connection(state: &State, connection: &Connection) -> Result<(), Error>
         }
     }
     let sides = [
-        (connection.from, true, connection.from_side),
-        (connection.to, false, connection.to_side),
+        (
+            connection.from,
+            true,
+            connection.output,
+            connection.from_side,
+        ),
+        (connection.to, false, connection.input, connection.to_side),
     ];
-    for (endpoint, output, side) in sides {
-        if side.is_some() && port_layout(state, endpoint, output) == Some(Layout::Mono) {
+    for (endpoint, output, port, side) in sides {
+        let one_channel = port_layout(state, endpoint, output) == Some(Layout::Mono)
+            || is_event(state, endpoint, output, port);
+        if side.is_some() && one_channel {
             return Err(Error::SideOfMonoPort(endpoint));
         }
     }

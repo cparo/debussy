@@ -44,6 +44,11 @@ pub(crate) enum Shape {
     Sink,
     /// A built-in effect by kind id.
     Effect(String),
+    /// A built-in instrument by kind id.
+    Instrument(String),
+    /// An instrument kind this build does not know, as a silent stand-in with an instrument's
+    /// ports.
+    UnknownInstrument,
     /// An effect kind this build does not know, as a silent stand-in with these port counts.
     Unknown {
         inputs: usize,
@@ -198,6 +203,13 @@ impl Target {
                     };
                     (shape, parameters.clone(), None)
                 }
+                NodeKind::Instrument { kind, parameters } => {
+                    let shape = match instruments::instrument(kind) {
+                        Some(_) => Shape::Instrument(kind.clone()),
+                        None => Shape::UnknownInstrument,
+                    };
+                    (shape, parameters.clone(), None)
+                }
                 NodeKind::Mixer {
                     channels,
                     parameters,
@@ -236,10 +248,10 @@ impl Target {
                 else {
                     return None;
                 };
-                // A stand-in for an unknown effect has no parameters to drive.
+                // A stand-in for an unknown effect or instrument has no parameters to drive.
                 if matches!(
                     nodes.get(&Key::Node(node)).map(|n| &n.shape),
-                    Some(Shape::Unknown { .. }) | None
+                    Some(Shape::Unknown { .. } | Shape::UnknownInstrument) | None
                 ) {
                     return None;
                 }

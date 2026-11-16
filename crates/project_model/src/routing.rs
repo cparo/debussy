@@ -87,6 +87,16 @@ pub enum NodeKind {
         /// Parameter values by name.
         parameters: BTreeMap<String, f32>,
     },
+    /// A built-in instrument (`docs/architecture/signal-graph.md` "Instruments"), named by a
+    /// stable id such as `"synth"`, with the parameter values that differ from its defaults, by
+    /// parameter name. It has an event input 0 and a stereo output 0. An id the application does
+    /// not know is kept and plays as silence.
+    Instrument {
+        /// The instrument's stable id.
+        kind: String,
+        /// Parameter values by name.
+        parameters: BTreeMap<String, f32>,
+    },
     /// A mixer (`docs/architecture/signal-graph.md` "Mixer"): `channels` mono inputs and one
     /// stereo output, with the parameter values that differ from their defaults, by name.
     Mixer {
@@ -317,7 +327,9 @@ pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
         }
     }
     match &node.kind {
-        NodeKind::Effect { parameters, .. } => check_parameters(parameters),
+        NodeKind::Effect { parameters, .. } | NodeKind::Instrument { parameters, .. } => {
+            check_parameters(parameters)
+        }
         NodeKind::Mixer {
             channels,
             parameters,
@@ -375,16 +387,21 @@ pub(crate) enum Lookup {
     },
     /// The node kind is known, but has no parameter of that name.
     NoSuchParameter,
-    /// An effect this build does not know: its parameters cannot be checked.
+    /// An effect or instrument this build does not know: its parameters cannot be checked.
     UnknownKind,
     /// A bus or feedback delay, which has no parameters.
     NoParameters,
 }
 
-/// Looks up parameter `name` of a node of `kind`. Allocates: builds the effect to ask it.
+/// Looks up parameter `name` of a node of `kind`. Allocates: builds the effect or instrument to
+/// ask it.
 pub(crate) fn parameter_info(kind: &NodeKind, name: &str) -> Lookup {
     let infos = match kind {
         NodeKind::Effect { kind, .. } => match audio_effects::parameter_infos(kind) {
+            Some(infos) => infos,
+            None => return Lookup::UnknownKind,
+        },
+        NodeKind::Instrument { kind, .. } => match instruments::parameter_infos(kind) {
             Some(infos) => infos,
             None => return Lookup::UnknownKind,
         },

@@ -1,4 +1,4 @@
-//! A mixer's or effect's parameters as its dialog shows them right now: the one view the panel,
+//! A mixer's, effect's or instrument's parameters as its dialog shows them right now: the one view the panel,
 //! display, preset picker, preset choice, keyboard stepping and the stopped-only guard all read
 //! (`docs/architecture/user-interface.md` "Gestures").
 
@@ -19,23 +19,30 @@ pub(crate) struct Live {
     pub value: f32,
 }
 
-/// Every mixer's and built-in effect's parameters, read once at launch.
+/// Every mixer's, built-in effect's and built-in instrument's parameters, read once at launch.
 #[derive(Debug)]
 pub(crate) struct ParameterCatalog {
     /// Each built-in effect kind's parameters.
     effects: BTreeMap<&'static str, Vec<ParameterInfo>>,
+    /// Each built-in instrument kind's parameters.
+    instruments: BTreeMap<&'static str, Vec<ParameterInfo>>,
     /// The parameters of a mixer of the most channels; a mixer of fewer has the first three per
     /// channel.
     mixer: Vec<ParameterInfo>,
 }
 
 impl ParameterCatalog {
-    /// The parameters of every built-in effect kind and of a mixer of the most channels.
+    /// The parameters of every built-in effect and instrument kind and of a mixer of the most
+    /// channels.
     pub(crate) fn new() -> ParameterCatalog {
         ParameterCatalog {
             effects: audio_effects::EFFECTS
                 .iter()
                 .filter_map(|e| Some((e.id, audio_effects::parameter_infos(e.id)?)))
+                .collect(),
+            instruments: instruments::INSTRUMENTS
+                .iter()
+                .filter_map(|i| Some((i.id, instruments::parameter_infos(i.id)?)))
                 .collect(),
             mixer: audio_effects::mixer_parameter_infos(audio_effects::MAX_CHANNELS),
         }
@@ -43,8 +50,8 @@ impl ParameterCatalog {
 
     /// Node `node` of `state`'s parameters as its dialog shows them, with the parameter being
     /// dragged anywhere `live`, whether playback is running, and the playhead's timeline frame,
-    /// where a wired curve is read; `None` unless it is a mixer or a built-in effect this build
-    /// knows.
+    /// where a wired curve is read; `None` unless it is a mixer, or a built-in effect or
+    /// instrument this build knows.
     pub(crate) fn view<'a>(
         &'a self,
         state: &'a State,
@@ -58,6 +65,11 @@ impl ParameterCatalog {
             NodeKind::Effect { kind, parameters } => (
                 Some(kind.as_str()),
                 self.effects.get(kind.as_str())?.as_slice(),
+                parameters,
+            ),
+            NodeKind::Instrument { kind, parameters } => (
+                Some(kind.as_str()),
+                self.instruments.get(kind.as_str())?.as_slice(),
                 parameters,
             ),
             NodeKind::Mixer {
