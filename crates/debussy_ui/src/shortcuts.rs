@@ -40,6 +40,9 @@ pub fn shortcut(event: Event) -> Option<Message> {
         Key::Named(Named::Delete | Named::Backspace) if modifiers.is_empty() => {
             Some(Message::DeleteRange)
         }
+        Key::Character(c) if modifiers.is_empty() && c.eq_ignore_ascii_case("q") => {
+            Some(Message::OpenQuantize)
+        }
         Key::Character(c) if modifiers.command() => match c.to_lowercase().as_str() {
             "x" => Some(Message::Cut),
             "c" => Some(Message::Copy),
@@ -161,5 +164,15 @@ mod tests {
             shortcut(press(Key::Named(Named::Escape), none)),
             Some(Message::ClearRange)
         );
+    }
+
+    #[test]
+    fn test_shortcut_q_opens_quantize_without_modifiers() {
+        assert_eq!(
+            shortcut(press(character("q"), Modifiers::empty())),
+            Some(Message::OpenQuantize)
+        );
+        assert_eq!(shortcut(press(character("q"), Modifiers::COMMAND)), None);
+        assert_eq!(shortcut(press(character("q"), Modifiers::SHIFT)), None);
     }
 }

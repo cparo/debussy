@@ -10,7 +10,7 @@
 //! - `bridge`: [`Bridge`], [`RenderGraph`] and [`render_graph`].
 //! - `click_sounds`: [`ClickSound`], [`prepare_click`] and [`click_track`].
 //! - `clips`: [`track_renderers`], [`TrackRenderers`] and [`FileTable`].
-//! - `midi`: [`midi_tracks`], MIDI tracks' clips flattened onto the timeline.
+//! - `midi`: [`midi_tracks`] and [`track_notes`], MIDI tracks' clips flattened onto the timeline.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -27,4 +27,4 @@ pub use bridge::{Bridge, RenderGraph, render_graph};
 pub use click_sounds::{ClickSound, click_track, prepare as prepare_click};
 pub use clips::{FileTable, TrackRenderers, track_renderers};
 pub use error::Error;
-pub use midi::midi_tracks;
+pub use midi::{midi_tracks, track_notes};

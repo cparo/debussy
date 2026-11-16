@@ -31,6 +31,8 @@ pub enum Menu {
     Click,
     /// The audio device button's list of devices.
     Device,
+    /// The quantize dialog, opened from the quantize button or Q: the grid and strength.
+    Quantize,
 }
 
 /// A line in a menu.

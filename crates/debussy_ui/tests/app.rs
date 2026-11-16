@@ -3203,3 +3203,164 @@ fn test_record_midi_without_notes_adds_nothing() -> Result<(), Box<dyn Error>> {
     assert_eq!(app.midi_arming(keys), None);
     Ok(())
 }
+
+/// The fixture's project plus a MIDI track holding one clip at frame 0, 24 000 frames long,
+/// with notes at 1 000, 7 000 and 13 000 (pitches 60, 62 and 64); and the MIDI track's id. At
+/// 120 BPM and 48 kHz a sixteenth note is 6 000 frames.
+fn app_with_midi() -> Result<(Fixture, TrackId), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let track = session.add_midi_track("Keys")?;
+    let note = |start, pitch| project_model::Note {
+        start,
+        length: 500,
+        channel: 0,
+        pitch,
+        velocity: 100,
+    };
+    let notes = vec![note(1_000, 60), note(7_000, 62), note(13_000, 64)];
+    let sequence = project_model::Sequence::new(24_000, notes, Vec::new())?;
+    let clip = Clip::new(Source::Midi(Arc::new(sequence)), 0, 24_000, 0);
+    session.add_clip(track, clip)?;
+    Ok((app_over(&session, None)?, track))
+}
+
+/// The note starts of the first clip on `track`.
+fn note_starts(app: &App, track: TrackId) -> Vec<u64> {
+    match app
+        .session()
+        .state()
+        .track(track)
+        .map(|t| &t.clips[0].1.source)
+    {
+        Some(Source::Midi(sequence)) => sequence.notes().iter().map(|n| n.start).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Selects frames `from..to` on `track` by dragging across its lane.
+fn select(app: &mut App, track: TrackId, from: u64, to: u64) {
+    app.update(Message::LanePress {
+        track,
+        frame: from,
+        extend: false,
+    });
+    app.update(Message::LaneDrag { track, frame: to });
+    app.update(Message::LaneRelease);
+}
+
+#[test]
+fn test_midi_lane_draws_note_bars_at_their_columns() -> Result<(), Box<dyn Error>> {
+    let ((app, _processor, _, _), track) = app_with_midi()?;
+    let lanes = app
+        .lanes()
+        .iter()
+        .find(|(id, _)| *id == track)
+        .map(|(_, lanes)| lanes)
+        .ok_or("no MIDI lanes")?;
+    assert_eq!(lanes.len(), 1);
+    let notes = lanes[0].midi.as_ref().ok_or("not a MIDI lane")?;
+    let (start, spc) = (app.view_start(), app.samples_per_column() as f32);
+    let columns: Vec<f32> = notes.notes.iter().map(|n| n.x0).collect();
+    let want: Vec<f32> = [1_000u64, 7_000, 13_000]
+        .iter()
+        .map(|&f| (f - start) as f32 / spc)
+        .collect();
+    assert_eq!(columns, want);
+    assert_eq!(
+        notes.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(),
+        [60, 62, 64]
+    );
+    // The audio track's lane has none.
+    assert!(
+        app.lanes()
+            .iter()
+            .all(|(id, l)| *id == track || l[0].midi.is_none())
+    );
+    Ok(())
+}
+
+#[test]
+fn test_quantize_dialog_moves_notes_as_one_step() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), track) = app_with_midi()?;
+    // Nothing selected: Q does nothing.
+    app.update(Message::OpenQuantize);
+    assert_eq!(app.menu(), None);
+    select(&mut app, track, 0, 24_000);
+    app.update(Message::OpenQuantize);
+    assert_eq!(app.menu(), Some(Menu::Quantize));
+    // The dialog's choices leave it open.
+    app.update(Message::QuantizeGrid(project_model::Grid::Sixteenth));
+    app.update(Message::QuantizeStrength(100.0));
+    assert_eq!(app.menu(), Some(Menu::Quantize));
+    let before = app.session().state().clone();
+    app.update(Message::Quantize);
+    assert_eq!(app.menu(), None);
+    assert_eq!(note_starts(&app, track), [0, 6_000, 12_000]);
+    assert_eq!(app.status(), Some("Quantized 3 notes."));
+    app.update(Message::Undo);
+    assert_eq!(app.session().state(), &before);
+    assert_eq!(note_starts(&app, track), [1_000, 7_000, 13_000]);
+    Ok(())
+}
+
+#[test]
+fn test_quantize_strength_snaps_to_steps_and_is_remembered() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), track) = app_with_midi()?;
+    select(&mut app, track, 0, 24_000);
+    app.update(Message::OpenQuantize);
+    app.update(Message::QuantizeStrength(48.0));
+    app.update(Message::QuantizeGrid(project_model::Grid::Beat));
+    let settings = app.quantize_settings();
+    assert_eq!(settings.strength, 50.0);
+    assert_eq!(settings.grid, project_model::Grid::Beat);
+    app.update(Message::Quantize);
+    // Beat lines are 24 000 apart: 1 000 → 500, 7 000 → 3 500, 13 000 → 18 500.
+    assert_eq!(note_starts(&app, track), [500, 3_500, 18_500]);
+    app.update(Message::OpenQuantize);
+    assert_eq!(app.quantize_settings(), settings);
+    Ok(())
+}
+
+#[test]
+fn test_quantize_outside_the_notes_says_so() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), track) = app_with_midi()?;
+    select(&mut app, track, 16_000, 23_000);
+    let revision = app.session().revision();
+    app.update(Message::Quantize);
+    assert_eq!(app.status(), Some("No notes in the selection."));
+    assert_eq!(app.session().revision(), revision);
+    Ok(())
+}
+
+#[test]
+fn test_instrument_menu_wires_the_synth_and_undo_removes_it() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, mixer), track) = app_with_midi()?;
+    app.update(Message::SetInstrument(track, "synth"));
+    assert_eq!(app.status(), None);
+    let state = app.session().state();
+    let synth = state
+        .connections_of(Endpoint::Track(track))
+        .find_map(|c| c.to.node())
+        .ok_or("the track feeds nothing")?;
+    assert!(matches!(
+        state.node(synth).map(|n| &n.kind),
+        Some(NodeKind::Instrument { kind, .. }) if kind == "synth"
+    ));
+    assert!(
+        state
+            .connections
+            .iter()
+            .any(|c| c.from == Endpoint::Node(synth) && c.to == Endpoint::Node(mixer))
+    );
+    app.update(Message::Undo);
+    assert!(app.session().state().node(synth).is_none());
+    assert_eq!(
+        app.session()
+            .state()
+            .connections_of(Endpoint::Track(track))
+            .count(),
+        0
+    );
+    Ok(())
+}

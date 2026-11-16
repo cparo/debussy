@@ -28,6 +28,12 @@ fn visible(clips: &[(project_model::ClipId, Clip)], index: usize) -> Vec<Stretch
     stretches
 }
 
+/// The notes `track`'s clips play, in timeline frames, as [`midi_tracks`] plays them: what the
+/// track pane draws (`docs/architecture/track-pane.md` "MIDI clip display").
+pub fn track_notes(track: &Track) -> Vec<NoteSpan> {
+    flatten(track).0
+}
+
 /// The notes and control changes `track`'s clips play, in timeline frames. Where clips overlap,
 /// the higher plays; a note plays if it starts inside a stretch of its clip that shows, and is cut
 /// off at that stretch's end (ADR-0144).

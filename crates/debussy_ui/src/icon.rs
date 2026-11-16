@@ -44,6 +44,8 @@ pub enum Icon {
     Menu,
     /// Give a parameter a curve port.
     Curve,
+    /// Open the quantize dialog.
+    Quantize,
 }
 
 /// Declares the artwork file of each icon, and a lazily parsed handle for it.
@@ -89,6 +91,7 @@ artwork! {
     Dark: DARK = "dark.svg";
     Menu: MENU = "menu.svg";
     Curve: CURVE = "curve.svg";
+    Quantize: QUANTIZE = "quantize.svg";
 }
 
 impl Icon {
@@ -113,6 +116,7 @@ impl Icon {
             Icon::Dark => "Dark Mode",
             Icon::Menu => "Menu",
             Icon::Curve => "Curve port",
+            Icon::Quantize => "Quantize",
         }
     }
 }
@@ -121,7 +125,7 @@ impl Icon {
 mod tests {
     use super::*;
 
-    const ALL: [Icon; 18] = [
+    const ALL: [Icon; 19] = [
         Icon::Waveform,
         Icon::Spectrogram,
         Icon::Grid,
@@ -140,6 +144,7 @@ mod tests {
         Icon::Dark,
         Icon::Menu,
         Icon::Curve,
+        Icon::Quantize,
     ];
 
     /// Every icon's artwork is a single-colour SVG with no text, as tinting requires.
