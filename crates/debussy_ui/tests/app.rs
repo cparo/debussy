@@ -3062,6 +3062,11 @@ fn test_record_midi_places_one_clip_of_the_notes_played() -> Result<(), Box<dyn 
     app.update(Message::Arm(keys));
     // Monitored on the first MIDI input, without opening the audio device's inputs.
     assert_eq!(app.midi_arming(keys), Some((true, Some("kb"))));
+    assert!(
+        app.is_armed(keys),
+        "the Arm toggle shows a MIDI track armed"
+    );
+    assert_eq!(app.arming(keys), None, "it has no audio input choice");
     assert_eq!(calls.borrow().midi_opened, ["kb"]);
     assert!(calls.borrow().input.is_empty());
     assert!(app.can_record());

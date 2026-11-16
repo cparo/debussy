@@ -998,7 +998,7 @@ impl App {
         let mut controls = row![chip(
             "Arm",
             unless_playing(Message::Arm(id)),
-            arming.is_some(),
+            self.is_armed(id),
             Accent::Record
         )]
         .spacing(4)

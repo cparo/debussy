@@ -146,6 +146,11 @@ impl App {
         Some((arming.monitor, InputChoice { input, stereo }))
     }
 
+    /// Whether the track is armed, audio or MIDI.
+    pub fn is_armed(&self, track: TrackId) -> bool {
+        self.arming.contains_key(&track)
+    }
+
     /// The MIDI track's arm settings, if it is armed: whether it is monitored, and its MIDI
     /// input's endpoint id if one is chosen.
     pub fn midi_arming(&self, track: TrackId) -> Option<(bool, Option<&str>)> {
