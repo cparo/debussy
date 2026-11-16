@@ -167,6 +167,10 @@ in by a human from Google Patents or USPTO Patent Center.
 | 3 | US8017856B2, Electronic musical instrument (publication US20100077908A1; Japanese priority 2008-250239). Abstract: in a "Unison 2" mode four instrument parts are assigned to the depressed notes and divided among them as evenly as possible. Claims not read. | Roland Corp (inventor Tanaka) | 2008-09-29 / 2009-05-18; granted 2011-09-13 | 2029-07-12 (Google, adjusted) | 4 (marginal: assignment of voices to depressed notes, CPC G10H 1/18; the design has no unison parts and allocates by free, releasing, oldest, so a reading is unlikely) | [GP](https://patents.google.com/patent/US8017856B2/en) || In force |
 | 4 | EP2775475A1 / B1 (granted 2017-05-03), In a music synthesizer, diatonic scalar transposition, or pitch bend according to chord type. Abstract: pitch-bend target pitch identified and converted according to chord. Claims not read; no US counterpart seen. | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / 2014-03-05 | 2034-03-05 (Google) | 5 (marginal: pitch bend handling, but chord-based conversion of the bend target; the design scales the bend by a semitone range with no chord logic) | [GP](https://patents.google.com/patent/EP2775475A1/en) || Not in force |
 | 5 | US9064485B2, US family member of candidate 4 (pitch bend according to chord type) | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / see GP | 2034-03-06 (Google) | 5 (pitch bend) | [GP](https://patents.google.com/patent/US9064485B2/en) | In force |
+| 6 | US11735152B2, Musical sound generation method (sounding a set number of simulated analog-synth voices per part) | Roland Corp | priority 2019 | not read (see GP) | 4 (voice assignment) | [GP](https://patents.google.com/patent/US11735152B2/en) | |
+| 7 | US7728217B2, Sound generator for producing a sound from a new note (new note supplied to synthesis generators by a priority associated with it) | Infineon Technologies AG | priority 2007 | not read (see GP) | 4 (voice allocation, stealing) | [GP](https://patents.google.com/patent/US7728217B2/en) | |
+| 8 | US8053658B2, Electronic musical instrument using on-on note time (time between note starts controls the new sound) | Roland Corp | priority 2008 | not read (see GP) | 2, 4 (retrigger, legato) | [GP](https://patents.google.com/patent/US8053658B2/en) | |
+| 9 | US9799313B2, Electronic musical instrument, storage medium and note selecting method (assigners decide which note sounds on a key-off) | (Google; not read) | priority 2013 | not read (see GP) | 4 (marginal) | [GP](https://patents.google.com/patent/US9799313B2/en) | |
 
 Statuses checked by Chris Paro on 2026-11-16: candidates 1, 2, 3 and 5 are in force; candidate 4 (EP2775475B1) is not in force.
 
@@ -546,6 +550,14 @@ approximate (about 10 per query unless noted).
 | Google Patents (page fetch by number, pass 2) | US7728213B2, US7750228B2, US8035021B2, US10147408B2, US6806413, US20100077908A1 and US8017856B2, US5280129A, US20060155543A1, US5827987A, US9542923B1, US5786541A, US20050120870A1, EP2775475A1, US6900381, US10109268B2 | 2026-11-16 | 16 | Dates and status read from the page header; claims were beyond the truncated text window on every page, so no claim was read |
 | Google Patents (stage 2 claim reading) | US7589272B2 claims and description, both text windows (offset 0 and 100000); FreePatentsOnline tried for a cross-check (403) | 2026-11-16 | 1 | All 60 claims read in the fetch tool's short verbatim pieces (HTML text, not OCR); independents 1, 2, 15, 28, 43, 58, 59, 60; spec passages on the pulse's derivation, odd symmetry, DC bias and Brandt; legal events (CoC 2010-12-14, fees paid to year 12) |
 | Google Patents (stage 2 claim reading, candidates 3 and 4) | US8017856B2 (offset 0 and 100000: header, spec on "parts", claims 1, 10, 14 and the steps of 16, 20, 22, 26); EP2775475B1 (offset 0 and 100000: header, status, Country Status family list, claims 1, 10, 11); US9064485B2 (offset 0 and 100000: header, independent claims 1, 10, 11 in pieces) | 2026-11-16 | 3 | HTML text, possibly OCR (the page does not say; typos in the text). Quotes come back in pieces of under 125 characters. EP2775475B1 shown as "Not-in-force"; US family member US9064485B2 shown as Active to 2034-03-06 |
+| Google Patents via Claude in Chrome (pass 3) | `CPC=G10H1/18`, US, granted, priority after 2006-01-01 | 2026-11-16 | ~127 | All rows keyword-screened (voice, assign, envelope, oscillator, bend, velocity, sustain); 14 read in the result list; candidate 9 |
+| Google Patents via Claude in Chrome (pass 3) | `CPC=G10H1/183`, same filters | 2026-11-16 | ~23 | Every title and the result-list abstract read; candidates 6, 7, 9; US11881196B2 (piano damper re-press channels) marginal, not tabled |
+| Google Patents via Claude in Chrome (pass 3) | `CPC=G10H1/057`, same filters | 2026-11-16 | ~36 | Every title read; candidate 8; US7511216B2 (Clynes, amplitude contours), US12272342B2 (filter coefficient groups), US12094440B2 (Casio) marginal, not tabled |
+| Google Patents via Claude in Chrome (pass 3) | `CPC=G10H7/00`, same filters | 2026-11-16 | ~116 | All rows keyword-screened; none on oscillators, envelopes or voices |
+| Google Patents via Claude in Chrome (pass 3) | `CPC=G10H2250/545`, priority after 2002-01-01 | 2026-11-16 | 4 | D/A converters and US6806413B1, US6798369B2 (expired or different technique) |
+| Google Patents via Claude in Chrome (pass 3) | `(sawtooth) (alias OR aliasing OR bandlimited OR "band-limited") (discontinuity) (synthesizer OR "musical tone")`, priority after 2002 | 2026-11-16 | ~17 | Finds candidate 1; also US11594207B2 (partial-series/additive rendering, mentions oversampling), US11837212B1 (additive), US9741329B2 (control points); none touches MinBLEP |
+| Google Patents via Claude in Chrome (pass 3) | `("minimum phase" OR "minimum-phase") (step OR impulse) (oscillator) (alias OR aliasing) (synthesizer OR "musical tone" OR sawtooth)`, priority after 2002 | 2026-11-16 | ~7 | Only candidate 1 and unrelated DDS/PWM patents: no MinBLEP patent found |
+| Google Patents via Claude in Chrome (pass 3) | voice stealing full text (`steal`/`truncat*` with voice, polyphon*, release/oldest/lowest), priority after 2006 | 2026-11-16 | ~13 | All off-topic |
 
 Refused or failed: Michigan Publishing page for Stilson and Smith returned 403; earlevel.com
 "Envelope generators ADSR code" returned 404; the KAIST JASA 2012 PDF fetch timed out (300 s) and
@@ -558,6 +570,10 @@ text, plus CPC codes read from the header of each opened Google Patents page. Ev
 comes from a web search or a citation list.
 
 ## Open uncertainties
+
+- Pass 3 (2026-11-16) ran the class-filtered searches in Google Patents through a browser, US
+  granted patents only. Non-US families of candidates 6 to 9, and other classes (G10H 1/02,
+  G10H 1/46, G10H 5/00, G10H 7/08 to 7/12), were not searched by class.
 
 - No paper text was read. The dates and the content of Stilson and Smith 1996, Brandt 2001,
   Välimäki and Huovilainen 2007 (does it contain the two-point polynomial residual, and is it the
