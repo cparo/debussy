@@ -9,6 +9,7 @@
 //! - `silence`: [`Silence`], the stand-in for an instrument kind this build does not know.
 //! - `synth`: [`Synth`], the polyphonic subtractive synthesizer
 //!   (`docs/architecture/instruments.md` "Synthesizer").
+//! - `voices`: the voice pool and amplitude-envelope parameters the instruments share.
 //! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
@@ -17,6 +18,7 @@ mod error;
 mod registry;
 mod silence;
 mod synth;
+mod voices;
 
 pub use error::Error;
 pub use registry::{INSTRUMENTS, InstrumentKind, display_name, instrument, parameter_infos};
