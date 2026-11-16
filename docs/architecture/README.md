@@ -154,6 +154,7 @@ The principles every crate and module follows are in [Design Principles](princip
   - [Commit gate](tooling.md#commit-gate)
 - [Track Pane](track-pane.md)
   - [MIDI clip display](track-pane.md#midi-clip-display)
+  - [Key and pitch names](track-pane.md#key-and-pitch-names)
   - [Quantize](track-pane.md#quantize)
   - [Instrument choice](track-pane.md#instrument-choice)
 - [User Interface](user-interface.md)
