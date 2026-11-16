@@ -139,6 +139,7 @@ fn offline(
         &mut g.runner,
         g.output,
         &mut tracks,
+        &mut [],
         0,
         frames as u64,
         block,

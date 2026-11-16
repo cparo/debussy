@@ -6,13 +6,16 @@ use signal_graph::{NodeId, Runner};
 use crate::block;
 use crate::error::Error;
 use crate::feed::TrackFeeds;
+use crate::midi::MidiTrack;
 
 /// Where rendered output goes: each stretch of left and right samples.
 type Output<'a> = dyn FnMut(&[f32], &[f32]) -> Result<(), Error> + 'a;
 
 /// Renders `frames` frames through `runner`'s plan from `tracks` (normally
 /// [`RenderFeed`](crate::RenderFeed)s positioned at `start`, the range's first timeline frame),
-/// in blocks of up to `block_frames`, passing each stretch of left and right output to `out`.
+/// and `midi`, whose notes sounding at `start` and controllers' values before it are chased as
+/// in playback, in blocks of up to `block_frames`, passing each stretch of left and right output
+/// to `out`.
 /// The plan's first `latency` frames are dropped, so the first frame passed is the range's
 /// first; mono listening does not apply. Curves are read from `start` on, as in playback.
 ///
@@ -20,10 +23,12 @@ type Output<'a> = dyn FnMut(&[f32], &[f32]) -> Result<(), Error> + 'a;
 ///
 /// [`Error::Graph`] if `block_frames` is 0 or larger than the graph allows; whatever `out`
 /// returns.
+#[allow(clippy::too_many_arguments)] // Each is a separate input of the render; a struct would only rename them.
 pub fn render(
     runner: &mut Runner,
     output: NodeId,
     tracks: &mut [TrackFeeds],
+    midi: &mut [MidiTrack],
     start: u64,
     frames: u64,
     block_frames: usize,
@@ -46,6 +51,7 @@ pub fn render(
             runner,
             output,
             tracks,
+            midi,
             None,
             position,
             true,

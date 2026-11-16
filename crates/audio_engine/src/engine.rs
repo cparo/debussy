@@ -14,10 +14,11 @@ use crate::capture::{ArmedTrack, MAX_INPUTS, TakeInfo};
 use crate::click::ClickTrack;
 use crate::error::Error;
 use crate::feed::{Streams, TrackFeeds};
+use crate::midi::MidiTrack;
 use crate::processor::Processor;
 
 /// Commands waiting for the real-time side at once.
-const COMMANDS: usize = 8;
+const COMMANDS: usize = 16;
 
 /// Where the transport is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +85,8 @@ pub(crate) struct Shared {
     take_started: AtomicBool,
     take_start: AtomicU64,
     take_latency: AtomicU64,
+    /// Events the MIDI tracks' event buffers have refused.
+    midi_overflows: AtomicU64,
 }
 
 impl Shared {
@@ -107,6 +110,10 @@ impl Shared {
         self.state.store(state.to_u8(), Ordering::Release);
     }
 
+    pub(crate) fn add_midi_overflows(&self, refused: u64) {
+        self.midi_overflows.fetch_add(refused, Ordering::Relaxed);
+    }
+
     pub(crate) fn mono(&self) -> bool {
         self.mono.load(Ordering::Relaxed)
     }
@@ -125,12 +132,15 @@ pub(crate) enum Retired {
     Tracks(#[allow(dead_code)] Vec<TrackFeeds>), // Held only to be dropped.
     Armed(#[allow(dead_code)] Vec<ArmedTrack>),  // Held only to be dropped.
     Click(#[allow(dead_code)] Option<ClickTrack>), // Held only to be dropped.
+    Midi(#[allow(dead_code)] Vec<MidiTrack>),    // Held only to be dropped.
 }
 
 /// A request from the control side to the real-time side.
 pub(crate) enum Command {
     /// Replace the track feeds.
     Tracks(Vec<TrackFeeds>),
+    /// Replace the MIDI tracks, carrying over which notes are sounding.
+    Midi(Vec<MidiTrack>),
     /// Replace the armed tracks, ending the old ones' takes.
     Arm(Vec<ArmedTrack>),
     /// Replace the click.
@@ -219,6 +229,26 @@ impl Engine {
         }
         self.collect();
         self.send(Command::Tracks(tracks))
+    }
+
+    /// Replaces the MIDI tracks (`docs/architecture/engine.md` "MIDI clip playback"). Only while
+    /// stopped or paused; notes the old tracks left sounding on the same event sources are still
+    /// sent their note-offs.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Playing`]; [`Error::Busy`].
+    pub fn set_midi_tracks(&mut self, tracks: Vec<MidiTrack>) -> Result<(), Error> {
+        if self.is_playing() {
+            return Err(Error::Playing);
+        }
+        self.collect();
+        self.send(Command::Midi(tracks))
+    }
+
+    /// How many MIDI events the tracks' event buffers have refused, in all (ADR-0143).
+    pub fn midi_overflows(&self) -> u64 {
+        self.shared.midi_overflows.load(Ordering::Relaxed)
     }
 
     /// Replaces the armed tracks (`docs/architecture/recording.md` "Capture"), ending any takes

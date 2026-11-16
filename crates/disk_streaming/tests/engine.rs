@@ -107,6 +107,7 @@ fn test_streamed_playback_matches_offline_render() -> Result<(), Box<dyn Error>>
         &mut runner,
         output,
         &mut tracks,
+        &mut [],
         0,
         FRAMES as u64,
         256,

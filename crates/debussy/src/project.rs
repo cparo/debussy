@@ -10,7 +10,7 @@ use audio_analysis::WaveformWriter;
 use audio_buffers::Layout;
 use audio_engine::{RenderFeed, TrackFeed, TrackFeeds};
 use disk_streaming::WavClipAudio;
-use engine_bridge::{render_graph, track_renderers};
+use engine_bridge::{midi_tracks, render_graph, track_renderers};
 use import_export::{
     ExportChannels, ExportFormat, Lame, Mp3Bitrate, OfflineRender, WavDepth, export, import,
 };
@@ -212,11 +212,13 @@ pub fn export_state(
                 .collect(),
         })
         .collect();
+    let mut midi = midi_tracks(state, &graph.event_sources);
     export(
         OfflineRender {
             runner: &mut graph.runner,
             output: graph.output,
             tracks: &mut tracks,
+            midi: &mut midi,
             start: 0,
             frames: project_end(state),
             block_frames: MAX_BLOCK,

@@ -74,6 +74,7 @@ fn export_sine(
             runner: &mut runner,
             output,
             tracks: &mut tracks,
+            midi: &mut [],
             start: 0,
             frames: frames as u64,
             block_frames: 256,
