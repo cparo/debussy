@@ -179,6 +179,59 @@ impl Sequence {
         Sequence::new(frames, notes, controls)
     }
 
+    /// This sequence with each note starting in `from..to` moved to `target(start)`, its length
+    /// kept (`docs/architecture/project.md` "Editing model"). Control changes stay where they
+    /// are. Then:
+    ///
+    /// - A note moved to or past the end is dropped; one that would run past it ends there.
+    /// - Where two notes on the same channel and pitch overlap, the earlier ends where the later
+    ///   starts; one left no frames long is dropped.
+    pub fn quantized(&self, from: u64, to: u64, target: impl Fn(u64) -> u64) -> Sequence {
+        let mut notes: Vec<Note> = self
+            .notes
+            .iter()
+            .filter_map(|&note| {
+                let start = if (from..to).contains(&note.start) {
+                    target(note.start)
+                } else {
+                    note.start
+                };
+                let length = note.length.min(self.frames.checked_sub(start)?);
+                (length > 0).then_some(Note {
+                    start,
+                    length,
+                    ..note
+                })
+            })
+            .collect();
+        notes.sort_by_key(|n| (n.start, n.channel, n.pitch));
+        // The index in `notes` of the latest note on each key, by channel × 128 + pitch.
+        let mut latest: Vec<Option<usize>> = vec![None; 16 * 128];
+        for index in 0..notes.len() {
+            let note = notes[index];
+            let slot = &mut latest[usize::from(note.channel) * 128 + usize::from(note.pitch)];
+            if let Some(earlier) = slot.replace(index) {
+                let earlier = &mut notes[earlier];
+                earlier.length = earlier.length.min(note.start - earlier.start);
+            }
+        }
+        notes.retain(|note| note.length > 0);
+        let quantized = Sequence {
+            frames: self.frames,
+            notes,
+            controls: self.controls.clone(),
+        };
+        debug_assert!(
+            Sequence::new(
+                quantized.frames,
+                quantized.notes.clone(),
+                quantized.controls.clone()
+            )
+            .is_ok()
+        );
+        quantized
+    }
+
     /// Its length, in frames.
     pub fn frames(&self) -> u64 {
         self.frames
@@ -430,6 +483,105 @@ mod tests {
                 note(0, 3, 2, 70, 100)
             ]
         );
+        Ok(())
+    }
+
+    fn quantize_test_sequence() -> Result<Sequence, Error> {
+        Sequence::new(
+            100,
+            vec![
+                note(3, 5, 0, 60, 100),
+                note(12, 4, 0, 62, 100),
+                note(27, 10, 0, 64, 100),
+            ],
+            vec![control(13, 0, 7, 50)],
+        )
+    }
+
+    /// Snaps to the nearest multiple of 10, `strength` of the way.
+    fn snap(strength: f64) -> impl Fn(u64) -> u64 {
+        move |start| {
+            let line = (start as f64 / 10.0).round() * 10.0;
+            (start as f64 + (strength * (line - start as f64)).round()) as u64
+        }
+    }
+
+    #[test]
+    fn test_quantized_full_strength_moves_starts_and_keeps_lengths() -> Result<(), Error> {
+        let quantized = quantize_test_sequence()?.quantized(0, 100, snap(1.0));
+        assert_eq!(
+            quantized.notes(),
+            [
+                note(0, 5, 0, 60, 100),
+                note(10, 4, 0, 62, 100),
+                note(30, 10, 0, 64, 100)
+            ]
+        );
+        assert_eq!(quantized.controls(), [control(13, 0, 7, 50)]);
+        assert_eq!(quantized.frames(), 100);
+        Ok(())
+    }
+
+    #[test]
+    fn test_quantized_strength_scales_the_move() -> Result<(), Error> {
+        let sequence = quantize_test_sequence()?;
+        assert_eq!(sequence.quantized(0, 100, snap(0.0)), sequence);
+        let half = sequence.quantized(0, 100, snap(0.5));
+        let starts: Vec<u64> = half.notes().iter().map(|n| n.start).collect();
+        // 3 → 1.5 rounds to 2 (away from zero), 12 → 11, 27 → 28.5 rounds to 29.
+        assert_eq!(starts, [1, 11, 29]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_quantized_moves_only_notes_starting_in_the_window() -> Result<(), Error> {
+        let quantized = quantize_test_sequence()?.quantized(4, 27, snap(1.0));
+        let starts: Vec<u64> = quantized.notes().iter().map(|n| n.start).collect();
+        assert_eq!(starts, [3, 10, 27]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_quantized_resolves_overlap_on_the_same_key() -> Result<(), Error> {
+        let sequence = Sequence::new(
+            100,
+            vec![
+                note(0, 15, 0, 60, 100),
+                note(17, 1, 0, 60, 90),
+                note(18, 5, 0, 60, 80),
+            ],
+            vec![],
+        )?;
+        // 17 and 18 both land on 20; the first of them is dropped, and the note at 0 is cut
+        // short only if it reached the later start.
+        let quantized = sequence.quantized(0, 100, snap(1.0));
+        assert_eq!(quantized.notes().len(), 2);
+        assert_eq!(quantized.notes()[0], note(0, 15, 0, 60, 100));
+        assert_eq!(quantized.notes()[1].start, 20);
+        // A long note is cut where a later one moved under it starts.
+        let sequence = Sequence::new(
+            100,
+            vec![note(0, 32, 0, 60, 100), note(33, 5, 0, 60, 90)],
+            vec![],
+        )?;
+        let quantized = sequence.quantized(20, 100, snap(1.0));
+        assert_eq!(
+            quantized.notes(),
+            [note(0, 30, 0, 60, 100), note(30, 5, 0, 60, 90)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_quantized_cuts_notes_at_the_end() -> Result<(), Error> {
+        let sequence = Sequence::new(
+            100,
+            vec![note(90, 7, 0, 60, 100), note(97, 3, 0, 61, 100)],
+            vec![],
+        )?;
+        let quantized = sequence.quantized(0, 100, |start| start + 6);
+        // 90 → 96, cut to 4 frames; 97 → 103, past the end, dropped.
+        assert_eq!(quantized.notes(), [note(96, 4, 0, 60, 100)]);
         Ok(())
     }
 

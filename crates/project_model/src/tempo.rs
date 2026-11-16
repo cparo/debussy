@@ -40,6 +40,20 @@ impl Default for Tempo {
     }
 }
 
+/// The spacing of the lines quantize moves notes to (`docs/architecture/project.md` "Musical
+/// time").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Grid {
+    /// The start of each bar.
+    Bar,
+    /// Each beat of the meter.
+    Beat,
+    /// Each eighth note.
+    Eighth,
+    /// Each sixteenth note.
+    Sixteenth,
+}
+
 /// A beat on the grid, counted from 0: bar 0 beat 0 is the first beat of the timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Beat {
@@ -128,6 +142,38 @@ impl Tempo {
         (first..)
             .map(move |index| self.beat(index, rate))
             .take_while(move |beat| beat.frame < to)
+    }
+
+    /// The frame line `index` of `grid` falls on at `rate` Hz. Like a beat, each line is
+    /// computed from its index, never accumulated.
+    pub fn grid_frame(&self, grid: Grid, index: i64, rate: u32) -> i64 {
+        match grid {
+            Grid::Bar => self.bar_frame(index, rate),
+            Grid::Beat => self.beat_frame(index, rate),
+            Grid::Eighth | Grid::Sixteenth => {
+                let per_whole = self.frames_per_whole_note(rate);
+                let divisions = if grid == Grid::Eighth { 8.0 } else { 16.0 };
+                (index as f64 * per_whole / divisions).round() as i64
+            }
+        }
+    }
+
+    /// The line of `grid` nearest `frame` at `rate` Hz; the earlier of two equally near.
+    pub fn nearest_grid(&self, frame: u64, grid: Grid, rate: u32) -> u64 {
+        let spacing = match grid {
+            Grid::Bar => self.frames_per_beat(rate) * f64::from(self.beats_per_bar.max(1)),
+            Grid::Beat => self.frames_per_beat(rate),
+            Grid::Eighth => self.frames_per_whole_note(rate) / 8.0,
+            Grid::Sixteenth => self.frames_per_whole_note(rate) / 16.0,
+        };
+        let estimate = (frame as f64 / spacing).round() as i64;
+        let target = i128::from(frame);
+        // Rounding each line can move it across the midpoint, so look either side of the
+        // estimate. Lines before frame 0 are never nearer than line 0.
+        (estimate - 1..=estimate + 1)
+            .map(|index| self.grid_frame(grid, index.max(0), rate).max(0))
+            .min_by_key(|&line| ((i128::from(line) - target).abs(), line))
+            .map_or(0, |line| line.unsigned_abs())
     }
 
     /// The length of `bars` bars at `rate` Hz, in frames: from frame 0 to the start of bar
@@ -242,6 +288,63 @@ mod tests {
         );
         assert_eq!(tempo.beats_in(1, 24_000, RATE).count(), 0);
         assert_eq!(tempo.bars_length(2, RATE), 144_000);
+    }
+
+    #[test]
+    fn test_grid_frame_spaces_each_grid() {
+        let tempo = Tempo::default(); // 24 000 frames per beat at 48 kHz.
+        assert_eq!(tempo.grid_frame(Grid::Bar, 2, RATE), 192_000);
+        assert_eq!(tempo.grid_frame(Grid::Beat, 3, RATE), 72_000);
+        assert_eq!(tempo.grid_frame(Grid::Eighth, 3, RATE), 36_000);
+        assert_eq!(tempo.grid_frame(Grid::Sixteenth, 3, RATE), 18_000);
+        // In 6/8 a beat is an eighth note, and a bar is six of them.
+        let six_eight = Tempo {
+            bpm: 120.0,
+            beats_per_bar: 6,
+            beat_unit: 8,
+        };
+        assert_eq!(six_eight.grid_frame(Grid::Beat, 1, RATE), 24_000);
+        assert_eq!(six_eight.grid_frame(Grid::Eighth, 1, RATE), 24_000);
+        assert_eq!(six_eight.grid_frame(Grid::Sixteenth, 1, RATE), 12_000);
+        assert_eq!(six_eight.grid_frame(Grid::Bar, 1, RATE), 144_000);
+    }
+
+    #[test]
+    fn test_nearest_grid_rounds_to_the_closest_line() {
+        let tempo = Tempo::default();
+        assert_eq!(tempo.nearest_grid(0, Grid::Sixteenth, RATE), 0);
+        assert_eq!(tempo.nearest_grid(2_999, Grid::Sixteenth, RATE), 0);
+        assert_eq!(tempo.nearest_grid(3_001, Grid::Sixteenth, RATE), 6_000);
+        // Halfway goes to the earlier line.
+        assert_eq!(tempo.nearest_grid(3_000, Grid::Sixteenth, RATE), 0);
+        assert_eq!(tempo.nearest_grid(30_000, Grid::Eighth, RATE), 24_000);
+        assert_eq!(tempo.nearest_grid(37_000, Grid::Beat, RATE), 48_000);
+        assert_eq!(tempo.nearest_grid(47_000, Grid::Bar, RATE), 0);
+        assert_eq!(tempo.nearest_grid(49_000, Grid::Bar, RATE), 96_000);
+        let six_eight = Tempo {
+            bpm: 120.0,
+            beats_per_bar: 6,
+            beat_unit: 8,
+        };
+        assert_eq!(six_eight.nearest_grid(80_000, Grid::Bar, RATE), 144_000);
+        assert_eq!(six_eight.nearest_grid(13_000, Grid::Beat, RATE), 24_000);
+    }
+
+    #[test]
+    fn test_nearest_grid_lands_on_rounded_lines_at_odd_tempos() {
+        let tempo = Tempo {
+            bpm: 133.33,
+            beats_per_bar: 7,
+            beat_unit: 8,
+        };
+        for grid in [Grid::Bar, Grid::Beat, Grid::Eighth, Grid::Sixteenth] {
+            for index in [0, 1, 17, 9_999] {
+                let line = tempo.grid_frame(grid, index, 44_100);
+                let frame = line.unsigned_abs();
+                assert_eq!(tempo.nearest_grid(frame, grid, 44_100), frame);
+                assert_eq!(tempo.nearest_grid(frame + 1, grid, 44_100), frame);
+            }
+        }
     }
 
     #[test]

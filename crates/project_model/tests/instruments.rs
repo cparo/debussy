@@ -137,3 +137,135 @@ fn test_instrument_ids_differ_from_effect_ids() {
         );
     }
 }
+
+/// The instruments in the state, by kind.
+fn instrument_kinds(session: &Session) -> Vec<String> {
+    session
+        .state()
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            NodeKind::Instrument { kind, .. } => Some(kind.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn test_set_instrument_wires_track_to_project_mixer_and_undoes() -> TestResult {
+    let mut session = Session::new_project();
+    let mixer = session.state().project_mixer().ok_or("no project mixer")?;
+    let track = session.add_midi_track("keys")?;
+    let before = session.state().clone();
+    let synth = session.set_instrument(track, "synth")?;
+    assert_eq!(instrument_kinds(&session), ["synth"]);
+    let state = session.state();
+    let from_track: Vec<_> = state.connections_of(Endpoint::Track(track)).collect();
+    assert_eq!(from_track.len(), 1);
+    assert_eq!(
+        (from_track[0].to, from_track[0].input),
+        (Endpoint::Node(synth), 0)
+    );
+    let sides: Vec<_> = state
+        .connections
+        .iter()
+        .filter(|c| c.from == Endpoint::Node(synth))
+        .map(|c| (c.to, c.from_side))
+        .collect();
+    assert_eq!(
+        sides,
+        [
+            (Endpoint::Node(mixer), Some(Side::Left)),
+            (Endpoint::Node(mixer), Some(Side::Right))
+        ]
+    );
+    assert!(session.undo());
+    assert_eq!(session.state(), &before);
+    Ok(())
+}
+
+#[test]
+fn test_set_instrument_replaces_the_one_the_track_fed() -> TestResult {
+    let mut session = Session::new_project();
+    let mixer = session.state().project_mixer().ok_or("no project mixer")?;
+    let track = session.add_midi_track("keys")?;
+    let first = session.set_instrument(track, "synth")?;
+    let channels = |s: &Session| match s.state().node(mixer).map(|n| &n.kind) {
+        Some(NodeKind::Mixer { channels, .. }) => *channels,
+        _ => 0,
+    };
+    let before = channels(&session);
+    let second = session.set_instrument(track, "from-the-future")?;
+    assert!(session.state().node(first).is_none());
+    assert_eq!(instrument_kinds(&session), ["from-the-future"]);
+    assert!(
+        session
+            .state()
+            .connections_of(Endpoint::Node(first))
+            .next()
+            .is_none()
+    );
+    // The new instrument took the channels the old one left.
+    assert_eq!(channels(&session), before);
+    assert_eq!(
+        session
+            .state()
+            .connections
+            .iter()
+            .filter(|c| c.from == Endpoint::Node(second))
+            .count(),
+        2
+    );
+    assert!(session.undo());
+    assert!(session.state().node(first).is_some());
+    assert!(session.state().node(second).is_none());
+    Ok(())
+}
+
+#[test]
+fn test_set_instrument_keeps_an_instrument_another_track_feeds() -> TestResult {
+    let mut session = Session::new_project();
+    let a = session.add_midi_track("a")?;
+    let b = session.add_midi_track("b")?;
+    let shared = session.set_instrument(a, "synth")?;
+    session.connect(Endpoint::Track(b), 0, Endpoint::Node(shared), 0)?;
+    session.set_instrument(a, "synth")?;
+    assert!(session.state().node(shared).is_some());
+    assert_eq!(instrument_kinds(&session).len(), 2);
+    // Only b still feeds the shared one.
+    let feeding: Vec<_> = session
+        .state()
+        .connections
+        .iter()
+        .filter(|c| c.to == Endpoint::Node(shared))
+        .map(|c| c.from)
+        .collect();
+    assert_eq!(feeding, [Endpoint::Track(b)]);
+    Ok(())
+}
+
+#[test]
+fn test_set_instrument_without_mixer_feeds_the_output() -> TestResult {
+    let mut session = Session::new();
+    let track = session.add_midi_track("keys")?;
+    let synth = session.set_instrument(track, "synth")?;
+    assert!(
+        session
+            .state()
+            .connections
+            .iter()
+            .any(|c| c.from == Endpoint::Node(synth) && c.to == Endpoint::Output)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_set_instrument_on_audio_track_refused() -> TestResult {
+    let mut session = Session::new_project();
+    let track = session.add_track("a", Layout::Stereo)?;
+    assert_eq!(
+        session.set_instrument(track, "synth"),
+        Err(Error::KindMismatch)
+    );
+    Ok(())
+}
