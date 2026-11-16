@@ -7,17 +7,17 @@ use std::sync::Arc;
 use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
 use project_model::{
-    AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane, Edit, Endpoint,
-    Key, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Mode, Node, NodeId, NodeKind, Notation, Note,
-    Position, Sequence, Side, Source, State, Tempo, Track, TrackId, TrackKind, WireHandle,
-    WirePoint, WireShape,
+    Accidental, AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane,
+    Edit, Endpoint, Key, Letter, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Mode, Node, NodeId,
+    NodeKind, Notation, Note, Position, Sequence, Side, Source, State, Tempo, Track, TrackId,
+    TrackKind, WireHandle, WirePoint, WireShape,
 };
 
 use crate::format::{
-    FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
-    SavedKey, SavedLayout, SavedName, SavedNode, SavedNodeKind, SavedPoint, SavedPosition,
-    SavedProject, SavedSequence, SavedSide, SavedSource, SavedTempo, SavedTrack, SavedTrackKind,
-    SavedWireHandle, SavedWirePoint,
+    FORMAT_VERSION, SavedAccidental, SavedClip, SavedConnection, SavedCurve, SavedEndpoint,
+    SavedFile, SavedHandle, SavedKey, SavedLayout, SavedLetter, SavedName, SavedNode,
+    SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSequence, SavedSide, SavedSource,
+    SavedTempo, SavedTrack, SavedTrackKind, SavedWireHandle, SavedWirePoint,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -360,17 +360,7 @@ fn track_to_saved(track: &Track, sequences: &mut SequenceTable) -> SavedTrack {
             TrackKind::Midi => {
                 let notation = track.notation.clone().unwrap_or_default();
                 SavedTrackKind::Midi {
-                    key: match notation.key {
-                        Key::Tonal {
-                            root,
-                            mode: Mode::Major,
-                        } => SavedKey::Major { root },
-                        Key::Tonal {
-                            root,
-                            mode: Mode::Minor,
-                        } => SavedKey::Minor { root },
-                        Key::Indefinite => SavedKey::Indefinite {},
-                    },
+                    key: key_to_saved(notation.key),
                     names: notation
                         .names
                         .into_iter()
@@ -407,20 +397,64 @@ fn track_to_saved(track: &Track, sequences: &mut SequenceTable) -> SavedTrack {
     }
 }
 
-/// A MIDI track's key and names from the file: a root of 0 to 11, names in strictly ascending
+fn key_to_saved(key: Key) -> SavedKey {
+    let Key::Tonal {
+        letter,
+        accidental,
+        mode,
+    } = key
+    else {
+        return SavedKey::Indefinite {};
+    };
+    let letter = match letter {
+        Letter::C => SavedLetter::C,
+        Letter::D => SavedLetter::D,
+        Letter::E => SavedLetter::E,
+        Letter::F => SavedLetter::F,
+        Letter::G => SavedLetter::G,
+        Letter::A => SavedLetter::A,
+        Letter::B => SavedLetter::B,
+    };
+    let accidental = match accidental {
+        Accidental::Natural => SavedAccidental::Natural,
+        Accidental::Sharp => SavedAccidental::Sharp,
+        Accidental::Flat => SavedAccidental::Flat,
+    };
+    match mode {
+        Mode::Major => SavedKey::Major { letter, accidental },
+        Mode::Minor => SavedKey::Minor { letter, accidental },
+    }
+}
+
+fn key_from_saved(key: SavedKey) -> Key {
+    let (letter, accidental, mode) = match key {
+        SavedKey::Major { letter, accidental } => (letter, accidental, Mode::Major),
+        SavedKey::Minor { letter, accidental } => (letter, accidental, Mode::Minor),
+        SavedKey::Indefinite {} => return Key::Indefinite,
+    };
+    Key::Tonal {
+        letter: match letter {
+            SavedLetter::C => Letter::C,
+            SavedLetter::D => Letter::D,
+            SavedLetter::E => Letter::E,
+            SavedLetter::F => Letter::F,
+            SavedLetter::G => Letter::G,
+            SavedLetter::A => Letter::A,
+            SavedLetter::B => Letter::B,
+        },
+        accidental: match accidental {
+            SavedAccidental::Natural => Accidental::Natural,
+            SavedAccidental::Sharp => Accidental::Sharp,
+            SavedAccidental::Flat => Accidental::Flat,
+        },
+        mode,
+    }
+}
+
+/// A MIDI track's key and names from the file: names in strictly ascending
 /// pitch order, within `project_model::notation`'s limits.
 fn notation_from_saved(key: SavedKey, names: Vec<SavedName>) -> Result<Notation, String> {
-    let key = match key {
-        SavedKey::Major { root } => Key::Tonal {
-            root,
-            mode: Mode::Major,
-        },
-        SavedKey::Minor { root } => Key::Tonal {
-            root,
-            mode: Mode::Minor,
-        },
-        SavedKey::Indefinite {} => Key::Indefinite,
-    };
+    let key = key_from_saved(key);
     ensure(names.windows(2).all(|w| w[0].pitch < w[1].pitch), || {
         "pitch names are not in strictly ascending pitch order".to_owned()
     })?;
@@ -821,7 +855,8 @@ mod tests {
         for notation in [
             Notation {
                 key: Key::Tonal {
-                    root: 10,
+                    letter: Letter::D,
+                    accidental: Accidental::Flat,
                     mode: Mode::Minor,
                 },
                 names: BTreeMap::from([(36, "kick".to_owned())]),
@@ -844,9 +879,11 @@ mod tests {
     }
 
     #[test]
-    fn test_notation_from_saved_refuses_bad_keys_and_names() {
-        let major = SavedKey::Major { root: 0 };
-        assert!(notation_from_saved(SavedKey::Minor { root: 12 }, Vec::new()).is_err());
+    fn test_notation_from_saved_refuses_bad_names() {
+        let major = SavedKey::Major {
+            letter: SavedLetter::C,
+            accidental: SavedAccidental::Natural,
+        };
         for names in [
             vec![name(128, "x")],
             vec![name(36, "kick"), name(36, "kick")],

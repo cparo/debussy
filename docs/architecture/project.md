@@ -225,7 +225,8 @@ index into `sequences`; a sequence shared by several clips is saved once. Versio
 to audio tracks and no sequences ([ADR-0144](../adrs/0144-midi-clips-are-windows-onto-shared-note-sequences.md)). Since version 8 a node kind may
 be `{"kind":"instrument","instrument":…,"parameters":{…}}`; version 7 files migrate unchanged
 ([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)). Since version 9 a MIDI track's
-kind carries a `key` (`{"mode":"major"|"minor","root":0–11}` or `{"mode":"indefinite"}`) and
+kind carries a `key` (`{"mode":"major"|"minor","letter":"a"–"g","accidental":"natural"|"sharp"|"flat"}`
+or `{"mode":"indefinite"}`) and
 `names`, `{"pitch","name"}` pairs in strictly ascending pitch order within the limits of
 `docs/architecture/track-pane.md` "Key and pitch names"; version 8 MIDI tracks migrate to C major
 with no names ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)). Times are

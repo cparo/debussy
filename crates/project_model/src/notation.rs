@@ -20,14 +20,112 @@ pub enum Mode {
     Minor,
 }
 
-/// A track's key: a root and mode, or none for a track whose pitches stand for sounds rather
-/// than notes (drums, samples).
+/// A note letter, the natural pitch a tonic is spelled from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Letter {
+    /// C.
+    C,
+    /// D.
+    D,
+    /// E.
+    E,
+    /// F.
+    F,
+    /// G.
+    G,
+    /// A.
+    A,
+    /// B.
+    B,
+}
+
+impl Letter {
+    /// Every letter, A first, as the key dialog lists them.
+    pub const ALL: [Letter; 7] = [
+        Letter::A,
+        Letter::B,
+        Letter::C,
+        Letter::D,
+        Letter::E,
+        Letter::F,
+        Letter::G,
+    ];
+
+    /// The letter's pitch class, 0 (C) to 11.
+    pub fn pitch_class(self) -> u8 {
+        match self {
+            Letter::C => 0,
+            Letter::D => 2,
+            Letter::E => 4,
+            Letter::F => 5,
+            Letter::G => 7,
+            Letter::A => 9,
+            Letter::B => 11,
+        }
+    }
+
+    /// Its place on the circle of fifths from C: the sharps (positive) or flats (negative) in
+    /// its major key.
+    fn fifths(self) -> i8 {
+        match self {
+            Letter::F => -1,
+            Letter::C => 0,
+            Letter::G => 1,
+            Letter::D => 2,
+            Letter::A => 3,
+            Letter::E => 4,
+            Letter::B => 5,
+        }
+    }
+
+    /// The letter as written: "C".
+    pub fn name(self) -> &'static str {
+        match self {
+            Letter::C => "C",
+            Letter::D => "D",
+            Letter::E => "E",
+            Letter::F => "F",
+            Letter::G => "G",
+            Letter::A => "A",
+            Letter::B => "B",
+        }
+    }
+}
+
+/// A tonic's accidental: none, a sharp or a flat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Accidental {
+    /// No accidental.
+    #[default]
+    Natural,
+    /// A semitone up: "#".
+    Sharp,
+    /// A semitone down: "b".
+    Flat,
+}
+
+impl Accidental {
+    /// The accidental as written, in ASCII: "", "#" or "b".
+    pub fn name(self) -> &'static str {
+        match self {
+            Accidental::Natural => "",
+            Accidental::Sharp => "#",
+            Accidental::Flat => "b",
+        }
+    }
+}
+
+/// A track's key: a tonic, spelled as a letter and accidental, and a mode; or none for a track
+/// whose pitches stand for sounds rather than notes (drums, samples). Enharmonic tonics, such as
+/// C# and Db, are different keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
-    /// A key with a root pitch class and a mode.
+    /// A key with a tonic and a mode.
     Tonal {
-        /// The root's pitch class, 0 (C) to 11 (B).
-        root: u8,
+        /// The tonic's letter.
+        letter: Letter,
+        /// The tonic's accidental.
+        accidental: Accidental,
         /// Major or minor.
         mode: Mode,
     },
@@ -39,39 +137,63 @@ impl Default for Key {
     /// C major.
     fn default() -> Self {
         Key::Tonal {
-            root: 0,
+            letter: Letter::C,
+            accidental: Accidental::Natural,
             mode: Mode::Major,
         }
     }
 }
 
 impl Key {
-    /// Whether the key's signature has flats, so that its notes are spelled with flats.
+    /// The tonic's pitch class, 0 (C) to 11; `None` for [`Key::Indefinite`].
+    pub fn root(&self) -> Option<u8> {
+        match *self {
+            Key::Tonal {
+                letter, accidental, ..
+            } => Some(match accidental {
+                Accidental::Natural => letter.pitch_class(),
+                Accidental::Sharp => (letter.pitch_class() + 1) % 12,
+                Accidental::Flat => (letter.pitch_class() + 11) % 12,
+            }),
+            Key::Indefinite => None,
+        }
+    }
+
+    /// Whether the key's signature has flats, so that its notes are spelled with flats: Db
+    /// major and Bb minor do, C# major and A# minor do not.
     pub fn uses_flats(&self) -> bool {
         match *self {
-            // F, B♭, E♭, A♭, D♭, G♭ major.
             Key::Tonal {
-                root,
-                mode: Mode::Major,
-            } => matches!(root, 5 | 10 | 3 | 8 | 1 | 6),
-            // D, G, C, F, B♭, E♭ minor.
-            Key::Tonal {
-                root,
-                mode: Mode::Minor,
-            } => matches!(root, 2 | 7 | 0 | 5 | 10 | 3),
+                letter,
+                accidental,
+                mode,
+            } => {
+                let shift = match accidental {
+                    Accidental::Natural => 0,
+                    Accidental::Sharp => 7,
+                    Accidental::Flat => -7,
+                };
+                // A minor key has the signature of the major key a minor third above.
+                let relative = if mode == Mode::Minor { -3 } else { 0 };
+                letter.fifths() + shift + relative < 0
+            }
             Key::Indefinite => false,
         }
     }
 
-    /// The key's name: "C major", "Bb minor", or "Indefinite".
+    /// The key's name: "C major", "Db major", "A# minor", or "Indefinite".
     pub fn name(&self) -> String {
         match *self {
-            Key::Tonal { root, mode } => {
+            Key::Tonal {
+                letter,
+                accidental,
+                mode,
+            } => {
                 let mode = match mode {
                     Mode::Major => "major",
                     Mode::Minor => "minor",
                 };
-                format!("{} {mode}", pitch_class_name(root, self.uses_flats()))
+                format!("{}{} {mode}", letter.name(), accidental.name())
             }
             Key::Indefinite => "Indefinite".to_owned(),
         }
@@ -97,7 +219,7 @@ impl Notation {
         }
     }
 
-    /// Checks the notation is within the limits: a root of 0 to 11, pitches up to
+    /// Checks the notation is within the limits: pitches up to
     /// [`MAX_PITCH`], and names that are not blank, have no control characters and have at most
     /// [`MAX_NAME_CHARS`] characters.
     ///
@@ -105,13 +227,6 @@ impl Notation {
     ///
     /// [`Error::InvalidNotation`], saying which limit.
     pub fn check(&self) -> Result<(), Error> {
-        if let Key::Tonal { root, .. } = self.key
-            && root > 11
-        {
-            return Err(Error::InvalidNotation(format!(
-                "root {root} is not 0 to 11"
-            )));
-        }
         for (&pitch, name) in &self.names {
             if pitch > MAX_PITCH {
                 return Err(Error::InvalidNotation(format!(
@@ -179,10 +294,7 @@ pub fn note_label(pitch: u8, notation: &Notation) -> String {
 /// The pitches from `low` to `high`, inclusive, whose class is `key`'s root, lowest first; none
 /// for [`Key::Indefinite`].
 pub fn root_pitches(key: &Key, low: u8, high: u8) -> impl Iterator<Item = u8> + use<> {
-    let root = match *key {
-        Key::Tonal { root, .. } => Some(root % 12),
-        Key::Indefinite => None,
-    };
+    let root = key.root();
     (low..=high).filter(move |pitch| root.is_some_and(|root| pitch % 12 == root))
 }
 
@@ -249,10 +361,15 @@ pub fn gm_drum_names() -> BTreeMap<u8, String> {
 mod tests {
     use super::*;
 
-    const C_MAJOR: Key = Key::Tonal {
-        root: 0,
-        mode: Mode::Major,
-    };
+    const C_MAJOR: Key = key(Letter::C, Accidental::Natural, Mode::Major);
+
+    const fn key(letter: Letter, accidental: Accidental, mode: Mode) -> Key {
+        Key::Tonal {
+            letter,
+            accidental,
+            mode,
+        }
+    }
 
     #[test]
     fn test_pitch_name_octaves_follow_middle_c_as_c4() {
@@ -265,38 +382,48 @@ mod tests {
 
     #[test]
     fn test_pitch_name_spells_with_flats_in_flat_keys() {
-        let f_major = Key::Tonal {
-            root: 5,
-            mode: Mode::Major,
-        };
+        let f_major = key(Letter::F, Accidental::Natural, Mode::Major);
         assert_eq!(pitch_name(70, &f_major), "Bb4");
         assert_eq!(pitch_name(70, &C_MAJOR), "A#4");
-        let d_minor = Key::Tonal {
-            root: 2,
-            mode: Mode::Minor,
-        };
+        let d_minor = key(Letter::D, Accidental::Natural, Mode::Minor);
         assert_eq!(pitch_name(70, &d_minor), "Bb4");
-        let e_minor = Key::Tonal {
-            root: 4,
-            mode: Mode::Minor,
-        };
+        let e_minor = key(Letter::E, Accidental::Natural, Mode::Minor);
         assert_eq!(pitch_name(66, &e_minor), "F#4");
     }
 
     #[test]
     fn test_key_name_spells_the_root_for_the_key() {
         assert_eq!(C_MAJOR.name(), "C major");
-        let b_flat = Key::Tonal {
-            root: 10,
-            mode: Mode::Minor,
-        };
+        let b_flat = key(Letter::B, Accidental::Flat, Mode::Minor);
         assert_eq!(b_flat.name(), "Bb minor");
-        let f_sharp = Key::Tonal {
-            root: 6,
-            mode: Mode::Minor,
-        };
+        let f_sharp = key(Letter::F, Accidental::Sharp, Mode::Minor);
         assert_eq!(f_sharp.name(), "F# minor");
         assert_eq!(Key::Indefinite.name(), "Indefinite");
+    }
+
+    #[test]
+    fn test_enharmonic_keys_share_a_root_but_not_a_spelling() {
+        let c_sharp = key(Letter::C, Accidental::Sharp, Mode::Major);
+        let d_flat = key(Letter::D, Accidental::Flat, Mode::Major);
+        assert_eq!((c_sharp.root(), d_flat.root()), (Some(1), Some(1)));
+        assert_eq!(
+            (c_sharp.name(), d_flat.name()),
+            ("C# major".into(), "Db major".into())
+        );
+        assert_eq!(pitch_name(61, &c_sharp), "C#4");
+        assert_eq!(pitch_name(61, &d_flat), "Db4");
+        // A# minor has sharps, Bb minor flats; B# wraps to C, Cb to B.
+        assert!(!key(Letter::A, Accidental::Sharp, Mode::Minor).uses_flats());
+        assert!(key(Letter::B, Accidental::Flat, Mode::Minor).uses_flats());
+        assert_eq!(
+            key(Letter::B, Accidental::Sharp, Mode::Major).root(),
+            Some(0)
+        );
+        assert_eq!(
+            key(Letter::C, Accidental::Flat, Mode::Major).root(),
+            Some(11)
+        );
+        assert_eq!(Key::Indefinite.root(), None);
     }
 
     #[test]
@@ -314,10 +441,7 @@ mod tests {
             root_pitches(&C_MAJOR, 48, 72).collect::<Vec<_>>(),
             [48, 60, 72]
         );
-        let a_minor = Key::Tonal {
-            root: 9,
-            mode: Mode::Minor,
-        };
+        let a_minor = key(Letter::A, Accidental::Natural, Mode::Minor);
         assert_eq!(root_pitches(&a_minor, 50, 70).collect::<Vec<_>>(), [57, 69]);
         assert_eq!(root_pitches(&C_MAJOR, 0, 127).count(), 11);
         assert_eq!(root_pitches(&Key::Indefinite, 0, 127).count(), 0);
@@ -333,14 +457,6 @@ mod tests {
 
     #[test]
     fn test_check_refuses_out_of_range_notation() {
-        let bad_root = Notation {
-            key: Key::Tonal {
-                root: 12,
-                mode: Mode::Major,
-            },
-            names: BTreeMap::new(),
-        };
-        assert!(bad_root.check().is_err());
         for (pitch, name) in [
             (128, "kick".to_owned()),
             (36, "  ".to_owned()),

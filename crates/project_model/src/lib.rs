@@ -57,7 +57,7 @@ mod types;
 pub use edit::Edit;
 pub use error::Error;
 pub use midi::{Control, Note, Sequence};
-pub use notation::{Key, Mode, Notation};
+pub use notation::{Accidental, Key, Letter, Mode, Notation};
 pub use range::{Excerpt, Lane, Range};
 pub use routing::{
     Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId,

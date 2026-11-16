@@ -7,9 +7,10 @@ use std::collections::BTreeSet;
 use iced::widget::text_input;
 use iced::widget::{Space, button, column, container, opaque, row, scrollable, slider, text};
 use iced::{Alignment, Element, Fill, Length};
-use project_model::notation::{self, MAX_NAME_CHARS, pitch_class_name, pitch_name};
+use project_model::notation::{self, MAX_NAME_CHARS, pitch_name};
 use project_model::{
-    Endpoint, Grid, Key, Mode, NodeKind, Notation, Source, State, Track, TrackId, TrackKind,
+    Accidental, Endpoint, Grid, Key, Letter, Mode, NodeKind, Notation, Source, State, Track,
+    TrackId, TrackKind,
 };
 
 use crate::app::{App, Message};
@@ -28,8 +29,8 @@ pub(crate) const GRIDS: [(Grid, &str); 4] = [
     (Grid::Sixteenth, "1/16"),
 ];
 
-/// The key dialog's width, in logical pixels: room for twelve root buttons.
-pub(crate) const KEY_DIALOG_WIDTH: f32 = 400.0;
+/// The key dialog's width, in logical pixels.
+pub(crate) const KEY_DIALOG_WIDTH: f32 = 420.0;
 
 /// The height of the key dialog's list of pitch names, in logical pixels.
 const NAME_LIST_HEIGHT: f32 = 240.0;
@@ -64,13 +65,36 @@ pub(crate) fn listed_pitches(track: &Track) -> Vec<u8> {
     pitches.into_iter().collect()
 }
 
-/// The key a mode button picks from `current`: a tonal mode keeps the root (C coming from
+/// The key a mode button picks from `current`: a tonal mode keeps the tonic (C coming from
 /// indefinite).
 fn with_mode(current: Key, mode: Option<Mode>) -> Key {
     match (mode, current) {
         (None, _) => Key::Indefinite,
-        (Some(mode), Key::Tonal { root, .. }) => Key::Tonal { root, mode },
-        (Some(mode), Key::Indefinite) => Key::Tonal { root: 0, mode },
+        (
+            Some(mode),
+            Key::Tonal {
+                letter, accidental, ..
+            },
+        ) => Key::Tonal {
+            letter,
+            accidental,
+            mode,
+        },
+        (Some(mode), Key::Indefinite) => Key::Tonal {
+            letter: Letter::C,
+            accidental: Accidental::Natural,
+            mode,
+        },
+    }
+}
+
+/// The accidental a press on the sharp or flat button (`pressed`) leaves: pressing the lit one
+/// clears it, pressing the other switches to it.
+fn toggle_accidental(current: Accidental, pressed: Accidental) -> Accidental {
+    if current == pressed {
+        Accidental::Natural
+    } else {
+        pressed
     }
 }
 
@@ -237,7 +261,7 @@ impl App {
     }
 
     /// The key dialog of MIDI track `track`: Major, Minor or Indefinite; for a tonal key, its
-    /// root; for an indefinite one, a name for each pitch the track plays or has named. Every
+    /// tonic's letter and a sharp or flat; for an indefinite one, a name for each pitch the track plays or has named. Every
     /// choice applies at once; a click elsewhere closes it.
     pub(crate) fn key_dialog(&self, track: TrackId) -> Element<'_, Message> {
         let Some(target) = self.session.state().track(track) else {
@@ -259,18 +283,45 @@ impl App {
             .collect();
         let mut body = column![label("Key"), group(modes)].spacing(6);
         match key {
-            Key::Tonal { root, mode } => {
-                let roots = (0..12u8)
-                    .map(|class| {
-                        let picked = Key::Tonal { root: class, mode };
+            Key::Tonal {
+                letter,
+                accidental,
+                mode,
+            } => {
+                let letters = Letter::ALL
+                    .into_iter()
+                    .map(|choice| {
+                        let picked = Key::Tonal {
+                            letter: choice,
+                            accidental,
+                            mode,
+                        };
                         (
-                            Face::Label(pitch_class_name(class, picked.uses_flats())),
+                            Face::Label(choice.name()),
                             Some(Message::SetKey(track, picked)),
-                            class == root,
+                            choice == letter,
                         )
                     })
                     .collect();
-                body = body.push(label("Root")).push(group(roots));
+                let accidentals = [Accidental::Sharp, Accidental::Flat]
+                    .into_iter()
+                    .map(|choice| {
+                        let picked = Key::Tonal {
+                            letter,
+                            accidental: toggle_accidental(accidental, choice),
+                            mode,
+                        };
+                        (
+                            Face::Label(choice.name()),
+                            Some(Message::SetKey(track, picked)),
+                            choice == accidental,
+                        )
+                    })
+                    .collect();
+                body = body
+                    .push(label("Tonic"))
+                    .push(group(letters))
+                    .push(group(accidentals));
             }
             Key::Indefinite => {
                 let rows = listed_pitches(target).into_iter().map(|pitch| {
@@ -410,21 +461,29 @@ mod tests {
     }
 
     #[test]
-    fn test_with_mode_keeps_the_root() {
-        let d_minor = Key::Tonal {
-            root: 2,
-            mode: Mode::Minor,
+    fn test_with_mode_keeps_the_tonic() {
+        let d_flat = |mode| Key::Tonal {
+            letter: Letter::D,
+            accidental: Accidental::Flat,
+            mode,
         };
-        let d_major = Key::Tonal {
-            root: 2,
-            mode: Mode::Major,
-        };
+        let (d_minor, d_major) = (d_flat(Mode::Minor), d_flat(Mode::Major));
         assert_eq!(with_mode(d_minor, Some(Mode::Major)), d_major);
         assert_eq!(with_mode(d_minor, None), Key::Indefinite);
         assert_eq!(
             with_mode(Key::Indefinite, Some(Mode::Minor)).name(),
             "C minor"
         );
+    }
+
+    #[test]
+    fn test_toggle_accidental_keeps_sharp_and_flat_exclusive() {
+        use Accidental::{Flat, Natural, Sharp};
+        assert_eq!(toggle_accidental(Natural, Sharp), Sharp);
+        assert_eq!(toggle_accidental(Sharp, Sharp), Natural);
+        assert_eq!(toggle_accidental(Sharp, Flat), Flat);
+        assert_eq!(toggle_accidental(Flat, Flat), Natural);
+        assert_eq!(toggle_accidental(Flat, Sharp), Sharp);
     }
 
     #[test]

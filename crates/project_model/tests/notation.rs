@@ -3,7 +3,7 @@
 use std::error::Error as StdError;
 
 use audio_buffers::Layout;
-use project_model::{Error, Key, Mode, Notation, Session};
+use project_model::{Accidental, Error, Key, Letter, Mode, Notation, Session};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -30,7 +30,8 @@ fn test_set_notation_is_one_undo_step() -> TestResult {
     let track = session.add_midi_track("m")?;
     let a_minor = Notation {
         key: Key::Tonal {
-            root: 9,
+            letter: Letter::A,
+            accidental: Accidental::Natural,
             mode: Mode::Minor,
         },
         names: Default::default(),

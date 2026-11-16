@@ -36,18 +36,20 @@ recording, during a drag, or after the lanes are redrawn
 
 ## Key and pitch names
 
-Every MIDI track has a key (`project_model::Notation`): a root pitch class and major or minor, or
-indefinite. A new MIDI track is in C major with no names. Pitches are named with middle C, MIDI
-60, as "C4" (octave = pitch / 12 − 1, so 0 is "C-1" and 127 is "G9"), in ASCII: flats ("Bb") in
-F, B♭, E♭, A♭, D♭ and G♭ major and D, G, C, F, B♭ and E♭ minor, sharps ("C#") in the other keys
-and under an indefinite key. A track may name pitches 0–127; a name is 1 to 32 characters, not
+Every MIDI track has a key (`project_model::Notation`): a tonic, spelled as a letter A–G with no
+accidental, a sharp or a flat, and major or minor; or indefinite. Enharmonic tonics (C# and Db)
+are different keys with the same root. A new MIDI track is in C major with no names. Pitches are
+named with middle C, MIDI 60, as "C4" (octave = pitch / 12 − 1, so 0 is "C-1" and 127 is "G9"),
+in ASCII: flats ("Bb") in keys whose signature has flats (Db major, Bb minor), sharps ("C#") in
+the other keys (C# major, A# minor) and under an indefinite key. A track may name pitches 0–127; a name is 1 to 32 characters, not
 blank, with no control characters. Names are kept under a tonal key but shown only under an
 indefinite one. The key and names change only the display, never what plays.
 
 A MIDI track's ≡ menu has "Key: <key>…" above its instrument entries, available while playing too.
 It opens the key dialog beside the track header: Major, Minor and Indefinite, then for a tonal key
-twelve root buttons spelled for the mode, or for an indefinite key a scrolling list of the pitches
-the track's clips play and those already named, each with a name field, and "Reset to GM drums".
+a row of the letters A to G and below it a "#" and "b" pair, at most one lit: pressing the lit one
+clears it, pressing the other switches to it. For an indefinite key it lists the pitches the
+track's clips play and those already named, each with a name field, and "Reset to GM drums".
 Every choice applies at once through `project_model::Session::set_notation`, one undo step each,
 and leaves the dialog open; Done or a click outside closes it. Choosing Indefinite on a track with
 no names names the General MIDI drum pitches 35–81 (`project_model::notation::GM_DRUMS`). A typed

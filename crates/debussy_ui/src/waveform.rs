@@ -1002,7 +1002,8 @@ mod tests {
         assert_eq!(rows, [(48, "C3"), (60, "C4"), (72, "C5")]);
         track.notation = Some(project_model::Notation {
             key: Key::Tonal {
-                root: 9,
+                letter: project_model::Letter::A,
+                accidental: project_model::Accidental::Natural,
                 mode: project_model::Mode::Minor,
             },
             names: Default::default(),

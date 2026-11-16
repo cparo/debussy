@@ -187,7 +187,6 @@ fn test_open_reads_key_and_names_and_refuses_bad_ones() -> Result<(), Box<dyn Er
     };
     assert_eq!(notation, Some(expected));
     for bad in [
-        r#"{"kind":"midi","key":{"mode":"major","root":12},"names":[]}"#,
         r#"{"kind":"midi","key":{"mode":"indefinite"},"names":[{"pitch":200,"name":"x"}]}"#,
         r#"{"kind":"midi","key":{"mode":"indefinite"},"names":[{"pitch":36,"name":""}]}"#,
     ] {
@@ -199,7 +198,9 @@ fn test_open_reads_key_and_names_and_refuses_bad_ones() -> Result<(), Box<dyn Er
     }
     let error = open_with(
         &path,
-        &notation_project(r#"{"kind":"midi","key":{"mode":"lydian","root":0},"names":[]}"#),
+        &notation_project(
+            r#"{"kind":"midi","key":{"mode":"major","letter":"h","accidental":"natural"},"names":[]}"#,
+        ),
     )?;
     assert!(matches!(error, StorageError::Json { .. }), "{error}");
     Ok(())

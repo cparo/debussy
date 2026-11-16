@@ -118,7 +118,7 @@ fn eight_to_nine(mut value: Value) -> Result<Value, String> {
             {
                 kind.insert(
                     "key".to_owned(),
-                    serde_json::json!({"mode": "major", "root": 0}),
+                    serde_json::json!({"mode": "major", "letter": "c", "accidental": "natural"}),
                 );
                 kind.insert("names".to_owned(), Value::Array(Vec::new()));
             }
@@ -211,7 +211,7 @@ fn depth(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{SavedKey, SavedLayout, SavedTrackKind};
+    use crate::format::{SavedAccidental, SavedKey, SavedLayout, SavedLetter, SavedTrackKind};
     use std::error::Error as StdError;
 
     const V1: &str =
@@ -312,7 +312,10 @@ mod tests {
 
     fn c_major() -> SavedTrackKind {
         SavedTrackKind::Midi {
-            key: SavedKey::Major { root: 0 },
+            key: SavedKey::Major {
+                letter: SavedLetter::C,
+                accidental: SavedAccidental::Natural,
+            },
             names: Vec::new(),
         }
     }

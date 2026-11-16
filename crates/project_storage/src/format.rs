@@ -118,16 +118,45 @@ pub(crate) enum SavedTrackKind {
 }
 
 /// Since version 9: a MIDI track's key (`docs/architecture/track-pane.md` "Key and pitch
-/// names"), as `{"mode": "major", "root": 0}` or `{"mode": "indefinite"}`.
+/// names"), as `{"mode": "major", "letter": "d", "accidental": "flat"}` or
+/// `{"mode": "indefinite"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SavedKey {
-    /// A major key; `root` is the pitch class, 0 (C) to 11.
-    Major { root: u8 },
-    /// A minor key; `root` is the pitch class, 0 (C) to 11.
-    Minor { root: u8 },
+    /// A major key on this tonic.
+    Major {
+        letter: SavedLetter,
+        accidental: SavedAccidental,
+    },
+    /// A minor key on this tonic.
+    Minor {
+        letter: SavedLetter,
+        accidental: SavedAccidental,
+    },
     /// A struct variant, not a unit one, so that unknown fields are refused.
     Indefinite {},
+}
+
+/// Since version 9: a key's tonic letter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SavedLetter {
+    C,
+    D,
+    E,
+    F,
+    G,
+    A,
+    B,
+}
+
+/// Since version 9: a key's tonic accidental.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SavedAccidental {
+    Natural,
+    Sharp,
+    Flat,
 }
 
 /// Since version 9: the name of one pitch of a MIDI track.

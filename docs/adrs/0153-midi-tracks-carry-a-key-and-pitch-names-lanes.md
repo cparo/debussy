@@ -15,11 +15,12 @@ than notes. Issue #192 asked for both, and for a way to read one note's name wit
 
 ## Decision
 
-- **A key per MIDI track.** Every MIDI track carries a `Notation`: a key (root pitch class and
-  major or minor, or **Indefinite**) and a map of pitch names. It is a field of `Track`
+- **A key per MIDI track.** Every MIDI track carries a `Notation`: a key (a tonic spelled as a
+  letter and an accidental — none, sharp or flat — with major or minor, or **Indefinite**) and a
+  map of pitch names. Enharmonic tonics such as C# and Db are distinct keys. It is a field of `Track`
   (`None` on audio tracks), set by its own edit, `Edit::SetNotation`, one undo step.
-- **Standard pitch names.** Middle C, MIDI 60, is C4. Flat-signature keys spell with flats,
-  others and Indefinite with sharps, in ASCII (`#`, `b`), which every interface font has.
+- **Standard pitch names.** Middle C, MIDI 60, is C4. Keys whose signature has flats (from the
+  tonic's place on the circle of fifths) spell with flats, others and Indefinite with sharps, in ASCII (`#`, `b`), which every interface font has.
 - **Lanes label roots, or named pitches.** A tonal lane draws a line and label on each root in
   view; an Indefinite lane on each named pitch instead. They are vectors in the cursor layer, so
   they draw over the lane image and need no raster redraw.
@@ -27,7 +28,8 @@ than notes. Issue #192 asked for both, and for a way to read one note's name wit
   pitches 35–81 after the GM drum map; every name can be edited or cleared, and reset. Names
   survive a switch to a tonal key but show only while Indefinite.
 - **A dialog, not a submenu.** The key and names are edited in a "Key…" dialog opened from the
-  MIDI track's ≡ menu, which has no submenus. Each choice applies at once. It is allowed while
+  MIDI track's ≡ menu, which has no submenus. The tonic is a row of letters A–G and a strip of
+  `#` and `b`, mutually exclusive toggles. Each choice applies at once. It is allowed while
   playing, as it changes only the display.
 - **A tooltip while stopped.** Hovering a note while stopped shows its label; the lane reports
   only changes of the hovered note, not every move. Nothing shows while playing or recording.
@@ -47,6 +49,10 @@ than notes. Issue #192 asked for both, and for a way to read one note's name wit
 - **Keep the key for the session only.** Rejected: a drum map typed by hand would be lost on
   reopening; the format change was approved for this.
 - **Unicode ♯ and ♭.** Rejected for now: not every face the interface may draw with has them.
+- **A root pitch class (0–11) with spelling derived from it.** Rejected: it cannot tell C# major
+  from Db major, and twelve root buttons did not fit the dialog.
+- **Double sharps and flats, or enharmonic letters in pitch names.** Not done: pitch names use
+  only the key's sharp-or-flat preference, so B# major labels its roots "C".
 
 ## Consequences
 
