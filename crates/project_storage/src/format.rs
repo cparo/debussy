@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 10;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,7 +118,7 @@ pub(crate) enum SavedTrackKind {
 }
 
 /// Since version 9: a MIDI track's key (`docs/architecture/track-pane.md` "Key and pitch
-/// names"), as `{"mode": "major", "letter": "d", "accidental": "flat"}` or
+/// names"); since version 10 always as `{"mode": "major", "letter": "d", "accidental": "flat"}` or
 /// `{"mode": "indefinite"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]

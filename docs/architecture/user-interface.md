@@ -30,7 +30,8 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   (see [Project archives](project.md#project-archives)), and quit.
 - **Bottom bar:** the audio device button, mono/stereo listening, play/pause, stop, record (see
   [Recording](#recording)), the click button, the position bar, the playhead's time, and the
-  status line ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)). The
+  status line ([ADR-0080](../adrs/0080-record-and-arm-are-lit-in-a-fixed-recording-red.md)),
+  whose text, like the start screen's, can be selected and copied. The
   audio device button opens a menu of the devices present, re-read on opening, the one in use
   ticked. The click button is lit while the click is on and opens the click dialog above it: the
   click on or off, the tempo field in BPM, the meter as two pickers (beats per bar over beat

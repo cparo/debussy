@@ -183,6 +183,23 @@ pub fn popup(theme: &Theme) -> container::Style {
     }
 }
 
+/// Read-only text that can be selected and copied: a text input drawn as plain text, its
+/// selection in the audio colour.
+pub fn plain_text(
+    theme: &Theme,
+    _status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    let t = tokens(tone_of(theme));
+    iced::widget::text_input::Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border::default(),
+        icon: t.text,
+        placeholder: t.text,
+        value: t.text,
+        selection: Color { a: 0.4, ..t.audio },
+    }
+}
+
 /// A dialog that fills a pane: chrome abutting the bars and divider, with no outline, rounding
 /// or shadow.
 pub fn panel(theme: &Theme) -> container::Style {

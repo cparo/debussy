@@ -229,7 +229,9 @@ kind carries a `key` (`{"mode":"major"|"minor","letter":"a"–"g","accidental":"
 or `{"mode":"indefinite"}`) and
 `names`, `{"pitch","name"}` pairs in strictly ascending pitch order within the limits of
 `docs/architecture/track-pane.md` "Key and pitch names"; version 8 MIDI tracks migrate to C major
-with no names ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)). Times are
+with no names. Version 10 requires the key's `letter` and `accidental`; a version 9 key given as a
+pitch class `root` (0–11) migrates to the spelling of its key signature, flats in F, Bb, Eb, Ab,
+Db and Gb major and D, G, C, F, Bb and Eb minor, sharps otherwise ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving

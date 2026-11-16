@@ -403,7 +403,7 @@ impl Shell {
         let title = if modal { "New project" } else { "Debussy" };
         let mut body = column![text(title).size(18), rate_row, buttons].spacing(16);
         if let Some(status) = &self.status {
-            body = body.push(text(status.as_str()).size(view::TOOL_TEXT));
+            body = body.push(view::selectable(status, view::TOOL_TEXT));
         }
         container(body)
             .padding(16)

@@ -56,7 +56,9 @@ than notes. Issue #192 asked for both, and for a way to read one note's name wit
 
 ## Consequences
 
-- Format version 9; older builds refuse projects saved by this one.
+- Format versions 9 and 10; older builds refuse projects saved by this one. Version 10 exists
+  because development builds of this change saved version 9 keys as a pitch-class `root`; those
+  files migrate to the spelling they were shown with.
 - Names are display only: nothing routes, plays or exports by them.
 - No scale highlighting, other modes, or key changes over time; the key is one per track. A
   per-pitch drum lane view or note entry by name would build on the names.

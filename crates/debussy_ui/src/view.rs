@@ -90,6 +90,16 @@ pub(crate) enum Face<'a> {
     Icon(Icon),
 }
 
+/// `content` at `size`, read-only but selectable, so it can be copied with ⌘C: for errors the
+/// user may want to pass on.
+pub(crate) fn selectable<'a>(content: &str, size: f32) -> Element<'a, Message> {
+    text_input("", content)
+        .size(size)
+        .padding(0)
+        .style(theme::plain_text)
+        .into()
+}
+
 /// A button in a bar showing `face`, sending `message` if there is one.
 pub(crate) fn tool<'a>(
     face: Face<'a>,
@@ -490,7 +500,7 @@ impl App {
             self.status()
         };
         if let Some(status) = status {
-            bar = bar.push(gap(12.0)).push(text(status.to_owned()).size(13));
+            bar = bar.push(gap(12.0)).push(selectable(status, 13.0));
         }
         container(bar)
             .padding([0, 12])

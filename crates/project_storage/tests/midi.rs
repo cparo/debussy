@@ -165,9 +165,9 @@ fn test_open_refuses_untrusted_midi() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// A version 9 project with one MIDI track of `kind` and no clips.
+/// A version 10 project with one MIDI track of `kind` and no clips.
 fn notation_project(kind: &str) -> String {
-    project(&track(1, kind, ""), "").replace("\"format_version\":7", "\"format_version\":9")
+    project(&track(1, kind, ""), "").replace("\"format_version\":7", "\"format_version\":10")
 }
 
 #[test]

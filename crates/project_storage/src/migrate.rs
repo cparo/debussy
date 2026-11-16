@@ -24,6 +24,7 @@ const MIGRATIONS: &[Migration] = &[
     six_to_seven,
     seven_to_eight,
     eight_to_nine,
+    nine_to_ten,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -123,6 +124,70 @@ fn eight_to_nine(mut value: Value) -> Result<Value, String> {
                 kind.insert("names".to_owned(), Value::Array(Vec::new()));
             }
         }
+    }
+    Ok(value)
+}
+
+/// Version 10 spells a key's tonic as a `letter` and `accidental` (ADR-0153). Some version 9
+/// files, saved by development builds, gave it as a pitch class `root` instead; it becomes the
+/// spelling those builds showed: flats in flat-signature keys (F, Bb, Eb, Ab, Db, Gb major; D,
+/// G, C, F, Bb, Eb minor), sharps otherwise. Keys already spelled are left alone.
+fn nine_to_ten(mut value: Value) -> Result<Value, String> {
+    const SHARPS: [(&str, &str); 12] = [
+        ("c", "natural"),
+        ("c", "sharp"),
+        ("d", "natural"),
+        ("d", "sharp"),
+        ("e", "natural"),
+        ("f", "natural"),
+        ("f", "sharp"),
+        ("g", "natural"),
+        ("g", "sharp"),
+        ("a", "natural"),
+        ("a", "sharp"),
+        ("b", "natural"),
+    ];
+    const FLATS: [(&str, &str); 12] = [
+        ("c", "natural"),
+        ("d", "flat"),
+        ("d", "natural"),
+        ("e", "flat"),
+        ("e", "natural"),
+        ("f", "natural"),
+        ("g", "flat"),
+        ("g", "natural"),
+        ("a", "flat"),
+        ("a", "natural"),
+        ("b", "flat"),
+        ("b", "natural"),
+    ];
+    let Some(tracks) = value.get_mut("tracks").and_then(Value::as_array_mut) else {
+        return Ok(value);
+    };
+    for track in tracks {
+        let key = track
+            .get_mut("kind")
+            .and_then(|kind| kind.get_mut("key"))
+            .and_then(Value::as_object_mut);
+        let Some(key) = key else {
+            continue;
+        };
+        let Some(root) = key.get("root").and_then(Value::as_u64) else {
+            continue;
+        };
+        let index = usize::try_from(root)
+            .ok()
+            .filter(|&r| r < 12)
+            .ok_or_else(|| format!("a key has root {root}, not 0 to 11"))?;
+        let flats = match key.get("mode").and_then(Value::as_str) {
+            Some("major") => matches!(index, 5 | 10 | 3 | 8 | 1 | 6),
+            Some("minor") => matches!(index, 2 | 7 | 0 | 5 | 10 | 3),
+            _ => false,
+        };
+        let (letter, accidental) = if flats { FLATS } else { SHARPS }[index];
+        key.remove("root");
+        key.insert("letter".to_owned(), Value::from(letter));
+        key.insert("accidental".to_owned(), Value::from(accidental));
     }
     Ok(value)
 }
@@ -346,6 +411,67 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_nine_roots_to_spelled_tonics() -> Result<(), Box<dyn StdError>> {
+        let track = |id: u64, key: &str| {
+            format!(
+                r#"{{"id":{id},"name":"m","kind":{{"kind":"midi","key":{key},"names":[]}},"clips":[]}}"#
+            )
+        };
+        let tracks = [
+            track(1, r#"{"mode":"major","root":1}"#),
+            track(2, r#"{"mode":"minor","root":1}"#),
+            track(3, r#"{"mode":"minor","root":10}"#),
+            track(4, r#"{"mode":"major","letter":"c","accidental":"sharp"}"#),
+            track(5, r#"{"mode":"indefinite"}"#),
+        ]
+        .join(",");
+        let v9 = format!(
+            r#"{{"format_version":9,"sample_rate":48000,"connections":[],"nodes":[],
+            "tracks":[{tracks}],"tempo":{{"bpm":90.0,"beats_per_bar":3,"beat_unit":4}},
+            "curves":[],"sequences":[]}}"#
+        );
+        let saved = parse(Path::new("p"), &v9)?;
+        assert_eq!(saved.format_version, FORMAT_VERSION);
+        let keys: Vec<_> = saved
+            .tracks
+            .iter()
+            .map(|t| match &t.kind {
+                SavedTrackKind::Midi { key, .. } => Some(*key),
+                SavedTrackKind::Audio { .. } => None,
+            })
+            .collect();
+        let (sharp, flat) = (SavedAccidental::Sharp, SavedAccidental::Flat);
+        assert_eq!(
+            keys,
+            [
+                Some(SavedKey::Major {
+                    letter: SavedLetter::D,
+                    accidental: flat
+                }),
+                Some(SavedKey::Minor {
+                    letter: SavedLetter::C,
+                    accidental: sharp
+                }),
+                Some(SavedKey::Minor {
+                    letter: SavedLetter::B,
+                    accidental: flat
+                }),
+                Some(SavedKey::Major {
+                    letter: SavedLetter::C,
+                    accidental: sharp
+                }),
+                Some(SavedKey::Indefinite {}),
+            ]
+        );
+        let bad = v9.replace(r#""root":1}"#, r#""root":12}"#);
+        assert!(matches!(
+            parse(Path::new("p"), &bad),
+            Err(Error::Invalid { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -353,12 +479,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":10");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":11");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 10,
-                supported: 9,
+                found: 11,
+                supported: 10,
                 ..
             })
         ));
