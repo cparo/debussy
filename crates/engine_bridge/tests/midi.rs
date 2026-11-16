@@ -7,7 +7,7 @@ use audio_buffers::Layout;
 use std::collections::BTreeMap;
 
 use audio_engine::{ControlPoint, MidiTrack, NoteSpan, render};
-use engine_bridge::{Bridge, midi_tracks, render_graph};
+use engine_bridge::{Bridge, Samples, midi_tracks, render_graph};
 use project_model::{Clip, Control, Endpoint, NodeKind, Note, Sequence, Session, Source, TrackId};
 use signal_graph::Config;
 
@@ -58,7 +58,7 @@ fn flattened(clips: Vec<Clip>) -> Result<MidiTrack, Box<dyn Error>> {
     for clip in clips {
         session.add_clip(track, clip)?;
     }
-    let (bridge, _runner) = Bridge::new(session.state(), config())?;
+    let (bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
     let mut tracks = midi_tracks(session.state(), &bridge.event_sources());
     assert_eq!(tracks.len(), 1);
     tracks.pop().ok_or_else(|| "no track".into())
@@ -142,7 +142,7 @@ fn test_render_graph_lists_event_sources() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new_project();
     let audio = session.add_track("audio", Layout::Mono)?;
     let midi: TrackId = session.add_midi_track("keys")?;
-    let graph = render_graph(session.state(), config())?;
+    let graph = render_graph(session.state(), config(), &mut Samples::none())?;
     assert_eq!(
         graph.event_sources.keys().copied().collect::<Vec<_>>(),
         vec![midi]
@@ -174,7 +174,7 @@ fn test_midi_clip_plays_through_the_synth_offline() -> Result<(), Box<dyn Error>
     })?;
     session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
     session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;
-    let mut graph = render_graph(session.state(), config())?;
+    let mut graph = render_graph(session.state(), config(), &mut Samples::none())?;
     let mut midi = midi_tracks(session.state(), &graph.event_sources);
     let (mut left, mut right) = (Vec::new(), Vec::new());
     render(

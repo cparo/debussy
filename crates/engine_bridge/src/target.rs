@@ -2,14 +2,18 @@
 //! each routing node and each automation curve, one per audio connection, and one per control
 //! wire, keyed by the model's ids.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use audio_buffers::Layout;
+use instruments::Playback;
 use modulation::Curve;
 use project_model::{
-    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, Tempo, TrackId,
+    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, SampleZone, Side, Source, State, Tempo,
+    TrackId, ZoneMode,
 };
+
+use crate::sample_loader::Samples;
 
 /// A model element that becomes a graph node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -44,8 +48,8 @@ pub(crate) enum Shape {
     Sink,
     /// A built-in effect by kind id.
     Effect(String),
-    /// A built-in instrument by kind id.
-    Instrument(String),
+    /// A built-in instrument by kind id, with a sampler's zones.
+    Instrument(String, Zones),
     /// An instrument kind this build does not know, as a silent stand-in with an instrument's
     /// ports.
     UnknownInstrument,
@@ -69,6 +73,47 @@ impl Shape {
             Shape::Source(_) | Shape::EventSource | Shape::Sink | Shape::Delay(_) | Shape::Curve
         )
     }
+}
+
+/// A sampler's zones as the model has them, and their samples once loaded
+/// ([`Target::load_samples`]). Two are equal when the model's zones are: loading changes nothing
+/// that would need a new node.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Zones {
+    pub model: Vec<SampleZone>,
+    /// The zones whose files loaded, in the model's order.
+    pub loaded: Arc<[instruments::Zone]>,
+}
+
+impl PartialEq for Zones {
+    fn eq(&self, other: &Self) -> bool {
+        self.model == other.model
+    }
+}
+
+/// The instrument zone `zone` with its samples from `samples` at `rate`; `None`, leaving the
+/// zone silent, if a file does not load.
+fn load_zone(zone: &SampleZone, samples: &mut Samples, rate: u32) -> Option<instruments::Zone> {
+    let (left, right) = match &zone.file {
+        Source::Mono(file) => (samples.load(&file.name, rate)?, None),
+        Source::Stereo { left, right } => (
+            samples.load(&left.name, rate)?,
+            Some(samples.load(&right.name, rate)?),
+        ),
+        Source::Midi(_) => return None,
+    };
+    Some(instruments::Zone {
+        low: zone.low,
+        high: zone.high,
+        root: zone.root,
+        playback: match zone.mode {
+            ZoneMode::OneShot => Playback::OneShot,
+            ZoneMode::Gated => Playback::Gated,
+        },
+        choke: zone.choke,
+        left,
+        right,
+    })
 }
 
 /// One node as the state wants it.
@@ -137,7 +182,34 @@ pub(crate) struct Target {
 }
 
 impl Target {
-    /// The target for `state`.
+    /// Loads every sampler zone's samples from `samples` at `rate`, off the audio thread, and
+    /// forgets cached files no zone uses. A file that does not load leaves its zone out, with a
+    /// warning in `samples`.
+    pub(crate) fn load_samples(&mut self, samples: &mut Samples, rate: u32) {
+        for node in self.nodes.values_mut() {
+            if let Shape::Instrument(_, zones) = &mut node.shape {
+                zones.loaded = zones
+                    .model
+                    .iter()
+                    .filter_map(|z| load_zone(z, samples, rate))
+                    .collect();
+            }
+        }
+        let used: BTreeSet<&str> = self
+            .nodes
+            .values()
+            .filter_map(|n| match &n.shape {
+                Shape::Instrument(_, zones) => Some(&zones.model),
+                _ => None,
+            })
+            .flatten()
+            .flat_map(|z| z.file.files())
+            .map(|f| f.name.as_str())
+            .collect();
+        samples.retain(&used);
+    }
+
+    /// The target for `state`, with no samples loaded yet.
     pub(crate) fn of(state: &State) -> Target {
         let connections: BTreeMap<ConnectionId, ConnectionTarget> = state
             .connections
@@ -204,10 +276,18 @@ impl Target {
                     (shape, parameters.clone(), None)
                 }
                 NodeKind::Instrument {
-                    kind, parameters, ..
+                    kind,
+                    parameters,
+                    zones,
                 } => {
                     let shape = match instruments::instrument(kind) {
-                        Some(_) => Shape::Instrument(kind.clone()),
+                        Some(_) => Shape::Instrument(
+                            kind.clone(),
+                            Zones {
+                                model: zones.clone(),
+                                loaded: Arc::from([]),
+                            },
+                        ),
                         None => Shape::UnknownInstrument,
                     };
                     (shape, parameters.clone(), None)

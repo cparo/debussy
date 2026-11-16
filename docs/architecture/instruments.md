@@ -53,14 +53,38 @@ and [ADR-0149](../adrs/0149-the-synthesizer-is-a-fixed-pool-of-two-oscillator.md
 ## Sampler
 
 `instruments::Sampler`, kind id `sampler`, shown as **Sampler**: plays the project's own audio
-files, mapped to notes by zones.
+files, mapped to notes by zones. Event input 0 takes notes on any channel; stereo output 0 carries
+the voices summed, a stereo zone's channels on their own sides and a mono zone's on both.
 
 - **Zones.** A sampler node carries a list of zones, each a file in the bundle's `audio/`
   directory (mono or stereo), a key range (`low` to `high`, 0–127), a root key, a mode (one-shot or
-  gated) and an optional choke group (1–16). Only a `sampler` instrument has zones; choosing a
-  different instrument removes them. Zone files count as used for cleanup
+  gated) and an optional choke group (1–16), at most 128 zones. Only a `sampler` instrument has
+  zones; choosing a different instrument removes them. Zone files count as used for cleanup
   (`docs/architecture/project.md` "Cleanup").
 - **Loading.** Zone samples are imported like any other audio, at the project rate, and are at
-  most 60 s long. The engine bridge reads them whole into memory off the audio thread and builds a
-  new sampler node when the zones change; a missing or unreadable file leaves its zone silent and
-  is reported as a warning ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)).
+  most 60 s long (`project_model::MAX_ZONE_SECONDS`, enforced by `import_export::import_sample`).
+  The engine bridge reads them whole into memory off the audio thread (`engine_bridge::Samples`,
+  cached by file name) and builds a new sampler node when the zones change; a missing or
+  unreadable file leaves its zone silent and is reported as a warning
+  ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)).
+- **Notes.** A note-on plays the first zone whose range holds the note; a note in no zone is
+  ignored. Voices come from the synthesizer's pool (16 voices, the same choice of voice, steal
+  fade and sustain pedal, `instruments::voices`), except that a repeated note fades its voice out
+  over 3 ms and restarts it rather than retriggering in place. A one-shot zone ignores note-off and
+  the pedal; a gated zone releases through the amplitude envelope.
+- **Playback.** Each voice steps a fractional playhead from the sample's first frame by
+  `2^((note − root + tune + bend · bend range)/12)` frames per sample and reads it by 4-point
+  Hermite interpolation (`dsp::hermite`); frames outside the sample read as zero. A voice frees
+  itself when its playhead passes the end.
+- **Choke.** A note-on in choke group g fades out over 3 ms every other voice sounding, or waiting
+  to start, in group g.
+- **Velocity.** The amplitude envelope peaks at `1 − amp velocity · (1 − velocity)`.
+- **Parameters.** Read once per block; continuous ones are ramped, `voices` is stepped.
+
+  | Group | Parameters |
+  |---|---|
+  | amp envelope | attack, decay, release (1 ms–10 s), sustain (0–1); amp velocity (0–1) |
+  | (none) | tune (±12 st), bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |
+- **Reset.** Every voice falls silent at once, the pedal lifts and the bend returns to centre.
+
+The design follows [ADR-0155](../adrs/0155-the-sampler-s-varispeed-playback-zones-one-shot.md).

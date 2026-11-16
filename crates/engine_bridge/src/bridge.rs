@@ -14,6 +14,7 @@ use signal_graph::{Config, Graph, NodeId as GraphNodeId, Parameter, Runner};
 
 use crate::error::Error;
 use crate::mirror::{Mirror, MirrorError};
+use crate::sample_loader::Samples;
 use crate::target::{Key, Shape, Target};
 
 /// The running processing graph for a project, kept in step with its routing.
@@ -24,6 +25,8 @@ pub struct Bridge {
     pending: bool,
     /// The tracks whose sources are marked live (ADR-0136).
     monitored: BTreeSet<TrackId>,
+    /// Sampler zone files, read whole and cached (ADR-0154).
+    samples: Samples,
 }
 
 /// A graph built from a state, with nothing running it yet: for offline render.
@@ -55,10 +58,21 @@ fn failed(error: MirrorError) -> Error {
     }
 }
 
+/// The target for `state`, its sampler zones loaded from `samples` at `config`'s rate.
+fn target(state: &State, samples: &mut Samples, config: &Config) -> Target {
+    let mut target = Target::of(state);
+    target.load_samples(samples, config.sample_rate);
+    target
+}
+
 /// Builds `state`'s routing into a new graph, checking it.
-fn build(state: &State, config: Config) -> Result<(Graph, Runner, Mirror), Error> {
+fn build(
+    state: &State,
+    config: Config,
+    samples: &mut Samples,
+) -> Result<(Graph, Runner, Mirror), Error> {
     let (mut graph, runner) = Graph::new(config).map_err(Error::Graph)?;
-    let mirror = Mirror::build(&mut graph, &Target::of(state)).map_err(refused)?;
+    let mirror = Mirror::build(&mut graph, &target(state, samples, &config)).map_err(refused)?;
     Ok((graph, runner, mirror))
 }
 
@@ -87,18 +101,24 @@ fn event_sources(mirror: &Mirror) -> BTreeMap<TrackId, GraphNodeId> {
 }
 
 impl Bridge {
-    /// The graph for `state`, committed, and its runner for the real-time side.
+    /// The graph for `state`, committed, and its runner for the real-time side. Sampler zones
+    /// are read through `samples`.
     ///
     /// # Errors
     ///
     /// [`Error::Refused`] if the graph cannot hold the state's routing; [`Error::Graph`].
-    pub fn new(state: &State, config: Config) -> Result<(Bridge, Runner), Error> {
-        let (graph, runner, mirror) = build(state, config)?;
+    pub fn new(
+        state: &State,
+        config: Config,
+        mut samples: Samples,
+    ) -> Result<(Bridge, Runner), Error> {
+        let (graph, runner, mirror) = build(state, config, &mut samples)?;
         let mut bridge = Bridge {
             graph,
             mirror,
             pending: true,
             monitored: BTreeSet::new(),
+            samples,
         };
         bridge.commit()?;
         Ok((bridge, runner))
@@ -158,7 +178,8 @@ impl Bridge {
     ///
     /// [`Error::Refused`]; [`Error::Graph`].
     pub fn sync(&mut self, state: &State) -> Result<(), Error> {
-        let target = Target::of(state);
+        let config = *self.graph.config();
+        let target = target(state, &mut self.samples, &config);
         if target.nodes == self.target_nodes()
             && target.connections == self.target_connections()
             && target.controls == self.target_controls()
@@ -168,7 +189,7 @@ impl Bridge {
         }
         // Check it all in a scratch graph first, so the running graph changes only if it will
         // all succeed.
-        let (mut scratch, _runner) = Graph::new(*self.graph.config()).map_err(Error::Graph)?;
+        let (mut scratch, _runner) = Graph::new(config).map_err(Error::Graph)?;
         Mirror::build(&mut scratch, &target).map_err(refused)?;
         self.mirror.sync(&mut self.graph, &target).map_err(failed)?;
         // A recreated source starts unmarked.
@@ -264,6 +285,17 @@ impl Bridge {
         self.graph.latency()
     }
 
+    /// Where sampler zone files are read from.
+    pub fn samples(&self) -> &Samples {
+        &self.samples
+    }
+
+    /// The warnings gathered since the last call, such as a sampler zone whose file did not
+    /// load, oldest first.
+    pub fn take_warnings(&mut self) -> Vec<String> {
+        self.samples.take_warnings()
+    }
+
     /// The running graph, for inspection.
     pub fn graph(&self) -> &Graph {
         &self.graph
@@ -325,13 +357,18 @@ impl Bridge {
     }
 }
 
-/// A new graph holding `state`'s routing, for offline render (export).
+/// A new graph holding `state`'s routing, for offline render (export), with sampler zones read
+/// through `samples`.
 ///
 /// # Errors
 ///
 /// [`Error::Refused`]; [`Error::Graph`].
-pub fn render_graph(state: &State, config: Config) -> Result<RenderGraph, Error> {
-    let (mut graph, runner, mirror) = build(state, config)?;
+pub fn render_graph(
+    state: &State,
+    config: Config,
+    samples: &mut Samples,
+) -> Result<RenderGraph, Error> {
+    let (mut graph, runner, mirror) = build(state, config, samples)?;
     graph.commit().map_err(Error::Graph)?;
     let output = mirror
         .nodes

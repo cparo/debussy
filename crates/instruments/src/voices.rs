@@ -247,6 +247,18 @@ impl<S: Sound> Pool<S> {
         }
     }
 
+    /// Starts voice `i` fading to silence, with no note to follow, unless it is free or already
+    /// fading to silence.
+    pub fn fade_out(&mut self, i: usize) {
+        let fade = self.fade;
+        if let Some(voice) = self.voices.get_mut(i).filter(|v| !v.is_free()) {
+            voice.pending = None;
+            if voice.fade == 0 {
+                voice.fade = fade;
+            }
+        }
+    }
+
     /// The gain of voice `i` for this sample, 1 unless it is fading, and advances its fade; a
     /// fade that ends starts its pending note from silence, or frees the voice.
     pub fn step_fade(&mut self, i: usize, amount: f32) -> f32 {
@@ -422,5 +434,20 @@ mod tests {
         }
         assert_eq!(p.voices[0].sound.starts, 2);
         assert_eq!(p.voices[0].velocity, 0.5);
+    }
+
+    #[test]
+    fn test_fade_out_frees_the_voice() {
+        let mut p = pool();
+        p.note_on(60, 1.0, 4, 0.0, false, true);
+        p.voices[0].amp.next_value();
+        p.fade_out(0);
+        let mut last = 1.0;
+        while p.voices[0].fade > 0 {
+            let share = p.step_fade(0, 0.0);
+            assert!(share <= last);
+            last = share;
+        }
+        assert!(p.voices[0].is_free());
     }
 }

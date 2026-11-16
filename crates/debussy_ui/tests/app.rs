@@ -21,7 +21,7 @@ use debussy_ui::{
     Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services,
     Spectrum, TakeFiles, TakeStatus, Takes,
 };
-use engine_bridge::Bridge;
+use engine_bridge::{Bridge, Samples};
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
 use platform_interfaces::test_doubles::FakeMidi;
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
@@ -520,7 +520,7 @@ fn app_with(gain_db: f32, recovered: Option<Recovered>) -> Result<Fixture, Box<d
 fn app_over(session: &Session, recovered: Option<Recovered>) -> Result<Fixture, Box<dyn Error>> {
     let mixer = session.state().project_mixer().ok_or("no project mixer")?;
     let session = Session::open(session.state().clone(), BTreeMap::new());
-    let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512))?;
+    let (bridge, runner) = Bridge::new(session.state(), Config::new(48_000, 512), Samples::none())?;
     let output = bridge.output().ok_or("no output")?;
     let (engine, processor) = Engine::new(runner, output, 48_000)?;
     let calls = Rc::new(RefCell::new(Calls {

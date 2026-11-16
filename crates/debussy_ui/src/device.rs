@@ -13,7 +13,8 @@ impl App {
     /// id, or with `None` on the remembered device if present, else the default output.
     pub(crate) fn recover_audio(&mut self, device: Option<&str>) {
         let config = *self.bridge.graph().config();
-        let rebuilt = Bridge::new(self.session.state(), config)
+        let samples = self.bridge.samples().same_directory();
+        let rebuilt = Bridge::new(self.session.state(), config, samples)
             .map_err(|e| e.to_string())
             .and_then(|(bridge, runner)| {
                 let output = bridge.output().ok_or("the project has no output")?;

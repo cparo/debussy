@@ -480,7 +480,7 @@ mod tests {
 
     use audio_analysis::Bucket;
     use audio_engine::{Engine, Processor, Streams, TrackFeeds};
-    use engine_bridge::Bridge;
+    use engine_bridge::{Bridge, Samples};
     use project_model::{Session, State, TrackId};
     use signal_graph::{Config, NodeId};
 
@@ -626,7 +626,8 @@ mod tests {
     /// An empty project's app at `rate`.
     fn app(rate: u32) -> Result<App, Box<dyn Error>> {
         let session = Session::new_project();
-        let (bridge, runner) = Bridge::new(session.state(), Config::new(rate, 512))?;
+        let (bridge, runner) =
+            Bridge::new(session.state(), Config::new(rate, 512), Samples::none())?;
         let output = bridge.output().ok_or("no output")?;
         let (engine, processor) = Engine::new(runner, output, rate)?;
         let services = Box::new(Quiet {
