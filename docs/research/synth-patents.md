@@ -56,7 +56,7 @@ pass the same day). Per-claim reading under Claim analysis.
 | 1d. Two oscillators per voice, summed | **Does not read** claims 28, 43, 58, 59 (hard sync): the design has no second waveform whose discontinuity phase depends on another waveform's event. | High |
 | 2, 6. Envelope, LFO | No in-force candidate touches them, so no claims were read (LFO cleared by ADR-0119). | Low for 2 (search gaps in Open uncertainties) |
 | 4. Voice allocation and stealing | **Does not read** US8017856B2 (Roland, to 2029-07-12). Every independent claim needs several timbre "parts" per note: claims 1, 14, 20, 26 assign several parts to one sound; claims 10, 16, 22 need "a plurality of parts comprising different timbers" reassigned among the sounding notes. The design gives each note one voice, all voices play the same patch, and nothing is stacked. | High for the claims (search gaps for element 4 in Open uncertainties) |
-| 5. Pitch, bend, velocity, CC 64 | **Does not read** EP2775475B1 (Yamaha), nor its US family member US9064485B2 (same independent claim structure; not in the Candidates table). Claims 1, 10 and 11 need chord information, a check that a tone's pitch glides from a first note pitch to a second, and conversion of both pitches to fit the chord. The design has no chord input and makes no such check. Google lists the EP as "Not-in-force", which disagrees with the Status column (Open uncertainties). | High for the claims |
+| 5. Pitch, bend, velocity, CC 64 | **Does not read** EP2775475B1 (Yamaha), nor its US family member US9064485B2 (candidate 5, in force; same independent claim structure, read in short pieces only, Medium confidence). Claims 1, 10 and 11 need chord information, a check that a tone's pitch glides from a first note pitch to a second, and conversion of both pitches to fit the chord. The design has no chord input and makes no such check. Google lists the EP as "Not-in-force", which disagrees with the Status column (Open uncertainties). | High for the claims |
 | 3. Filter (per-sample cutoff modulation of `dsp::Svf`) | **Does not read** US11202147B2, carried over from `docs/research/eq-filter-patents.md`: its claims need a resonant frequency modulated through zero into negative frequency. The synth modulates cutoff every sample in log2 Hz (always positive) and clamps it below 0.49·fs. | High |
 
 ## Prior art
@@ -165,9 +165,10 @@ in by a human from Google Patents or USPTO Patent Center.
 | 1 | US7589272B2, Bandlimited digital synthesis of analog waveforms (publication US20060145733A1; JP counterpart JP2005375217A, priority 2005-12-27) | Korg Inc (inventors Leary, Bright) | 2005-01-03 / 2005-01-03; granted 2009-09-15 | 2028-07-04 (Google, adjusted) | 1 (a sum of a naive saw/square/pulse with an alias-reducing pulse around each discontinuity, "odd symmetric" and "essentially no DC bias" per claims 1, 2, 15) | [GP](https://patents.google.com/patent/US7589272B2/en) || In force |
 | 2 | US11202147B2, Audio filter with through-zero linearly variable resonant frequency (see `docs/research/eq-filter-patents.md` row 1) | Rossum Electro-Music LLC | 2018-12-26 / 2019-12-20 | 2039-12-20 (as in that note; term adjustment not seen) | 3 (SVF with trapezoidal integration and modulated cutoff) | [GP](https://patents.google.com/patent/US11202147B2/en) || In force |
 | 3 | US8017856B2, Electronic musical instrument (publication US20100077908A1; Japanese priority 2008-250239). Abstract: in a "Unison 2" mode four instrument parts are assigned to the depressed notes and divided among them as evenly as possible. Claims not read. | Roland Corp (inventor Tanaka) | 2008-09-29 / 2009-05-18; granted 2011-09-13 | 2029-07-12 (Google, adjusted) | 4 (marginal: assignment of voices to depressed notes, CPC G10H 1/18; the design has no unison parts and allocates by free, releasing, oldest, so a reading is unlikely) | [GP](https://patents.google.com/patent/US8017856B2/en) || In force |
-| 4 | EP2775475A1 / B1 (granted 2017-05-03), In a music synthesizer, diatonic scalar transposition, or pitch bend according to chord type. Abstract: pitch-bend target pitch identified and converted according to chord. Claims not read; no US counterpart seen. | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / 2014-03-05 | 2034-03-05 (Google) | 5 (marginal: pitch bend handling, but chord-based conversion of the bend target; the design scales the bend by a semitone range with no chord logic) | [GP](https://patents.google.com/patent/EP2775475A1/en) || In force |
+| 4 | EP2775475A1 / B1 (granted 2017-05-03), In a music synthesizer, diatonic scalar transposition, or pitch bend according to chord type. Abstract: pitch-bend target pitch identified and converted according to chord. Claims not read; no US counterpart seen. | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / 2014-03-05 | 2034-03-05 (Google) | 5 (marginal: pitch bend handling, but chord-based conversion of the bend target; the design scales the bend by a semitone range with no chord logic) | [GP](https://patents.google.com/patent/EP2775475A1/en) || Not in force |
+| 5 | US9064485B2, US family member of candidate 4 (pitch bend according to chord type) | Yamaha Corp (inventor Yamauchi) | 2013-03-06 / see GP | 2034-03-06 (Google) | 5 (pitch bend) | [GP](https://patents.google.com/patent/US9064485B2/en) | In force |
 
-Statuses checked by Chris Paro on 2026-11-16: all four candidates are in force.
+Statuses checked by Chris Paro on 2026-11-16: candidates 1, 2, 3 and 5 are in force; candidate 4 (EP2775475B1) is not in force.
 
 Status values: **In force**, **Lapsed (fees)**, **Expired (term)**, **Abandoned**, **Invalidated**,
 **Not found**. Record who checked and when, under the table.
@@ -623,13 +624,10 @@ comes from a web search or a citation list.
   Google's HTML, in short pieces, and possibly OCR. Claims 10 and 14 came back as element lists.
   Compare them with the USPTO grant PDF before relying on them. (c) Adding unison, layered patches
   or multitimbral splits before 2029-07-12 needs a new reading.
-- Candidate 4 (EP2775475B1) **does not read** (stage 2). For a human: (a) Google lists it as
-  "Not-in-force", but the Status column says In force (Chris Paro, 2026-11-16). Check the EP
-  Register for lapses by country. The verdict holds either way. (b) Its US family member
-  US9064485B2 (Google: Active, to 2034-03-06) is not in the Candidates table. Its independent
-  claims also need chord information and a glide determination, but I saw them only in short
-  pieces. A human should add it as a candidate with its status and confirm its claims from the
-  USPTO text. (c) The EP claims were read in English only, from Google's HTML, possibly OCR; claims
+- Candidate 4 (EP2775475B1) **does not read** (stage 2), and Chris Paro found it not in force
+  (2026-11-16). (b) Its US family member US9064485B2 is candidate 5, in force. Its independent
+  claims also need chord information and a glide determination, but they were seen only in short
+  pieces; confirming them from the USPTO text remains open. (c) The EP claims were read in English only, from Google's HTML, possibly OCR; claims
   10 and 11 only as pieces. The authentic text is the EPO B1 publication, which was not opened.
 - Term ends are as Google prints them (Google says they are assumptions). Candidate 1's adjusted
   date 2028-07-04 was not checked against the USPTO record; terminal disclaimers and fee lapse
