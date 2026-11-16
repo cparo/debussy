@@ -24,6 +24,38 @@ lane's height spans the lowest to the highest pitch in view, widened evenly to a
 semitones within 0–127, highest at the top. It is drawn on the lane's raster, as waveforms are,
 and redrawn with the other lanes ([ADR-0152](../adrs/0152-midi-clips-are-edited-through-range-selection.md)).
 
+Over the lane, in the layer above its image, each labelled pitch in view gets a hairline in the
+text colour across the lane and a small label at its left edge: under a tonal key each pitch
+that is the key's root ("C3", "C4"), under an indefinite key each named pitch ("kick"). A label
+that would crowd the one below it is left out; its line stays. Bars, lines and hit tests share
+one placement of each pitch's row. While stopped, a pointer within 3 pixels of a note bar, or
+within half its row where rows are taller, shows a tooltip beside the note with its label
+(`project_model::notation::note_label`), kept inside the lane; there is none while playing or
+recording, during a drag, or after the lanes are redrawn
+([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)).
+
+## Key and pitch names
+
+Every MIDI track has a key (`project_model::Notation`): a tonic, spelled as a letter A–G with no
+accidental, a sharp or a flat, and major or minor; or indefinite. Enharmonic tonics (C# and Db)
+are different keys with the same root. A new MIDI track is in C major with no names. Pitches are
+named with middle C, MIDI 60, as "C4" (octave = pitch / 12 − 1, so 0 is "C-1" and 127 is "G9"),
+in ASCII: flats ("Bb") in keys whose signature has flats (Db major, Bb minor), sharps ("C#") in
+the other keys (C# major, A# minor) and under an indefinite key. A track may name pitches 0–127; a name is 1 to 32 characters, not
+blank, with no control characters. Names are kept under a tonal key but shown only under an
+indefinite one. The key and names change only the display, never what plays.
+
+A MIDI track's ≡ menu has "Key: <key>…" above its instrument entries, available while playing too.
+It opens the key dialog beside the track header: Major, Minor and Indefinite, then for a tonal key
+a row of the letters A to G and below it a "#" and "b" pair, at most one lit: pressing the lit one
+clears it, pressing the other switches to it. For an indefinite key it lists the pitches the
+track's clips play and those already named, each with a name field, and "Reset to GM drums".
+Every choice applies at once through `project_model::Session::set_notation`, one undo step each,
+and leaves the dialog open; Done or a click outside closes it. Choosing Indefinite on a track with
+no names names the General MIDI drum pitches 35–81 (`project_model::notation::GM_DRUMS`). A typed
+name is recorded, trimmed, on Return or on anything else the user does; an empty one clears the
+name ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)).
+
 ## Quantize
 
 The quantize button, beside cut, copy and paste in the top bar, and the Q key open the quantize

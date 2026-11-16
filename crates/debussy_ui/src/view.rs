@@ -10,6 +10,7 @@ use iced::widget::{
     responsive, row, scrollable, slider, stack, svg, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Padding, Size};
+use project_model::notation::note_label;
 use project_model::{CurveId, Endpoint, NodeKind, Side, TrackId, TrackKind};
 
 use crate::app::{App, Message, NewNode, PaneRow, Renaming};
@@ -18,6 +19,7 @@ use crate::curve_lane::CurveLaneView;
 use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::menu::{Entry, MENU_WIDTH, Menu, burger, dropdown, gap};
+use crate::midi_edit::KEY_DIALOG_WIDTH;
 use crate::node_dialog::{ConfirmFocus, DialogFocus, DialogMessage};
 use crate::patch_board::{
     BoardView, Divider, GUTTER_WIDTH, GutterView, PIN_RADIUS, Selection, gutter_pin_x,
@@ -26,7 +28,7 @@ use crate::recording::METER_FLOOR_DB;
 use crate::services::{MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB};
 use crate::theme::{self, Accent, Place, Tone};
 use crate::transport::PositionBar;
-use crate::waveform::{CursorView, Display, GridView, LaneView};
+use crate::waveform::{CursorView, Display, GridView, LaneView, NoteTip};
 
 /// The height of one channel's lane, in logical pixels.
 pub(crate) const LANE_HEIGHT: f32 = 128.0;
@@ -86,6 +88,16 @@ pub(crate) enum Face<'a> {
     Label(&'a str),
     /// An icon, named in a tooltip.
     Icon(Icon),
+}
+
+/// `content` at `size`, read-only but selectable, so it can be copied with ⌘C: for errors the
+/// user may want to pass on.
+pub(crate) fn selectable<'a>(content: &str, size: f32) -> Element<'a, Message> {
+    text_input("", content)
+        .size(size)
+        .padding(0)
+        .style(theme::plain_text)
+        .into()
 }
 
 /// A button in a bar showing `face`, sending `message` if there is one.
@@ -488,7 +500,7 @@ impl App {
             self.status()
         };
         if let Some(status) = status {
-            bar = bar.push(gap(12.0)).push(text(status.to_owned()).size(13));
+            bar = bar.push(gap(12.0)).push(selectable(status, 13.0));
         }
         container(bar)
             .padding([0, 12])
@@ -869,6 +881,7 @@ impl App {
             scale: self.scale_factor,
         });
         let hidden = self.node_dialog_open();
+        let playing = self.engine().is_playing();
         let mut tracks = column![];
         for (id, lanes) in &self.lanes {
             let Some(track) = self.session().state().track(*id) else {
@@ -887,6 +900,7 @@ impl App {
                 continue;
             }
             for lane in lanes {
+                let hover = self.note_hover.filter(|h| h.track == *id && !playing);
                 let view = LaneView {
                     lane,
                     track: *id,
@@ -895,7 +909,15 @@ impl App {
                     start,
                     span,
                     scale: self.scale_factor,
+                    stopped: !playing,
+                    hovering: hover.is_some(),
                 };
+                let tip = hover
+                    .zip(track.notation.as_ref())
+                    .map(|(h, notation)| NoteTip {
+                        at: iced::Point::new(h.x, h.y),
+                        label: note_label(h.pitch, notation),
+                    });
                 // The cursor is stacked above the lane, in a layer of its own, to draw over
                 // the lane's image.
                 tracks = tracks.push(
@@ -904,7 +926,9 @@ impl App {
                         canvas(CursorView {
                             at: cursor,
                             band,
-                            grid
+                            grid,
+                            notes: lane.midi.as_ref(),
+                            tip,
                         })
                         .width(Fill)
                         .height(Fill),
@@ -943,7 +967,9 @@ impl App {
                     canvas(CursorView {
                         at: cursor,
                         band: None,
-                        grid
+                        grid,
+                        notes: None,
+                        tip: None,
                     })
                     .width(Fill)
                     .height(Fill),
@@ -1117,6 +1143,13 @@ impl App {
                 size.height - BAR_HEIGHT - CLICK_DIALOG_HEIGHT,
             ),
             Menu::Quantize => (QUANTIZE_DIALOG_X, BAR_HEIGHT),
+            Menu::Key(id) => {
+                let (_, y) = self.menu_position(Menu::Track(id), size);
+                // Clamped to the window below, which allows for a menu's width only.
+                let x = (track_pane - KEY_DIALOG_WIDTH - 8.0)
+                    .clamp(0.0, (size.width - KEY_DIALOG_WIDTH).max(0.0));
+                return (x, y);
+            }
             Menu::Device => {
                 let items = self.devices.0.len().max(1) as f32;
                 (
@@ -1172,6 +1205,7 @@ impl App {
                 ];
                 if midi {
                     entries.push(Entry::Separator);
+                    entries.push(self.key_entry(id));
                     entries.extend(self.instrument_entries(id));
                 }
                 entries
@@ -1191,6 +1225,7 @@ impl App {
             ],
             Menu::Click => return self.click_dialog(),
             Menu::Quantize => return self.quantize_dialog(),
+            Menu::Key(id) => return self.key_dialog(id),
             Menu::Device => self.device_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),

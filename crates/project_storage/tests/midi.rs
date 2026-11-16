@@ -164,3 +164,44 @@ fn test_open_refuses_untrusted_midi() -> Result<(), Box<dyn Error>> {
     assert!(Bundle::open(&path).is_ok());
     Ok(())
 }
+
+/// A version 10 project with one MIDI track of `kind` and no clips.
+fn notation_project(kind: &str) -> String {
+    project(&track(1, kind, ""), "").replace("\"format_version\":7", "\"format_version\":10")
+}
+
+#[test]
+fn test_open_reads_key_and_names_and_refuses_bad_ones() -> Result<(), Box<dyn Error>> {
+    use project_model::{Key, Notation};
+    let path = scratch("notation")?;
+    Bundle::create(&path, 48_000)?;
+    let good = notation_project(
+        r#"{"kind":"midi","key":{"mode":"indefinite"},"names":[{"pitch":36,"name":"kick"}]}"#,
+    );
+    fs::write(path.join("project.json"), &good)?;
+    let (_, session) = Bundle::open(&path)?;
+    let notation = session.state().tracks[0].notation.clone();
+    let expected = Notation {
+        key: Key::Indefinite,
+        names: [(36, "kick".to_owned())].into(),
+    };
+    assert_eq!(notation, Some(expected));
+    for bad in [
+        r#"{"kind":"midi","key":{"mode":"indefinite"},"names":[{"pitch":200,"name":"x"}]}"#,
+        r#"{"kind":"midi","key":{"mode":"indefinite"},"names":[{"pitch":36,"name":""}]}"#,
+    ] {
+        let error = open_with(&path, &notation_project(bad))?;
+        assert!(
+            matches!(error, StorageError::Invalid { .. }),
+            "{bad}: {error}"
+        );
+    }
+    let error = open_with(
+        &path,
+        &notation_project(
+            r#"{"kind":"midi","key":{"mode":"major","letter":"h","accidental":"natural"},"names":[]}"#,
+        ),
+    )?;
+    assert!(matches!(error, StorageError::Json { .. }), "{error}");
+    Ok(())
+}

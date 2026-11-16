@@ -1,10 +1,17 @@
-//! Editing MIDI tracks from the track pane (`docs/architecture/track-pane.md` "Quantize" and
-//! "Instrument choice"): the quantize dialog over the range selection, and each MIDI track's
-//! instrument.
+//! Editing MIDI tracks from the track pane (`docs/architecture/track-pane.md` "Quantize",
+//! "Instrument choice" and "Key and pitch names"): the quantize dialog over the range selection,
+//! each MIDI track's instrument, and its key dialog.
 
-use iced::widget::{Space, button, column, container, opaque, row, slider, text};
+use std::collections::BTreeSet;
+
+use iced::widget::text_input;
+use iced::widget::{Space, button, column, container, opaque, row, scrollable, slider, text};
 use iced::{Alignment, Element, Fill, Length};
-use project_model::{Endpoint, Grid, NodeKind, State, TrackId, TrackKind};
+use project_model::notation::{self, MAX_NAME_CHARS, pitch_name};
+use project_model::{
+    Accidental, Endpoint, Grid, Key, Letter, Mode, NodeKind, Notation, Source, State, Track,
+    TrackId, TrackKind,
+};
 
 use crate::app::{App, Message};
 use crate::menu::Entry;
@@ -21,6 +28,75 @@ pub(crate) const GRIDS: [(Grid, &str); 4] = [
     (Grid::Eighth, "1/8"),
     (Grid::Sixteenth, "1/16"),
 ];
+
+/// The key dialog's width, in logical pixels.
+pub(crate) const KEY_DIALOG_WIDTH: f32 = 420.0;
+
+/// The height of the key dialog's list of pitch names, in logical pixels.
+const NAME_LIST_HEIGHT: f32 = 240.0;
+
+/// The key's modes as the dialog offers them.
+const MODES: [(Option<Mode>, &str); 3] = [
+    (Some(Mode::Major), "Major"),
+    (Some(Mode::Minor), "Minor"),
+    (None, "Indefinite"),
+];
+
+/// A track's key and names; C major with none for a track without (an audio track).
+fn notation_of(track: &Track) -> Notation {
+    track.notation.clone().unwrap_or_default()
+}
+
+/// The pitches the key dialog lists for an indefinite track: those its clips play and those
+/// already named, lowest first.
+pub(crate) fn listed_pitches(track: &Track) -> Vec<u8> {
+    let mut pitches: BTreeSet<u8> = track
+        .clips
+        .iter()
+        .filter_map(|(_, clip)| match &clip.source {
+            Source::Midi(sequence) => Some(sequence.notes().iter().map(|n| n.pitch)),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    if let Some(notation) = &track.notation {
+        pitches.extend(notation.names.keys().copied());
+    }
+    pitches.into_iter().collect()
+}
+
+/// The key a mode button picks from `current`: a tonal mode keeps the tonic (C coming from
+/// indefinite).
+fn with_mode(current: Key, mode: Option<Mode>) -> Key {
+    match (mode, current) {
+        (None, _) => Key::Indefinite,
+        (
+            Some(mode),
+            Key::Tonal {
+                letter, accidental, ..
+            },
+        ) => Key::Tonal {
+            letter,
+            accidental,
+            mode,
+        },
+        (Some(mode), Key::Indefinite) => Key::Tonal {
+            letter: Letter::C,
+            accidental: Accidental::Natural,
+            mode,
+        },
+    }
+}
+
+/// The accidental a press on the sharp or flat button (`pressed`) leaves: pressing the lit one
+/// clears it, pressing the other switches to it.
+fn toggle_accidental(current: Accidental, pressed: Accidental) -> Accidental {
+    if current == pressed {
+        Accidental::Natural
+    } else {
+        pressed
+    }
+}
 
 /// The quantize dialog's choices, remembered for the session.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,6 +188,194 @@ impl App {
         self.report(result.map(|_| ()).map_err(|e| e.to_string()));
     }
 
+    /// Sets MIDI track `track`'s key, as one step. Turning indefinite with no names yet names
+    /// the General MIDI drums. Allowed while playing: it changes only the display.
+    pub(crate) fn set_key(&mut self, track: TrackId, key: Key) {
+        let Some(current) = self.session.state().track(track).map(notation_of) else {
+            return;
+        };
+        if current.key == key {
+            return;
+        }
+        let mut notation = Notation { key, ..current };
+        if key == Key::Indefinite && notation.names.is_empty() {
+            notation.names = notation::gm_drum_names();
+        }
+        self.apply_notation(track, notation);
+    }
+
+    /// Names every General MIDI drum pitch of MIDI track `track` again, dropping its other
+    /// names, as one step.
+    pub(crate) fn reset_drum_names(&mut self, track: TrackId) {
+        let Some(current) = self.session.state().track(track).map(notation_of) else {
+            return;
+        };
+        let names = notation::gm_drum_names();
+        if current.names != names {
+            self.apply_notation(track, Notation { names, ..current });
+        }
+    }
+
+    /// Records the pitch name being typed in the key dialog, as one step: trimmed, and an empty
+    /// one clears the name. Nothing happens if none is being typed or it is unchanged.
+    pub(crate) fn commit_key_name(&mut self) {
+        let Some((track, pitch, typed)) = self.key_name.take() else {
+            return;
+        };
+        let Some(mut notation) = self.session.state().track(track).map(notation_of) else {
+            return;
+        };
+        let typed = typed.trim();
+        let changed = if typed.is_empty() {
+            notation.names.remove(&pitch).is_some()
+        } else {
+            notation.names.insert(pitch, typed.to_owned()).as_deref() != Some(typed)
+        };
+        if changed {
+            self.apply_notation(track, notation);
+        }
+    }
+
+    /// Sets `track`'s notation through the bridge, as one step, and redraws the lanes.
+    fn apply_notation(&mut self, track: TrackId, notation: Notation) {
+        let result = self
+            .bridge
+            .edit(&mut self.session, |s| s.set_notation(track, notation));
+        self.report(result.map_err(|e| e.to_string()));
+        self.refresh_lanes();
+    }
+
+    /// The key entry of MIDI track `track`'s ≡ menu, naming its key and opening the key dialog.
+    pub(crate) fn key_entry(&self, track: TrackId) -> Entry {
+        let key = self
+            .session
+            .state()
+            .track(track)
+            .map(notation_of)
+            .unwrap_or_default()
+            .key;
+        Entry::item(
+            format!("Key: {}…", key.name()),
+            Some(Message::OpenMenu(crate::menu::Menu::Key(track))),
+        )
+    }
+
+    /// The key dialog of MIDI track `track`: Major, Minor or Indefinite; for a tonal key, its
+    /// tonic's letter and a sharp or flat; for an indefinite one, a name for each pitch the track plays or has named. Every
+    /// choice applies at once; a click elsewhere closes it.
+    pub(crate) fn key_dialog(&self, track: TrackId) -> Element<'_, Message> {
+        let Some(target) = self.session.state().track(track) else {
+            return Space::new().into();
+        };
+        let notation = notation_of(target);
+        let key = notation.key;
+        let label = |s: &'static str| text(s).size(TOOL_TEXT);
+        let modes = MODES
+            .into_iter()
+            .map(|(mode, name)| {
+                let picked = with_mode(key, mode);
+                (
+                    Face::Label(name),
+                    Some(Message::SetKey(track, picked)),
+                    picked == key,
+                )
+            })
+            .collect();
+        let mut body = column![label("Key"), group(modes)].spacing(6);
+        match key {
+            Key::Tonal {
+                letter,
+                accidental,
+                mode,
+            } => {
+                let letters = Letter::ALL
+                    .into_iter()
+                    .map(|choice| {
+                        let picked = Key::Tonal {
+                            letter: choice,
+                            accidental,
+                            mode,
+                        };
+                        (
+                            Face::Label(choice.name()),
+                            Some(Message::SetKey(track, picked)),
+                            choice == letter,
+                        )
+                    })
+                    .collect();
+                let accidentals = [Accidental::Sharp, Accidental::Flat]
+                    .into_iter()
+                    .map(|choice| {
+                        let picked = Key::Tonal {
+                            letter,
+                            accidental: toggle_accidental(accidental, choice),
+                            mode,
+                        };
+                        (
+                            Face::Label(choice.name()),
+                            Some(Message::SetKey(track, picked)),
+                            choice == accidental,
+                        )
+                    })
+                    .collect();
+                body = body
+                    .push(label("Tonic"))
+                    .push(group(letters))
+                    .push(group(accidentals));
+            }
+            Key::Indefinite => {
+                let rows = listed_pitches(target).into_iter().map(|pitch| {
+                    let typed = match &self.key_name {
+                        Some((t, p, typed)) if (*t, *p) == (track, pitch) => typed.as_str(),
+                        _ => notation.names.get(&pitch).map_or("", String::as_str),
+                    };
+                    row![
+                        text(pitch_name(pitch, &key))
+                            .size(TOOL_TEXT)
+                            .width(Length::Fixed(48.0)),
+                        text_input("unnamed", typed)
+                            .on_input(move |s| {
+                                Message::KeyNameText(
+                                    track,
+                                    pitch,
+                                    s.chars().take(MAX_NAME_CHARS).collect(),
+                                )
+                            })
+                            .on_submit(Message::CommitKeyName)
+                            .size(TOOL_TEXT)
+                            .padding([3, 6]),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into()
+                });
+                let list = column(rows).spacing(4).padding([0, 12]);
+                let reset = button(text("Reset to GM drums").size(TOOL_TEXT))
+                    .on_press(Message::ResetDrumNames(track))
+                    .padding([6, 12])
+                    .style(theme::flat);
+                body = body
+                    .push(label("Pitch names"))
+                    .push(scrollable(list).height(Length::Fixed(NAME_LIST_HEIGHT)))
+                    .push(reset);
+            }
+        }
+        let done = button(text("Done").size(TOOL_TEXT))
+            .on_press(Message::CloseMenu)
+            .padding([6, 12])
+            .style(theme::flat);
+        let body = body
+            .push(row![Space::new().width(Fill), done].align_y(Alignment::Center))
+            .spacing(10);
+        // Opaque, so a press on the dialog's background does not close it.
+        opaque(
+            container(body)
+                .padding(12)
+                .width(Length::Fixed(KEY_DIALOG_WIDTH))
+                .style(theme::popup),
+        )
+    }
+
     /// The instrument entries of MIDI track `track`'s ≡ menu, the one it feeds ticked.
     pub(crate) fn instrument_entries(&self, track: TrackId) -> Vec<Entry> {
         let stopped = !self.engine.is_playing();
@@ -193,6 +457,58 @@ mod tests {
         assert_eq!(instrument_of(session.state(), track), Some("synth"));
         assert_eq!(instrument_name("synth"), "Synthesizer");
         assert_eq!(instrument_name("from-the-future"), "from-the-future");
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_mode_keeps_the_tonic() {
+        let d_flat = |mode| Key::Tonal {
+            letter: Letter::D,
+            accidental: Accidental::Flat,
+            mode,
+        };
+        let (d_minor, d_major) = (d_flat(Mode::Minor), d_flat(Mode::Major));
+        assert_eq!(with_mode(d_minor, Some(Mode::Major)), d_major);
+        assert_eq!(with_mode(d_minor, None), Key::Indefinite);
+        assert_eq!(
+            with_mode(Key::Indefinite, Some(Mode::Minor)).name(),
+            "C minor"
+        );
+    }
+
+    #[test]
+    fn test_toggle_accidental_keeps_sharp_and_flat_exclusive() {
+        use Accidental::{Flat, Natural, Sharp};
+        assert_eq!(toggle_accidental(Natural, Sharp), Sharp);
+        assert_eq!(toggle_accidental(Sharp, Sharp), Natural);
+        assert_eq!(toggle_accidental(Sharp, Flat), Flat);
+        assert_eq!(toggle_accidental(Flat, Flat), Natural);
+        assert_eq!(toggle_accidental(Flat, Sharp), Sharp);
+    }
+
+    #[test]
+    fn test_listed_pitches_joins_played_and_named() -> Result<(), project_model::Error> {
+        use project_model::{Clip, ClipId, Note, Sequence};
+        use std::sync::Arc;
+        let note = |pitch| Note {
+            start: 0,
+            length: 10,
+            channel: 9,
+            pitch,
+            velocity: 100,
+        };
+        let sequence = Sequence::new(100, vec![note(36), note(38)], Vec::new())?;
+        let mut track = Track::new_midi(TrackId(1), "drums");
+        track.clips.push((
+            ClipId(2),
+            Clip::new(Source::Midi(Arc::new(sequence)), 0, 100, 0),
+        ));
+        assert_eq!(listed_pitches(&track), [36, 38]);
+        track.notation = Some(Notation {
+            key: Key::Indefinite,
+            names: [(40, "rim".to_owned()), (36, "kick".to_owned())].into(),
+        });
+        assert_eq!(listed_pitches(&track), [36, 38, 40]);
         Ok(())
     }
 }

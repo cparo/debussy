@@ -33,6 +33,8 @@ pub enum Menu {
     Device,
     /// The quantize dialog, opened from the quantize button or Q: the grid and strength.
     Quantize,
+    /// A MIDI track's key dialog, opened from its ≡ menu: its key and pitch names.
+    Key(TrackId),
 }
 
 /// A line in a menu.

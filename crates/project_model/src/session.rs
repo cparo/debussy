@@ -8,6 +8,7 @@ use audio_buffers::Layout;
 
 use crate::edit::Edit;
 use crate::error::Error;
+use crate::notation::Notation;
 use crate::range::{self, Excerpt, Range};
 use crate::routing::{
     Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side, WireShape,
@@ -379,6 +380,17 @@ impl Session {
         edits.extend(joining);
         self.apply(Edit::Batch(edits))?;
         Ok(id)
+    }
+
+    /// Sets MIDI track `track`'s key and pitch names, as one step
+    /// (`docs/architecture/track-pane.md` "Key and pitch names").
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], [`Error::KindMismatch`] for an audio track, or
+    /// [`Error::InvalidNotation`].
+    pub fn set_notation(&mut self, track: TrackId, notation: Notation) -> Result<(), Error> {
+        self.apply(Edit::SetNotation { track, notation })
     }
 
     /// Connects `from_side` of output `output` of `from` (or the whole port, with `None`) to

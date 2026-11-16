@@ -210,6 +210,16 @@ pub enum Message {
     /// Give this MIDI track a new instrument of this kind, wired to the project mixer, as one
     /// step.
     SetInstrument(TrackId, &'static str),
+    /// Set this MIDI track's key, as one step.
+    SetKey(TrackId, project_model::Key),
+    /// The name being typed in the key dialog for this pitch of this MIDI track.
+    KeyNameText(TrackId, u8, String),
+    /// Record the pitch name being typed, as one step.
+    CommitKeyName,
+    /// Name this MIDI track's pitches as the General MIDI drums, as one step.
+    ResetDrumNames(TrackId),
+    /// The MIDI note under the pointer changed, while stopped: this one, or none.
+    HoverNote(Option<crate::waveform::NoteHover>),
     /// Turn mono listening on (`true`) or off.
     SetMono(bool),
     /// Turn the click on (`true`) or off.
@@ -472,6 +482,10 @@ pub struct App {
     pub(crate) click: Click,
     /// The quantize dialog's choices.
     pub(crate) quantize: crate::midi_edit::QuantizeSettings,
+    /// The pitch name being typed in the key dialog: the track, the pitch and the text.
+    pub(crate) key_name: Option<(TrackId, u8, String)>,
+    /// The MIDI note under the pointer, while stopped, for its tooltip.
+    pub(crate) note_hover: Option<crate::waveform::NoteHover>,
     /// Every mixer's and built-in effect's parameters, read once at launch.
     catalog: ParameterCatalog,
     /// The open Export dialog.
@@ -550,6 +564,8 @@ impl App {
             midi_activity: BTreeMap::new(),
             click: Click::new(preferences),
             quantize: crate::midi_edit::QuantizeSettings::default(),
+            key_name: None,
+            note_hover: None,
             catalog: ParameterCatalog::new(),
             export_dialog: None,
             export_settings,
@@ -876,6 +892,11 @@ impl App {
                 && matches!(
                     message,
                     Message::QuantizeGrid(_) | Message::QuantizeStrength(_)
+                ))
+            || (matches!(self.menu, Some(Menu::Key(_)))
+                && matches!(
+                    message,
+                    Message::SetKey(..) | Message::CommitKeyName | Message::ResetDrumNames(_)
                 ));
         let quiet = matches!(&message, Message::Dialog(m) if m.is_focus_key());
         if !quiet
@@ -897,6 +918,8 @@ impl App {
                     | Message::TempoText(_)
                     | Message::ClickLevel(_)
                     | Message::ReleaseClickLevel
+                    | Message::KeyNameText(..)
+                    | Message::HoverNote(_)
             )
         {
             self.status = None;
@@ -907,9 +930,24 @@ impl App {
         // Doing anything else while typing a tempo records it.
         if !matches!(
             message,
-            Message::Tick | Message::Scrolled(_) | Message::Rescaled(_) | Message::TempoText(_)
+            Message::Tick
+                | Message::Scrolled(_)
+                | Message::Rescaled(_)
+                | Message::TempoText(_)
+                | Message::HoverNote(_)
         ) {
             self.finish_tempo();
+        }
+        // Doing anything else while typing a pitch name records it.
+        if !matches!(
+            message,
+            Message::Tick
+                | Message::Scrolled(_)
+                | Message::Rescaled(_)
+                | Message::KeyNameText(..)
+                | Message::HoverNote(_)
+        ) {
+            self.commit_key_name();
         }
         // Doing anything else while renaming a track finishes the rename.
         if !matches!(
@@ -919,12 +957,20 @@ impl App {
                 | Message::Rescaled(_)
                 | Message::RenameText(_)
                 | Message::FinishRename
+                | Message::HoverNote(_)
         ) {
             self.finish_rename();
         }
         match message {
-            Message::Play => self.play(),
-            Message::Record => self.record(),
+            // No tooltip while playing or recording.
+            Message::Play => {
+                self.note_hover = None;
+                self.play();
+            }
+            Message::Record => {
+                self.note_hover = None;
+                self.record();
+            }
             Message::Arm(track) => self.toggle_arm(track),
             Message::Monitor(track) => self.toggle_monitor(track),
             Message::Input(track, choice) => self.set_input(track, choice.input),
@@ -945,7 +991,10 @@ impl App {
                 track,
                 frame,
                 extend,
-            } => self.lane_press(track, frame, extend),
+            } => {
+                self.note_hover = None;
+                self.lane_press(track, frame, extend);
+            }
             Message::LaneDrag { track, frame } => self.lane_drag(track, frame),
             Message::LaneRelease => {
                 self.drag = None;
@@ -978,6 +1027,24 @@ impl App {
             }
             Message::Quantize => self.quantize(),
             Message::SetInstrument(track, kind) => self.set_instrument(track, kind),
+            Message::SetKey(track, key) => self.set_key(track, key),
+            Message::KeyNameText(track, pitch, typed) => {
+                // Typing for another pitch records the one before.
+                if self
+                    .key_name
+                    .as_ref()
+                    .is_some_and(|(t, p, _)| (*t, *p) != (track, pitch))
+                {
+                    self.commit_key_name();
+                }
+                self.key_name = Some((track, pitch, typed));
+            }
+            // Recorded above, as anything but typing records it.
+            Message::CommitKeyName => {}
+            Message::ResetDrumNames(track) => self.reset_drum_names(track),
+            Message::HoverNote(hover) => {
+                self.note_hover = hover.filter(|_| !self.engine.is_playing());
+            }
             Message::SetMono(mono) => self.engine.set_mono(mono),
             Message::SetClick(on) => self.engine.set_click_on(on),
             Message::TempoText(text) => self.click.tempo_text = Some(text),
@@ -1978,6 +2045,8 @@ impl App {
             return;
         }
         self.lanes_stale = false;
+        // The hovered note's index may now be another note's.
+        self.note_hover = None;
         let (start, spc, display) = (self.start, self.samples_per_column(), self.display);
         let services = self.services.as_mut();
         self.lanes = self

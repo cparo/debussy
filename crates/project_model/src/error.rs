@@ -144,4 +144,7 @@ pub enum Error {
     /// A curve port that already has a connection.
     #[error("{0:?} already has a connection")]
     PortTaken(Endpoint),
+    /// A key or pitch names outside the limits (`project_model::notation`).
+    #[error("not a valid key or pitch name: {0}")]
+    InvalidNotation(String),
 }

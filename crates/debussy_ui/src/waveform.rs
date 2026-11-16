@@ -3,14 +3,16 @@
 //! as a time-in-level trace (`docs/architecture/analysis.md` "Waveform summaries"), or a
 //! spectrum per coarser column computed from the audio ("Spectrograms") — and the canvas that
 //! draws a lane — into a [`Raster`] at the display's scale, blurred — seeks or selects a range
-//! on a press or drag, and pans on a sideways scroll.
+//! on a press or drag, pans on a sideways scroll, and reports the MIDI note under the pointer
+//! while stopped.
 
 use std::cell::Cell;
 
 use audio_analysis::{BASE_BUCKET, Bucket, trace_density};
-use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Program};
+use iced::widget::canvas::{self, Cache, Event, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse};
-use project_model::{Clip, Source, Tempo, Track, TrackId, TrackKind};
+use project_model::notation::{pitch_name, root_pitches};
+use project_model::{Clip, Key, Source, Tempo, Track, TrackId, TrackKind};
 
 use crate::app::Message;
 use crate::grid::grid_lines;
@@ -96,6 +98,58 @@ pub struct NoteLane {
     pub low: u8,
     /// The highest pitch the lane's height spans, at least 11 above `low`.
     pub high: u8,
+    /// The pitches from `low` to `high` that get a reference line, lowest first, with their
+    /// labels: the key's roots ("C4"), or under an indefinite key the named pitches ("kick").
+    pub rows: Vec<(u8, String)>,
+}
+
+/// The note under the pointer in a MIDI lane, while stopped.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoteHover {
+    /// The track whose lane it is.
+    pub track: TrackId,
+    /// Where the pointer is, in logical pixels from the lane's left edge.
+    pub x: f32,
+    /// The middle of the note's row, in logical pixels from the lane's top.
+    pub y: f32,
+    /// The note's pitch.
+    pub pitch: u8,
+}
+
+/// A tooltip naming a note, at a point in its lane.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteTip {
+    /// Where it points, in logical pixels from the lane's top left.
+    pub at: Point,
+    /// The note's label.
+    pub label: String,
+}
+
+/// How far from a note bar, in logical pixels, the pointer still hits it.
+const HIT_SLOP: f32 = 3.0;
+
+/// The middle and height of `pitch`'s row in a MIDI lane spanning `low` to `high` over `height`
+/// logical pixels, the highest pitch at the top. Bars, reference lines and hit tests all use
+/// it, so they agree.
+fn pitch_row(low: u8, high: u8, pitch: u8, height: f32) -> (f32, f32) {
+    let rows = f32::from(high.saturating_sub(low)) + 1.0;
+    let row = height / rows;
+    let step = f32::from(high.saturating_sub(pitch));
+    ((step + 0.5) * row, row)
+}
+
+/// The index of the note in `lane` under `point` (logical pixels in a lane of `size`), if
+/// any: the last drawn, so the one on top. A bar is hit within [`HIT_SLOP`] of it, and within
+/// half a row of its middle when rows are taller.
+fn note_at(lane: &NoteLane, point: Point, size: Size) -> Option<usize> {
+    let width = size.width / LANE_COLUMNS as f32;
+    lane.notes.iter().rposition(|note| {
+        let (y, row) = pitch_row(lane.low, lane.high, note.pitch, size.height);
+        let left = note.x0 * width;
+        let right = (note.x1 * width).max(left + 1.0);
+        let reach = (row / 2.0).max(HIT_SLOP);
+        (left - HIT_SLOP..=right + HIT_SLOP).contains(&point.x) && (point.y - y).abs() <= reach
+    })
 }
 
 /// The fewest semitones a MIDI lane's height spans, so a short melody is not stretched.
@@ -127,11 +181,23 @@ fn note_lane(track: &Track, start: u64, spc: u64) -> NoteLane {
     let low = lowest.saturating_sub(short / 2);
     let high = (low + (MIN_PITCH_SPAN - 1)).max(highest).min(127);
     let low = low.min(high - (MIN_PITCH_SPAN - 1));
+    let rows = match &track.notation {
+        Some(notation) if notation.key == Key::Indefinite => notation
+            .names
+            .range(low..=high)
+            .map(|(&pitch, name)| (pitch, name.clone()))
+            .collect(),
+        Some(notation) => root_pitches(&notation.key, low, high)
+            .map(|pitch| (pitch, pitch_name(pitch, &notation.key)))
+            .collect(),
+        None => Vec::new(),
+    };
     NoteLane {
         notes,
         spans,
         low,
         high,
+        rows,
     }
 }
 
@@ -307,6 +373,8 @@ pub struct LaneState {
     scale: Cell<Option<f32>>,
     /// Whether Shift is held, for a press that extends the range selection.
     shift: bool,
+    /// The index of the MIDI note last reported under the pointer.
+    hovered: Option<usize>,
 }
 
 /// Draws a lane; a press seeks there or extends the range selection, a drag selects a range,
@@ -326,6 +394,46 @@ pub struct LaneView<'a> {
     pub span: u64,
     /// The display's physical pixels per logical pixel.
     pub scale: f32,
+    /// Whether the transport is stopped, so the note under the pointer is reported.
+    pub stopped: bool,
+    /// Whether the note last reported for this lane is still the one shown; when not, the next
+    /// move reports afresh.
+    pub hovering: bool,
+}
+
+impl LaneView<'_> {
+    /// Reports the MIDI note under the pointer when it changes: a note while stopped and not
+    /// dragging, otherwise none.
+    fn hover(
+        &self,
+        state: &mut LaneState,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        if !self.hovering {
+            state.hovered = None;
+        }
+        let notes = self.lane.midi.as_ref()?;
+        let point = cursor.position_in(bounds);
+        let hit = point
+            .filter(|_| self.stopped && !self.dragging)
+            .and_then(|p| note_at(notes, p, bounds.size()));
+        if hit == state.hovered {
+            return None;
+        }
+        state.hovered = hit;
+        let hover = hit.zip(point).and_then(|(i, p)| {
+            let note = notes.notes.get(i)?;
+            let (y, _) = pitch_row(notes.low, notes.high, note.pitch, bounds.height);
+            Some(NoteHover {
+                track: self.track,
+                x: p.x,
+                y,
+                pitch: note.pitch,
+            })
+        });
+        Some(canvas::Action::publish(Message::HoverNote(hover)))
+    }
 }
 
 impl Program<Message> for LaneView<'_> {
@@ -342,12 +450,22 @@ impl Program<Message> for LaneView<'_> {
             state.shift = modifiers.shift();
             return None;
         }
+        match event {
+            Event::Mouse(mouse::Event::CursorLeft) => {
+                return self.hover(state, bounds, mouse::Cursor::Unavailable);
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if !self.dragging => {
+                return self.hover(state, bounds, cursor);
+            }
+            _ => {}
+        }
         let at = cursor.position_in(bounds)?;
         let fraction = f64::from(at.x / bounds.width.max(1.0));
         let frame = self.start + (fraction * self.span as f64) as u64;
         let track = self.track;
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                state.hovered = None;
                 let extend = state.shift;
                 let press = Message::LanePress {
                     track,
@@ -449,20 +567,91 @@ pub struct GridView {
     pub scale: f32,
 }
 
-/// The grid, playhead cursor and range selection over a lane. It is a canvas of its own, stacked
-/// above the lane's: the renderer draws a layer's vector shapes before its images, so a cursor
-/// in the lane's own canvas would be hidden under the lane image. It takes no events and sets
-/// no mouse pointer, so they reach the lane beneath.
-pub struct CursorView {
+/// The grid, a MIDI lane's pitch lines and note tooltip, the playhead cursor and range selection
+/// over a lane. It is a canvas of its own, stacked above the lane's: the renderer draws a
+/// layer's vector shapes before its images, so a cursor in the lane's own canvas would be hidden
+/// under the lane image. It takes no events and sets no mouse pointer, so they reach the lane
+/// beneath.
+pub struct CursorView<'a> {
     /// Where the cursor is, as a fraction of the lane's width, if visible.
     pub at: Option<f32>,
     /// The selected stretch of this lane, as fractions of its width, if any of it is visible.
     pub band: Option<(f32, f32)>,
     /// The bars and beats grid, if shown.
     pub grid: Option<GridView>,
+    /// A MIDI lane, whose labelled pitches get a line and a label.
+    pub notes: Option<&'a NoteLane>,
+    /// The tooltip naming the note under the pointer, if any.
+    pub tip: Option<NoteTip>,
 }
 
-impl Program<Message> for CursorView {
+/// The size of a pitch label and of a note tooltip's text, in logical pixels.
+const LABEL_SIZE: f32 = 10.0;
+const TIP_SIZE: f32 = 12.0;
+
+impl CursorView<'_> {
+    /// A line across the lane at each labelled pitch, with its label at the left edge; a label
+    /// that would crowd the one below it is left out.
+    fn draw_pitch_rows(&self, frame: &mut Frame, lane: &NoteLane, ink: Color, scale: f32) {
+        let size = frame.size();
+        let mut last_label: Option<f32> = None;
+        for (pitch, label) in &lane.rows {
+            let (y, _) = pitch_row(lane.low, lane.high, *pitch, size.height);
+            let y = (y * scale).floor() / scale;
+            frame.fill_rectangle(
+                Point::new(0.0, y),
+                Size::new(size.width, 1.0 / scale),
+                Color { a: 0.3, ..ink },
+            );
+            // Rows go lowest first, so up the lane.
+            if last_label.is_some_and(|below| below - y < LABEL_SIZE + 2.0) {
+                continue;
+            }
+            last_label = Some(y);
+            frame.fill_text(Text {
+                content: label.clone(),
+                position: Point::new(3.0, y - 1.0),
+                color: Color { a: 0.75, ..ink },
+                size: LABEL_SIZE.into(),
+                align_y: iced::alignment::Vertical::Bottom,
+                ..Text::default()
+            });
+        }
+    }
+
+    /// A small rounded box holding the tip's label, beside the point, flipped left or down to
+    /// stay inside the lane.
+    fn draw_tip(frame: &mut Frame, tip: &NoteTip, theme: &Theme) {
+        let t = tokens(tone_of(theme));
+        let size = frame.size();
+        // The interface font's advance is about 0.6 of its size; close enough for a box.
+        let width = tip.label.chars().count() as f32 * TIP_SIZE * 0.6 + 12.0;
+        let height = TIP_SIZE + 8.0;
+        let mut x = tip.at.x + 10.0;
+        if x + width > size.width {
+            x = tip.at.x - 10.0 - width;
+        }
+        let mut y = tip.at.y - height - 4.0;
+        if y < 0.0 {
+            y = tip.at.y + 4.0;
+        }
+        let x = x.clamp(0.0, (size.width - width).max(0.0));
+        let y = y.clamp(0.0, (size.height - height).max(0.0));
+        let body = Path::rounded_rectangle(Point::new(x, y), Size::new(width, height), 4.0.into());
+        frame.fill(&body, t.chrome);
+        frame.stroke(&body, Stroke::default().with_color(t.line).with_width(1.0));
+        frame.fill_text(Text {
+            content: tip.label.clone(),
+            position: Point::new(x + 6.0, y + height / 2.0),
+            color: t.text,
+            size: TIP_SIZE.into(),
+            align_y: iced::alignment::Vertical::Center,
+            ..Text::default()
+        });
+    }
+}
+
+impl Program<Message> for CursorView<'_> {
     type State = ();
 
     fn draw(
@@ -473,10 +662,21 @@ impl Program<Message> for CursorView {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        if self.at.is_none() && self.band.is_none() && self.grid.is_none() {
+        let rows = self.notes.filter(|lane| !lane.rows.is_empty());
+        if self.at.is_none()
+            && self.band.is_none()
+            && self.grid.is_none()
+            && rows.is_none()
+            && self.tip.is_none()
+        {
             return Vec::new();
         }
         let mut frame = Frame::new(renderer, bounds.size());
+        if let Some(lane) = rows {
+            let scale = self.grid.map_or(1.0, |g| g.scale).max(0.5);
+            let ink = tokens(tone_of(theme)).text;
+            self.draw_pitch_rows(&mut frame, lane, ink, scale);
+        }
         if let Some(grid) = &self.grid {
             // Hairlines a physical pixel wide on the pixel grid, so they stay sharp; bars
             // stronger than beats, in the text colour.
@@ -502,14 +702,16 @@ impl Program<Message> for CursorView {
                 Color { a: 0.22, ..ink },
             );
         }
-        let Some(at) = self.at else {
-            return vec![frame.into_geometry()];
-        };
-        frame.fill_rectangle(
-            Point::new(at * bounds.width - 0.75, 0.0),
-            Size::new(1.5, bounds.height),
-            CURSOR,
-        );
+        if let Some(at) = self.at {
+            frame.fill_rectangle(
+                Point::new(at * bounds.width - 0.75, 0.0),
+                Size::new(1.5, bounds.height),
+                CURSOR,
+            );
+        }
+        if let Some(tip) = &self.tip {
+            CursorView::draw_tip(&mut frame, tip, theme);
+        }
         vec![frame.into_geometry()]
     }
 }
@@ -528,15 +730,11 @@ fn draw_notes(raster: &mut Raster, lane: &NoteLane, size: Size, audio: iced::Col
             band,
         );
     }
-    let rows = f32::from(lane.high - lane.low) + 1.0;
-    let row = size.height / rows;
-    let bar = row.clamp(1.0, 3.0);
     for note in &lane.notes {
-        // The highest pitch at the top.
-        let step = f32::from(lane.high.saturating_sub(note.pitch));
-        let y = step * row + (row - bar) / 2.0;
+        let (y, row) = pitch_row(lane.low, lane.high, note.pitch, size.height);
+        let bar = row.clamp(1.0, 3.0);
         let w = ((note.x1 - note.x0) * width).max(1.0);
-        raster.fill_rect(note.x0 * width, y, w, bar, audio);
+        raster.fill_rect(note.x0 * width, y - bar / 2.0, w, bar, audio);
     }
 }
 
@@ -793,6 +991,71 @@ mod tests {
         let pitches: Vec<u8> = lane.notes.iter().map(|n| n.pitch).collect();
         assert_eq!(pitches, [60]);
         Ok(())
+    }
+
+    #[test]
+    fn test_note_lane_rows_are_the_roots_of_a_tonal_key() -> Result<(), project_model::Error> {
+        // 48 and 72 span 48–72 exactly.
+        let mut track = midi_track(vec![midi_clip(&[(0, 100, 48), (100, 100, 72)], 0)?]);
+        let lane = note_lane(&track, 0, 100);
+        let rows: Vec<_> = lane.rows.iter().map(|(p, l)| (*p, l.as_str())).collect();
+        assert_eq!(rows, [(48, "C3"), (60, "C4"), (72, "C5")]);
+        track.notation = Some(project_model::Notation {
+            key: Key::Tonal {
+                letter: project_model::Letter::A,
+                accidental: project_model::Accidental::Natural,
+                mode: project_model::Mode::Minor,
+            },
+            names: Default::default(),
+        });
+        let rows: Vec<u8> = note_lane(&track, 0, 100).rows.iter().map(|r| r.0).collect();
+        assert_eq!(rows, [57, 69]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_lane_rows_are_the_named_pitches_when_indefinite()
+    -> Result<(), project_model::Error> {
+        let mut track = midi_track(vec![midi_clip(&[(0, 100, 36), (100, 100, 47)], 0)?]);
+        track.notation = Some(project_model::Notation::gm_drums());
+        let lane = note_lane(&track, 0, 100);
+        assert_eq!((lane.low, lane.high), (36, 47));
+        let labels: Vec<&str> = lane.rows.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels[0], "kick");
+        assert_eq!(labels.len(), 12);
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_at_hits_the_bar_and_misses_gaps() {
+        let lane = NoteLane {
+            notes: vec![
+                NoteBar {
+                    x0: 0.0,
+                    x1: 100.0,
+                    pitch: 60,
+                },
+                NoteBar {
+                    x0: 200.0,
+                    x1: 300.0,
+                    pitch: 71,
+                },
+            ],
+            spans: Vec::new(),
+            low: 60,
+            high: 71,
+            rows: Vec::new(),
+        };
+        // A lane as wide as its columns, 120 high: rows of 10, pitch 60's middle at 115.
+        let size = Size::new(LANE_COLUMNS as f32, 120.0);
+        assert_eq!(note_at(&lane, Point::new(50.0, 115.0), size), Some(0));
+        assert_eq!(note_at(&lane, Point::new(50.0, 111.0), size), Some(0));
+        assert_eq!(note_at(&lane, Point::new(250.0, 5.0), size), Some(1));
+        // Between the notes in time, and a few rows above the first.
+        assert_eq!(note_at(&lane, Point::new(150.0, 115.0), size), None);
+        assert_eq!(note_at(&lane, Point::new(50.0, 90.0), size), None);
+        // Within the slop past a bar's end.
+        assert_eq!(note_at(&lane, Point::new(102.0, 115.0), size), Some(0));
     }
 
     #[test]

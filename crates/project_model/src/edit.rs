@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use audio_buffers::Layout;
 
 use crate::error::Error;
+use crate::notation::Notation;
 use crate::routing::{self, Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Tempo;
@@ -33,6 +34,13 @@ pub enum Edit {
         track: TrackId,
         /// Its new name.
         name: String,
+    },
+    /// Sets a MIDI track's key and pitch names.
+    SetNotation {
+        /// The track; a MIDI track.
+        track: TrackId,
+        /// Its new key and names.
+        notation: Notation,
     },
     /// Moves a track to `index` in the track order.
     MoveTrack {
@@ -205,6 +213,18 @@ impl Edit {
             Edit::RenameTrack { track, name } => {
                 let old = std::mem::replace(&mut state.track_mut(track)?.name, name);
                 Ok(Edit::RenameTrack { track, name: old })
+            }
+            Edit::SetNotation { track, notation } => {
+                notation.check()?;
+                let target = state.track_mut(track)?;
+                let Some(current) = target.notation.as_mut() else {
+                    return Err(Error::KindMismatch);
+                };
+                let old = std::mem::replace(current, notation);
+                Ok(Edit::SetNotation {
+                    track,
+                    notation: old,
+                })
             }
             Edit::MoveTrack { track, index } => {
                 let from = state.track_index(track)?;
@@ -491,7 +511,11 @@ fn check_track(track: &Track, taken: &BTreeSet<ClipId>) -> Result<(), Error> {
         }
         clip.check(track.kind)?;
     }
-    Ok(())
+    match &track.notation {
+        Some(notation) if track.kind == TrackKind::Midi => notation.check(),
+        None if track.kind != TrackKind::Midi => Ok(()),
+        _ => Err(Error::KindMismatch),
+    }
 }
 
 fn node_index(state: &State, id: NodeId) -> Result<usize, Error> {
