@@ -41,7 +41,7 @@ The window is a top bar, a track pane beside a right pane, and a bottom bar.
   [ADR-0086](../adrs/0086-the-bottom-bar-opens-the-audio-device-list-and-the.md)).
 - **Track pane:** each track is a header (its name, the arm toggle and, while armed, the monitor
   toggle, the input choice and an input meter, and a ≡ menu: rename, import audio into, delete) over one 128-pixel lane per channel, left above right. A "+" below the tracks adds a mono
-  or stereo track, or an automation curve ("Curve N", the lowest N not in use, holding one point
+  or stereo track, a MIDI track, or an automation curve ("Curve N", the lowest N not in use, holding one point
   at frame 0 halfway up). A red cursor marks the playhead in
   every lane. A menu item that cannot be used now is greyed out, not hidden. Adding, deleting and
   importing into a track are refused while playing.

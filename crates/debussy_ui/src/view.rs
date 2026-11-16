@@ -1146,6 +1146,7 @@ impl App {
                     "Stereo track",
                     when_stopped(Message::AddTrack(Layout::Stereo)),
                 ),
+                Entry::item("MIDI track", when_stopped(Message::AddMidiTrack)),
                 Entry::item("Automation curve", when_stopped(Message::AddCurve)),
             ],
             Menu::Click => return self.click_dialog(),

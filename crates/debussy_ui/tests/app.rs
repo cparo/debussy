@@ -25,7 +25,9 @@ use engine_bridge::Bridge;
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
 use platform_interfaces::test_doubles::FakeMidi;
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
-use project_model::{AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId};
+use project_model::{
+    AudioFile, Clip, Endpoint, NodeId, NodeKind, Session, Source, State, TrackId, TrackKind,
+};
 use signal_graph::{Config, NodeId as GraphNodeId};
 
 /// What the fake services saw.
@@ -1281,6 +1283,19 @@ fn test_tracks_are_added_renamed_and_deleted_as_steps() -> Result<(), Box<dyn Er
         app.update(Message::Undo);
     }
     assert_eq!(app.session().state().tracks[1].name, "Piano");
+    Ok(())
+}
+
+#[test]
+fn test_add_midi_track_adds_one_undoable_midi_track() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    app.update(Message::AddMidiTrack);
+    let track = app.session().state().tracks[1].clone();
+    assert_eq!(track.name, "Track 2");
+    assert_eq!(track.kind, TrackKind::Midi);
+    let _ = app.view();
+    app.update(Message::Undo);
+    assert_eq!(app.session().state().tracks.len(), 1);
     Ok(())
 }
 

@@ -277,6 +277,8 @@ pub enum Message {
     ImportInto(TrackId),
     /// Add an empty track of this layout after the others.
     AddTrack(Layout),
+    /// Add an empty MIDI track after the others.
+    AddMidiTrack,
     /// Delete a track, its clips and its connections.
     DeleteTrack(TrackId),
     /// Add an automation curve lane, "Curve N", holding one point, below the others.
@@ -1057,6 +1059,17 @@ impl App {
                 let result = self
                     .bridge
                     .edit(&mut self.session, |s| s.add_track(&name, layout));
+                self.report(result.map(|_| ()).map_err(|e| e.to_string()));
+                self.refresh_lanes();
+            }
+            Message::AddMidiTrack => {
+                if self.refuse_while_playing("add a track") {
+                    return;
+                }
+                let name = format!("Track {}", self.session.state().tracks.len() + 1);
+                let result = self
+                    .bridge
+                    .edit(&mut self.session, |s| s.add_midi_track(&name));
                 self.report(result.map(|_| ()).map_err(|e| e.to_string()));
                 self.refresh_lanes();
             }
