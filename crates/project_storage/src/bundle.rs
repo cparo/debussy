@@ -195,7 +195,7 @@ impl Bundle {
     }
 
     /// Deletes every audio file in `audio/` that neither `session`'s current state nor any of its
-    /// versions uses, returning their names. Call it only when no undo history can refer to them:
+    /// versions uses, and every MIDI take journal, returning their names. Call it only when no undo history can refer to them:
     /// [`Bundle::open`] does, and the application does on closing the project.
     ///
     /// # Errors
@@ -226,7 +226,7 @@ impl Bundle {
             let is_file = entry.file_type().map_err(io(&audio))?.is_file();
             if is_file
                 && is_plain_file_name(&name)
-                && name.to_ascii_lowercase().ends_with(".wav")
+                && is_take_file(&name)
                 && !keep.contains(name.as_str())
             {
                 let path = entry.path();
@@ -488,6 +488,12 @@ fn write_json<T: Serialize>(path: &Path, saved: &T) -> Result<(), Error> {
 /// Syncs a directory, so renames and removals in it survive a crash.
 fn sync_dir(dir: &Path) -> Result<(), Error> {
     File::open(dir).and_then(|d| d.sync_all()).map_err(io(dir))
+}
+
+/// Whether `name` is a file cleanup manages: a WAV file, or a MIDI take journal.
+fn is_take_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".wav") || lower.ends_with(".midilog")
 }
 
 #[cfg(test)]

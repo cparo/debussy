@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 audio_buffers = { path = "../audio_buffers" }
+midi = { path = "../midi" }
 modulation = { path = "../modulation" }
 project_model = { path = "../project_model" }
 serde = { version = "1.0.229", features = ["derive"] }

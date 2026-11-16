@@ -17,9 +17,9 @@ use audio_engine::{
 };
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
-    ImportedTrack, Menu, Message, MidiInputChoice, MixerFocus, NewNode, PassMarker, Recovered,
-    RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services, Spectrum, TakeFiles, TakeStatus,
-    Takes,
+    ImportedTrack, Menu, Message, MidiInputChoice, MidiTakeFile, MixerFocus, NewNode, PassMarker,
+    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services,
+    Spectrum, TakeFiles, TakeStatus, Takes,
 };
 use engine_bridge::Bridge;
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
@@ -416,12 +416,13 @@ impl Services for Fake {
             })
             .collect();
         let midi = (0..midi)
-            .map(|i| {
-                Box::new(FakeNotes {
+            .map(|i| MidiTakeFile {
+                file: format!("take-{i}.midilog"),
+                sink: Box::new(FakeNotes {
                     take: take + i,
                     captured: Arc::clone(&self.captured),
                     ended: Some(Arc::clone(&self.ended)),
-                }) as Box<dyn NoteSink>
+                }),
             })
             .collect();
         self.calls.borrow_mut().started.push(all);
@@ -2153,6 +2154,7 @@ fn test_record_places_the_take_on_top_as_one_step() -> Result<(), Box<dyn Error>
         calls.borrow().marked,
         [PassMarker {
             device_latency: LATENCY,
+            midi_latency: MIDI_LATENCY,
             tracks: vec![(track, vec!["Vocal 0.wav".into()])],
         }]
     );
@@ -2255,11 +2257,13 @@ fn test_recovered_take_is_placed_as_one_undoable_step() -> Result<(), Box<dyn Er
             (track, vec!["L.wav".into(), "R.wav".into()]),
         ],
         frames: 5000,
+        midi: Vec::new(),
         info: TakeInfo {
             start_frame: 20_000,
             latency: 50,
         },
         device_latency: 150,
+        midi_latency: 0,
     };
     let (mut app, _, calls, _) = app_with(0.0, Some(Recovered::Takes(pass)))?;
     assert_eq!(
@@ -2283,6 +2287,53 @@ fn test_recovered_take_is_placed_as_one_undoable_step() -> Result<(), Box<dyn Er
     let clips = &app.session().state().track(track).ok_or("no track")?.clips;
     assert_eq!(clips.len(), 1);
     assert!(!app.session().can_undo());
+    Ok(())
+}
+
+#[test]
+fn test_recovered_midi_take_is_placed_once() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let keys = session.add_midi_track("Keys")?;
+    let recovered = || {
+        Recovered::Takes(RecoveredPass {
+            tracks: Vec::new(),
+            frames: 0,
+            midi: vec![RecoveredMidi {
+                track: keys,
+                file: "take-1.midilog".into(),
+                messages: vec![(100, [0x90, 60, 100]), (600, [0x80, 60, 0])],
+                frames: 601,
+            }],
+            info: TakeInfo {
+                start_frame: 20_000,
+                latency: 50,
+            },
+            device_latency: 150,
+            midi_latency: 300,
+        })
+    };
+    let (app, _, calls, _) = app_over(&session, Some(recovered()))?;
+    assert_eq!(
+        app.status(),
+        Some("Recovered a take interrupted by a crash.")
+    );
+    let clips = &app.session().state().track(keys).ok_or("no track")?.clips;
+    let [(_, take)] = clips.as_slice() else {
+        return Err("not one clip".into());
+    };
+    assert_eq!(
+        (take.position, take.offset, take.length),
+        (20_000 - 350, 0, 601)
+    );
+    assert_eq!(calls.borrow().discarded, ["take-1.midilog"]);
+    assert_eq!(calls.borrow().marker_clears, 1);
+    // Saved before the crash marker went: a second recovery finds the clip and adds nothing.
+    let saved = app.session().state().clone();
+    let session = Session::open(saved, BTreeMap::new());
+    let (app, _, calls, _) = app_over(&session, Some(recovered()))?;
+    let clips = &app.session().state().track(keys).ok_or("no track")?.clips;
+    assert_eq!(clips.len(), 1);
+    assert_eq!(calls.borrow().discarded, ["take-1.midilog"]);
     Ok(())
 }
 
@@ -3090,6 +3141,17 @@ fn test_record_midi_places_one_clip_of_the_notes_played() -> Result<(), Box<dyn 
     app.update(Message::Tick);
     assert!(app.can_record());
     assert!(calls.borrow().kept.is_empty(), "no audio files");
+    // The crash marker named the take's journal, which went once the take was placed.
+    assert_eq!(
+        calls.borrow().marked,
+        [PassMarker {
+            device_latency: LATENCY,
+            midi_latency: MIDI_LATENCY,
+            tracks: vec![(keys, vec!["take-0.midilog".into()])],
+        }]
+    );
+    assert_eq!(calls.borrow().discarded, ["take-0.midilog"]);
+    assert_eq!(calls.borrow().marker_clears, 1);
     let clips = &app.session().state().track(keys).ok_or("no track")?.clips;
     let (_, take) = clips.last().ok_or("no take")?;
     assert_eq!(

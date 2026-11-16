@@ -15,8 +15,8 @@ use audio_engine::{NoteSink, Processor, TakeInfo, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
     ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, MidiInputChoice,
-    PassMarker, Recovered, RecoveredPass, Services, Spectrum, TakeFiles, TakeStatus, Takes,
-    spectrum_bands,
+    MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, Services, Spectrum,
+    TakeFiles, TakeStatus, Takes, spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
@@ -165,6 +165,16 @@ fn take_names(dir: &std::path::Path, tracks: &[(String, usize)]) -> Vec<Vec<Stri
         chosen.push(names);
     }
     chosen
+}
+
+/// `count` names for new MIDI take journals in `dir`, `take-<n>.midilog` with the smallest `n`
+/// from 1 not in use.
+fn journal_names(dir: &std::path::Path, count: usize) -> Vec<String> {
+    (1u64..)
+        .map(|n| format!("take-{n}.midilog"))
+        .filter(|name| !dir.join(name).exists())
+        .take(count)
+        .collect()
 }
 
 /// Stored audio file `file` from `bundle`, opened on first use and kept in `audio_files`; `None`
@@ -516,11 +526,13 @@ impl Services for AppServices {
         let dir = self.bundle.audio_dir();
         let names = take_names(&dir, tracks);
         let paths: Vec<PathBuf> = names.iter().flatten().map(|n| dir.join(n)).collect();
+        let journals = journal_names(&dir, midi);
+        let journal_paths: Vec<PathBuf> = journals.iter().map(|n| dir.join(n)).collect();
         // A pass still held is finished first, keeping its files on disk.
         self.recorder = None;
         let config = RecorderConfig::new(self.bundle.sample_rate());
         let (recorder, takes, midi_takes) =
-            Recorder::start_with_midi(&paths, midi, config).map_err(|e| e.to_string())?;
+            Recorder::start_with_midi(&paths, &journal_paths, config).map_err(|e| e.to_string())?;
         self.recorder = Some(recorder);
         let mut takes = takes.into_iter();
         let audio = names
@@ -534,9 +546,13 @@ impl Services for AppServices {
                 files,
             })
             .collect();
-        let midi = midi_takes
+        let midi = journals
             .into_iter()
-            .map(|t| Box::new(t) as Box<dyn NoteSink>)
+            .zip(midi_takes)
+            .map(|(file, t)| MidiTakeFile {
+                file,
+                sink: Box::new(t) as Box<dyn NoteSink>,
+            })
             .collect();
         Ok(Takes { audio, midi })
     }
@@ -583,6 +599,7 @@ impl Services for AppServices {
     fn mark_pass(&mut self, marker: &PassMarker) -> Result<(), String> {
         let recording = Recording {
             device_latency: marker.device_latency,
+            midi_latency: marker.midi_latency,
             start: None,
             tracks: marker.tracks.clone(),
         };
@@ -616,11 +633,22 @@ impl Services for AppServices {
             Recovery::Takes(pass) => Some(Recovered::Takes(RecoveredPass {
                 tracks: pass.tracks,
                 frames: pass.frames,
+                midi: pass
+                    .midi
+                    .into_iter()
+                    .map(|m| RecoveredMidi {
+                        track: m.track,
+                        file: m.file,
+                        messages: m.messages,
+                        frames: m.frames,
+                    })
+                    .collect(),
                 info: TakeInfo {
                     start_frame: pass.start.start_frame,
                     latency: pass.start.plan_latency,
                 },
                 device_latency: pass.device_latency,
+                midi_latency: pass.midi_latency,
             })),
             Recovery::Discarded { reason } => {
                 eprintln!("debussy: a take interrupted by a crash was discarded: {reason}");

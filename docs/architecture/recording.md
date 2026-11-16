@@ -94,8 +94,9 @@ autosave. The new clip goes on the top layer. An empty take is discarded and its
 
 ## Take recovery
 
-While a pass is recorded, `recording.json` in the bundle names its tracks and their files and the
-device latency at the start; once capture begins, it adds the start frame and plan latency. It is
+While a pass is recorded, `recording.json` in the bundle names its tracks and their files (an
+audio track's WAV files, or a MIDI track's journal) and the device and MIDI placement latencies at
+the start; once capture begins, it adds the start frame and plan latency. It is
 written crash-safely like `project.json` and removed once the takes are placed or discarded.
 
 On open, a marker present is read as untrusted input within the limits in `docs/architecture/project.md`
@@ -104,6 +105,19 @@ partial last frame is cut off, and a file not laid out as the writer lays files 
 The takes are then placed as in [Take placement](#take-placement), with every file's length set
 to the shortest, as one undo step that is autosaved before the marker is removed, and the status
 line says so.
+
+A MIDI take's journal, `take-<n>.midilog` in `audio/`, is a 16-byte header (magic `DBMIDILG`, a
+little-endian `u32` version 1, a `u32` sample rate) and then one 16-byte record per message: a
+little-endian `u64` take frame, the status and data bytes (an unused one 0), and five zero bytes.
+The writer thread appends each message and syncs the journal as it syncs WAV files and when the
+take ends. On open a journal is read as untrusted input; a partial last record is ignored, and a
+wrong magic, version or rate, a record that is not one channel message, a frame earlier than the
+one before, or more records than the MIDI event limit in `docs/architecture/project.md`
+"Loading" drops the take. A recovered MIDI take is the frame after its last message long and is
+placed as in [MIDI recording](#midi-recording), in the same step as the audio takes; one identical
+to a clip already on its track is not added. A journal is deleted once its take is placed or
+discarded; a journal that is gone counts as placed
+([ADR-0151](../adrs/0151-midi-takes-are-journaled-to-a-fixed-record-log-so.md)).
 
 A track no longer in the project, whose layout does not match its files, or with a file that
 cannot be repaired is skipped; files already used by the project are skipped. A marker that
@@ -124,7 +138,8 @@ while it is armed and monitored.
 
 While capturing, each live message goes to the take at its frame from the take's first frame.
 Messages heard during the count-in are not captured, so a note held from the count-in has no
-note-on in the take. The writer thread collects a pass's MIDI messages in memory; a message the
+note-on in the take. The writer thread collects a pass's MIDI messages in memory and in each
+take's journal (see [Take recovery](#take-recovery)); a message the
 take's queue of 4096 cannot hold is dropped and counted as an overrun. When the pass ends, the
 messages become a sequence the take's length long:
 
@@ -136,6 +151,5 @@ messages become a sequence the take's length long:
 
 A MIDI take is placed like an audio take (see [Take placement](#take-placement)), shifted back by
 the device's output latency plus one device block, the delay with which live input is stamped,
-and the plan latency, instead of the device latency. A take with no notes adds no clip. MIDI takes
-are not in the crash marker and are lost in a crash
+and the plan latency, instead of the device latency. A take with no notes adds no clip
 ([ADR-0150](../adrs/0150-midi-tracks-are-recorded-and-monitored-through-a.md)).

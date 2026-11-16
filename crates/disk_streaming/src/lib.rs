@@ -20,7 +20,8 @@
 //! disk falls behind, frames are dropped, counted as an overrun, and written as silence so the
 //! take stays aligned. [`Take::end`] ends a take; the writer then finishes its file and reports a
 //! [`TakeEvent`]. [`Recorder::start_with_midi`] also returns a [`MidiTake`] per armed MIDI
-//! track, whose messages the same writer collects in memory.
+//! track, whose messages the same writer collects in memory and appends to the take's crash
+//! journal.
 //!
 //! # Modules
 //!

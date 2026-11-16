@@ -1,6 +1,7 @@
 //! Recording to disk: the control side, [`Recorder`], and its writer thread, which appends each
-//! take channel's queued blocks to a new WAV file and collects each MIDI take's messages
-//! (`docs/architecture/recording.md` "Writer thread", "MIDI recording").
+//! take channel's queued blocks to a new WAV file, and collects each MIDI take's messages while
+//! appending them to its journal (`docs/architecture/recording.md` "Writer thread", "MIDI
+//! recording").
 //!
 //! This is not real-time code: it creates, writes and syncs files, sleeps when idle, and starts
 //! and joins its thread. The crate's `clippy.toml` bans those operations for the real-time side,
@@ -17,6 +18,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use audio_buffers::{Block, BlockPool, Consumer, Layout, Producer, queue};
+use midi::{journal_header, journal_record};
 use wav_files::{Channels, SampleFormat, Spec, WavWriter};
 
 use crate::error::Error;
@@ -180,17 +182,49 @@ struct WriterMidi {
     messages: Consumer<CapturedMessage>,
     /// The messages so far, in arrival order.
     collected: Vec<CapturedMessage>,
+    /// The take's crash journal; dropped after a failure, the take going on in memory.
+    journal: Option<BufWriter<File>>,
+    /// When the journal was last synced, and how often to.
+    synced: Instant,
+    sync_interval: Duration,
+    /// Whether records have been appended since the last sync.
+    unsynced: bool,
     done: bool,
 }
 
 impl WriterMidi {
-    /// Takes every message queued. Returns whether there were any.
+    /// Takes every message queued, appending each to the journal. Returns whether there were
+    /// any.
     fn drain(&mut self) -> bool {
         let before = self.collected.len();
-        while let Some(message) = self.messages.try_pop() {
-            self.collected.push(message);
+        while let Some((frame, bytes)) = self.messages.try_pop() {
+            self.collected.push((frame, bytes));
+            if let Some(journal) = &mut self.journal
+                && journal.write_all(&journal_record(frame, bytes)).is_err()
+            {
+                self.journal = None;
+            }
+            self.unsynced = true;
         }
         self.collected.len() > before
+    }
+
+    /// Flushes and syncs the journal if records are waiting and the interval has passed, or at
+    /// once if `now`, so a crash loses at most about that much of the take.
+    fn sync(&mut self, now: bool) {
+        if !self.unsynced || (!now && self.synced.elapsed() < self.sync_interval) {
+            return;
+        }
+        self.unsynced = false;
+        self.synced = Instant::now();
+        if let Some(journal) = &mut self.journal
+            && journal
+                .flush()
+                .and_then(|()| journal.get_ref().sync_data())
+                .is_err()
+        {
+            self.journal = None;
+        }
     }
 }
 
@@ -235,8 +269,10 @@ fn run(
         for (i, take) in midi.iter_mut().enumerate().filter(|(_, t)| !t.done) {
             let ended = take.shared.ended.load(Ordering::Acquire);
             idle &= !take.drain();
+            take.sync(ended || stopping);
             if ended || stopping {
                 take.done = true;
+                take.journal = None;
                 let frames = if ended {
                     take.shared.frames.load(Ordering::Relaxed)
                 } else {
@@ -286,22 +322,25 @@ impl Recorder {
     /// [`Error::Io`] if a file exists or cannot be created (any already created are removed),
     /// [`Error::Wav`], [`Error::Buffers`], or [`Error::Thread`].
     pub fn start(paths: &[PathBuf], config: RecorderConfig) -> Result<(Self, Vec<Take>), Error> {
-        Recorder::start_with_midi(paths, 0, config).map(|(recorder, takes, _)| (recorder, takes))
+        Recorder::start_with_midi(paths, &[], config).map(|(recorder, takes, _)| (recorder, takes))
     }
 
-    /// As [`Recorder::start`], with `midi` MIDI takes as well, numbered after the audio ones: the
-    /// writer collects each one's messages, which [`Recorder::take_messages`] returns once its
-    /// [`TakeEvent`] has come. Returns a [`MidiTake`] per MIDI take, in order, for the real-time
-    /// thread.
+    /// As [`Recorder::start`], with a MIDI take as well for each of `journals`, numbered after
+    /// the audio ones. The writer creates a crash journal at each path (ADR-0151), appends each
+    /// message to it and syncs it as often as the WAV files, and collects the messages, which
+    /// [`Recorder::take_messages`] returns once its [`TakeEvent`] has come. A journal that fails
+    /// to write is abandoned; the take goes on in memory. Returns a [`MidiTake`] per MIDI take,
+    /// in order, for the real-time thread.
     ///
     /// # Errors
     ///
     /// As [`Recorder::start`].
     pub fn start_with_midi(
         paths: &[PathBuf],
-        midi: usize,
+        journals: &[PathBuf],
         config: RecorderConfig,
     ) -> Result<(Self, Vec<Take>, Vec<MidiTake>), Error> {
+        let midi = journals.len();
         let frames = (config.buffer.as_secs_f64() * f64::from(config.sample_rate)).ceil() as u64;
         // Enough blocks for the buffer, plus one being filled and one being written.
         let blocks = usize::try_from(frames.div_ceil(BLOCK_FRAMES as u64))
@@ -312,7 +351,7 @@ impl Recorder {
             sample_rate: config.sample_rate,
             format: SampleFormat::Float32,
         };
-        let mut created: Vec<&PathBuf> = Vec::with_capacity(paths.len());
+        let mut created: Vec<&PathBuf> = Vec::with_capacity(paths.len() + midi);
         let result = (|| -> Result<_, Error> {
             let mut shared = Vec::with_capacity(paths.len());
             let mut writers = Vec::with_capacity(paths.len());
@@ -348,13 +387,22 @@ impl Recorder {
             let mut midi_shared = Vec::with_capacity(midi);
             let mut midi_writers = Vec::with_capacity(midi);
             let mut midi_takes = Vec::with_capacity(midi);
-            for _ in 0..midi {
+            for path in journals {
+                let file = File::create_new(path)?;
+                created.push(path);
+                let mut journal = BufWriter::new(file);
+                journal.write_all(&journal_header(config.sample_rate))?;
                 let take_shared = Arc::new(MidiTakeShared::default());
                 let (tx, rx) = queue::channel(MIDI_TAKE_CAPACITY)?;
                 midi_writers.push(WriterMidi {
                     shared: Arc::clone(&take_shared),
                     messages: rx,
                     collected: Vec::new(),
+                    journal: Some(journal),
+                    synced: Instant::now(),
+                    sync_interval: config.sync_interval,
+                    // The header is synced with the first records.
+                    unsynced: true,
                     done: false,
                 });
                 midi_takes.push(MidiTake::new(Arc::clone(&take_shared), tx));

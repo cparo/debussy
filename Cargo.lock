@@ -578,6 +578,7 @@ version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "audio_engine",
+ "midi",
  "realtime_guard",
  "signal_graph",
  "thiserror 2.0.21",
@@ -1677,6 +1678,7 @@ version = "0.1.0"
 dependencies = [
  "audio_buffers",
  "realtime_guard",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2393,6 +2395,7 @@ name = "project_storage"
 version = "0.1.0"
 dependencies = [
  "audio_buffers",
+ "midi",
  "modulation",
  "project_model",
  "serde",
