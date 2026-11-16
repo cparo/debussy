@@ -26,7 +26,10 @@ a shared, immutable note sequence: notes (start, length, channel, pitch, velocit
 changes (frame, channel, controller, value), timed in frames from the sequence's start. Its offset
 and length window the sequence as an audio clip's window a file, so every clip operation and range
 edit applies to it, and a split leaves both pieces sharing one sequence. A note plays if it starts
-inside the window and is cut off at the window's end. In a sequence, channels are 0–15, pitches,
+inside the window and is cut off at the window's end. Where MIDI clips overlap, the top clip plays
+and a lower clip plays only where nothing above covers it, with no crossfade; a note plays only if
+it starts in a stretch of its clip that shows, and is cut off where that stretch ends
+([ADR-0145](../adrs/0145-midi-clips-play-through-a-per-track-real-time-note.md)). In a sequence, channels are 0–15, pitches,
 controllers and values 0–127, velocities 1–127; every note is at least one frame long and ends
 within the sequence; notes are sorted by (start, channel, pitch) and controls by frame; no two
 notes on the same channel and pitch overlap. A MIDI clip has no gain and no fades, and a clip's

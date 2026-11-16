@@ -15,6 +15,9 @@
 //! [`TakeSink`]s take the captured input (normally a disk recorder), and places each finished
 //! take where [`TakeInfo::placement`] says.
 //!
+//! Each MIDI track's clips, flattened onto the timeline as a [`MidiTrack`] and set with
+//! [`Engine::set_midi_tracks`], are played into its event source with frame-accurate events.
+//!
 //! A [`ClickTrack`] set with [`Engine::set_click`] is mixed into the output after the plan
 //! while playing; offline render never includes it.
 //!
@@ -29,6 +32,8 @@
 //! - `click`: [`ClickTrack`], the metronome click.
 //! - `capture`: [`ArmedTrack`], [`TakeSink`], [`TakeInfo`] and the device input.
 //! - `feed`: [`TrackFeed`], [`TrackFeeds`], [`Streams`] and [`RenderFeed`].
+//! - `midi`: [`MidiTrack`], [`NoteSpan`] and [`ControlPoint`], a MIDI track's clips played into
+//!   its event source.
 //! - `block`: the per-block step shared by playback and render.
 //! - `processor`: [`Processor`], the real-time side.
 //! - `engine`: [`Engine`], the control side, and [`TransportState`].
@@ -43,6 +48,7 @@ mod click;
 mod engine;
 mod error;
 mod feed;
+mod midi;
 mod processor;
 mod render;
 mod timeline;
@@ -52,6 +58,7 @@ pub use click::{ClickTrack, OFFBEAT_GAIN};
 pub use engine::{Engine, TransportState};
 pub use error::Error;
 pub use feed::{RenderFeed, Streams, TrackFeed, TrackFeeds};
+pub use midi::{ControlPoint, MidiTrack, NoteSpan};
 pub use processor::Processor;
 pub use render::render;
 pub use timeline::{CROSSFADE_SECONDS, ChannelClip, ClipAudio, TrackRenderer};

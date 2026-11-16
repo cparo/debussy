@@ -107,6 +107,7 @@ For example: "butterworth-filter", "audio-track-storage-chunk"
   - [Disk streaming](engine.md#disk-streaming)
   - [Real-time thread](engine.md#real-time-thread)
   - [Clip playback](engine.md#clip-playback)
+  - [MIDI clip playback](engine.md#midi-clip-playback)
   - [Transport](engine.md#transport)
   - [Offline render](engine.md#offline-render)
 - [Import and Export](import-export.md)

@@ -12,6 +12,7 @@ use crate::click::ClickTrack;
 use crate::engine::{Command, Retired, Shared, TransportState};
 use crate::error::Error;
 use crate::feed::TrackFeeds;
+use crate::midi::MidiTrack;
 
 /// Runs the engine on the real-time thread: call [`Processor::process`] once per device block.
 ///
@@ -20,6 +21,7 @@ pub struct Processor {
     runner: Runner,
     output: NodeId,
     tracks: Vec<TrackFeeds>,
+    midi: Vec<MidiTrack>,
     armed: Vec<ArmedTrack>,
     click: Option<ClickTrack>,
     input: Input,
@@ -54,6 +56,7 @@ impl Processor {
             runner,
             output,
             tracks: Vec::new(),
+            midi: Vec::new(),
             armed: Vec::new(),
             click: None,
             input,
@@ -75,7 +78,8 @@ impl Processor {
     /// pending commands, starts playback (or recording's count-in) once every feed is primed,
     /// fills the track sources
     /// (silence unless playing; armed tracks' input or silence, see
-    /// `docs/architecture/recording.md` "Input monitoring"), hands the input to the takes while
+    /// `docs/architecture/recording.md` "Input monitoring") and the MIDI tracks' event sources
+    /// (`docs/architecture/engine.md` "MIDI clip playback"), hands the input to the takes while
     /// recording, publishes each input's peak for the meters while armed, runs the plan, adds
     /// the click while playing with it on (`docs/architecture/recording.md` "Click track") and
     /// advances the playhead. The graph runs while stopped too, so plans swap, tails ring out
@@ -140,11 +144,13 @@ impl Processor {
             }
             self.input.skip(counted);
             if left.is_empty() {
+                self.report_midi_overflows();
                 self.shared.publish(self.state, self.playhead);
                 return Ok(());
             }
         }
         let result = self.play_part(left, right);
+        self.report_midi_overflows();
         self.shared.publish(self.state, self.playhead);
         result
     }
@@ -164,6 +170,7 @@ impl Processor {
             &mut self.runner,
             self.output,
             &mut self.tracks,
+            &mut self.midi,
             Some(&mut live),
             position,
             false,
@@ -203,6 +210,7 @@ impl Processor {
             &mut self.runner,
             self.output,
             &mut self.tracks,
+            &mut self.midi,
             Some(&mut live),
             position,
             playing,
@@ -245,6 +253,15 @@ impl Processor {
                     let old = std::mem::replace(&mut self.tracks, tracks);
                     self.send_back(Retired::Tracks(old));
                 }
+                Command::Midi(mut midi) => {
+                    for track in &mut midi {
+                        if let Some(old) = self.midi.iter().find(|t| t.source() == track.source()) {
+                            track.carry_over(old);
+                        }
+                    }
+                    let old = std::mem::replace(&mut self.midi, midi);
+                    self.send_back(Retired::Midi(old));
+                }
                 Command::Click(click) => {
                     let old = self.click.replace(click);
                     self.send_back(Retired::Click(old));
@@ -285,6 +302,14 @@ impl Processor {
                 }
                 Command::Locate { frame } => self.playhead = frame,
             }
+        }
+    }
+
+    /// Adds the events the MIDI tracks' buffers refused since the last call to the shared count.
+    fn report_midi_overflows(&mut self) {
+        let refused: u64 = self.midi.iter_mut().map(MidiTrack::take_overflows).sum();
+        if refused > 0 {
+            self.shared.add_midi_overflows(refused);
         }
     }
 

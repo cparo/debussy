@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 
-use audio_engine::TrackFeeds;
+use audio_engine::{MidiTrack, TrackFeeds};
 use dsp::{Depth, Ditherer, fold_to_mono};
 use platform_interfaces::{Codecs, EncodeSettings, Encoder, FlacDepth};
 use signal_graph::{NodeId, Runner};
@@ -101,6 +101,8 @@ pub struct OfflineRender<'a> {
     pub output: NodeId,
     /// The track feeds, positioned at the range's start.
     pub tracks: &'a mut [TrackFeeds],
+    /// The MIDI tracks; notes sounding at the range's start are chased.
+    pub midi: &'a mut [MidiTrack],
     /// The range's first timeline frame, where curves are read from.
     pub start: u64,
     /// The range's length, in frames.
@@ -251,6 +253,7 @@ pub fn export(
         render.runner,
         render.output,
         render.tracks,
+        render.midi,
         render.start,
         render.frames,
         render.block_frames,

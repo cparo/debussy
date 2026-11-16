@@ -34,8 +34,10 @@ pub struct RenderGraph {
     pub runner: Runner,
     /// The output sink.
     pub output: GraphNodeId,
-    /// Each track's source.
+    /// Each audio track's source.
     pub sources: BTreeMap<TrackId, GraphNodeId>,
+    /// Each MIDI track's event source.
+    pub event_sources: BTreeMap<TrackId, GraphNodeId>,
 }
 
 fn refused(error: MirrorError) -> Error {
@@ -67,6 +69,18 @@ fn sources(mirror: &Mirror) -> BTreeMap<TrackId, GraphNodeId> {
         .iter()
         .filter_map(|(key, node)| match (key, &node.target.shape) {
             (Key::Track(track), Shape::Source(_)) => Some((*track, node.id)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The event sources of every MIDI track in `mirror`.
+fn event_sources(mirror: &Mirror) -> BTreeMap<TrackId, GraphNodeId> {
+    mirror
+        .nodes
+        .iter()
+        .filter_map(|(key, node)| match (key, &node.target.shape) {
+            (Key::Track(track), Shape::EventSource) => Some((*track, node.id)),
             _ => None,
         })
         .collect()
@@ -221,9 +235,14 @@ impl Bridge {
         self.mirror.nodes.get(&Key::Output).map(|n| n.id)
     }
 
-    /// Each track's source.
+    /// Each audio track's source.
     pub fn sources(&self) -> BTreeMap<TrackId, GraphNodeId> {
         sources(&self.mirror)
+    }
+
+    /// Each MIDI track's event source.
+    pub fn event_sources(&self) -> BTreeMap<TrackId, GraphNodeId> {
+        event_sources(&self.mirror)
     }
 
     /// The running handle of parameter `name` on routing node `node`, for setting live while a
@@ -320,5 +339,6 @@ pub fn render_graph(state: &State, config: Config) -> Result<RenderGraph, Error>
         runner,
         output,
         sources: sources(&mirror),
+        event_sources: event_sources(&mirror),
     })
 }

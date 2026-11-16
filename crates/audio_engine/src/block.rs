@@ -6,6 +6,7 @@ use signal_graph::{NodeId, Runner};
 use crate::capture::{ArmedTrack, Input, replaces_clips};
 use crate::error::Error;
 use crate::feed::TrackFeeds;
+use crate::midi::MidiTrack;
 
 /// The live side of a block: armed tracks and the device input. Offline render has none.
 pub(crate) struct Live<'a> {
@@ -18,7 +19,8 @@ pub(crate) struct Live<'a> {
 }
 
 /// Runs one block of `left.len()` frames: fills each track's source from its feeds (or with
-/// silence unless `playing`), puts armed tracks' input in their sources and takes (see
+/// silence unless `playing`), each MIDI track's event source with its events (see
+/// [`MidiTrack::fill`]), puts armed tracks' input in their sources and takes (see
 /// [`Live`]), runs the plan with the sources at timeline frame `position` (where curves are
 /// read), and writes the output sink to `left` and `right`, folded to mono on both if `mono`.
 /// Real-time safe if the feeds and sinks are.
@@ -32,6 +34,7 @@ pub(crate) fn run(
     runner: &mut Runner,
     output: NodeId,
     tracks: &mut [TrackFeeds],
+    midi: &mut [MidiTrack],
     live: Option<&mut Live<'_>>,
     position: i64,
     playing: bool,
@@ -54,6 +57,13 @@ pub(crate) fn run(
         return Err(error.into());
     }
     runner.set_transport(position, playing);
+    let midi_position = u64::try_from(position).unwrap_or(0);
+    for track in midi.iter_mut() {
+        if let Some(events) = runner.event_source_mut(track.source()) {
+            // At most the graph's largest block, so it fits.
+            track.fill(events, midi_position, frames as u32, playing);
+        }
+    }
     let (armed, recording): (&[ArmedTrack], bool) = match &live {
         Some(live) => (live.armed, live.recording),
         None => (&[], false),

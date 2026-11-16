@@ -1420,7 +1420,8 @@ impl App {
         self.report(result.map_err(|e| e.to_string()));
     }
 
-    /// Gives the engine feeds for the tracks if they changed since it last took them. Returns
+    /// Gives the engine feeds and MIDI players for the tracks if they changed since it last took
+    /// them. Returns
     /// `false`, with the reason on the status line, if that failed. Only while stopped.
     pub(crate) fn load_feeds(&mut self) -> bool {
         if self.loaded.as_ref() == Some(&self.session.state().tracks) {
@@ -1430,6 +1431,12 @@ impl App {
         match self.services.track_feeds(self.session.state(), &sources) {
             Ok(feeds) => {
                 if let Err(error) = self.engine.set_tracks(feeds) {
+                    self.status = Some(error.to_string());
+                    return false;
+                }
+                let midi =
+                    engine_bridge::midi_tracks(self.session.state(), &self.bridge.event_sources());
+                if let Err(error) = self.engine.set_midi_tracks(midi) {
                     self.status = Some(error.to_string());
                     return false;
                 }

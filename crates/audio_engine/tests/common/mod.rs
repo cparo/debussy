@@ -269,3 +269,137 @@ impl TakeSink for MemorySink {
         self.0.ended.store(true, Ordering::SeqCst);
     }
 }
+
+/// One event a [`Probe`] saw: its output frame (counted from the probe's first block) and its
+/// message bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Seen {
+    pub frame: u64,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+}
+
+impl Seen {
+    /// A note-on (status `0x9n`).
+    pub fn is_note_on(&self) -> bool {
+        self.status & 0xF0 == 0x90
+    }
+
+    /// A note-off (status `0x8n`).
+    pub fn is_note_off(&self) -> bool {
+        self.status & 0xF0 == 0x80
+    }
+
+    /// A control change (status `0xBn`).
+    pub fn is_control(&self) -> bool {
+        self.status & 0xF0 == 0xB0
+    }
+}
+
+/// What a [`Probe`] has seen, read by the test. Recording allocates and locks nothing.
+pub struct ProbeLog {
+    events: Box<[AtomicU64]>,
+    len: AtomicUsize,
+}
+
+impl ProbeLog {
+    /// Every event seen so far, in order.
+    pub fn events(&self) -> Vec<Seen> {
+        self.events[..self.len.load(Ordering::SeqCst)]
+            .iter()
+            .map(|e| {
+                let e = e.load(Ordering::SeqCst);
+                Seen {
+                    frame: e >> 24,
+                    status: (e >> 16) as u8,
+                    data1: (e >> 8) as u8,
+                    data2: e as u8,
+                }
+            })
+            .collect()
+    }
+
+    /// Forgets every event seen so far.
+    pub fn clear(&self) {
+        self.len.store(0, Ordering::SeqCst);
+    }
+}
+
+/// A node that logs every event on its input with the output frame it falls on, and outputs
+/// silence.
+pub struct Probe {
+    log: Arc<ProbeLog>,
+    frame: u64,
+}
+
+impl Node for Probe {
+    fn inputs(&self) -> Vec<Port> {
+        vec![Port::event("in")]
+    }
+
+    fn outputs(&self) -> Vec<Port> {
+        vec![Port::audio("out", Layout::Mono)]
+    }
+
+    fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
+        let frames = outputs.frames();
+        for event in inputs.events(0) {
+            let len = self.log.len.load(Ordering::SeqCst);
+            if let Some(slot) = self.log.events.get(len) {
+                let [status, data1, data2] = match event.message.bytes() {
+                    [a, b, c] => [*a, *b, *c],
+                    [a, b] => [*a, *b, 0],
+                    _ => [0, 0, 0],
+                };
+                let frame = self.frame + u64::from(event.frame);
+                slot.store(
+                    (frame << 24)
+                        | (u64::from(status) << 16)
+                        | (u64::from(data1) << 8)
+                        | u64::from(data2),
+                    Ordering::SeqCst,
+                );
+                self.log.len.store(len + 1, Ordering::SeqCst);
+            }
+        }
+        if let Some(out) = outputs.channel_mut(0, 0) {
+            out.fill(0.0);
+        }
+        self.frame += frames as u64;
+    }
+}
+
+/// A graph of one MIDI track's event source into a [`Probe`], whose silent output goes to the
+/// stereo sink.
+pub struct MidiGraph {
+    pub graph: Graph,
+    pub runner: Runner,
+    pub source: NodeId,
+    pub output: NodeId,
+    pub log: Arc<ProbeLog>,
+}
+
+pub fn midi_graph() -> Result<MidiGraph, Box<dyn Error>> {
+    let (mut graph, runner) = Graph::new(Config::new(RATE, 512))?;
+    let log = Arc::new(ProbeLog {
+        events: (0..8192).map(|_| AtomicU64::new(0)).collect(),
+        len: AtomicUsize::new(0),
+    });
+    let source = graph.add_event_source();
+    let probe = graph.add_node(Box::new(Probe {
+        log: Arc::clone(&log),
+        frame: 0,
+    }));
+    let output = graph.add_sink(Layout::Stereo);
+    graph.connect(source, 0, probe, 0)?;
+    graph.connect(probe, 0, output, 0)?;
+    graph.commit()?;
+    Ok(MidiGraph {
+        graph,
+        runner,
+        source,
+        output,
+        log,
+    })
+}

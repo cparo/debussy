@@ -71,6 +71,24 @@ track channel, a handle that moves every feed, and a reader of stored audio. It 
 does not see `project_model`. `disk_streaming` implements those interfaces over its streams and the
 stored WAV files ([ADR-0047](../adrs/0047-audio-engine-defines-its-feeds-and-disk-streaming.md)).
 
+## MIDI clip playback
+
+Each MIDI track's clips are flattened onto the timeline off the real-time thread: where clips
+overlap the top clip plays, and a lower clip plays only where no clip above covers it; a note plays
+if it starts inside a stretch of its clip that shows and is cut off at that stretch's end; a
+control change plays if it falls inside one. The engine holds one player per MIDI track, replaced
+only while the transport is stopped or paused, which writes the track's events into its graph event
+source each block, stamped with their frames in the block; at one frame, note-offs come before
+control changes and control changes before note-ons.
+
+Whenever a block does not follow on from the last one played (play, locate, a render's first block,
+or any other jump of the playhead), the player first sends a note-off for every sounding note, then
+chases at the block's first frame: each controller's last value before that point, then note-ons
+for the notes sounding there. While the transport is not playing it sends note-offs for every
+sounding note. A note-off the event buffer refuses is sent at the next block; every refused event
+is counted, and the count is readable from the control side
+([ADR-0145](../adrs/0145-midi-clips-play-through-a-per-track-real-time-note.md)).
+
 ## Transport
 
 Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last
@@ -82,7 +100,8 @@ counting in and the playhead holds; the playhead cannot be moved while recording
 
 Stop and pause silence the plan at once: the engine resets it, so every node's state and every
 feedback and compensation delay is cleared, and from the next block the output carries only
-what the sources give, such as monitored input ([ADR-0137](../adrs/0137-stop-and-pause-silence-the-plan-s-tails-at-once.md)).
+what the sources give, such as monitored input; every sounding MIDI note gets its note-off in that
+block, as on any jump of the playhead (see "MIDI clip playback") ([ADR-0137](../adrs/0137-stop-and-pause-silence-the-plan-s-tails-at-once.md)).
 
 A mono listening switch in the engine's output stage, after the plan, sends `(L + R) × 0.7071`
 to both output channels. It is a monitoring setting and is not saved in the project ([ADR-0046](../adrs/0046-the-engine-renders-clips-on-the-reader-thread-and.md)).
