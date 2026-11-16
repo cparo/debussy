@@ -23,6 +23,7 @@ const MIGRATIONS: &[Migration] = &[
     five_to_six,
     six_to_seven,
     seven_to_eight,
+    eight_to_nine,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -99,6 +100,30 @@ fn six_to_seven(mut value: Value) -> Result<Value, String> {
 /// Version 8 added instrument nodes (ADR-0147); no version 7 file can hold one, so nothing
 /// changes.
 fn seven_to_eight(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
+
+/// Version 9 added a required `key` and `names` to each MIDI track (ADR-0153); a version 8 MIDI
+/// track gets C major and no names.
+fn eight_to_nine(mut value: Value) -> Result<Value, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("the file is not a JSON object")?;
+    if let Some(tracks) = object.get_mut("tracks").and_then(Value::as_array_mut) {
+        for track in tracks {
+            // A track without a kind is left for parsing to refuse.
+            let kind = track.get_mut("kind").and_then(Value::as_object_mut);
+            if let Some(kind) = kind
+                && kind.get("kind").and_then(Value::as_str) == Some("midi")
+            {
+                kind.insert(
+                    "key".to_owned(),
+                    serde_json::json!({"mode": "major", "root": 0}),
+                );
+                kind.insert("names".to_owned(), Value::Array(Vec::new()));
+            }
+        }
+    }
     Ok(value)
 }
 
@@ -186,7 +211,7 @@ fn depth(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{SavedLayout, SavedTrackKind};
+    use crate::format::{SavedKey, SavedLayout, SavedTrackKind};
     use std::error::Error as StdError;
 
     const V1: &str =
@@ -249,7 +274,7 @@ mod tests {
         let saved = parse(Path::new("p"), v6)?;
         assert_eq!(saved.format_version, FORMAT_VERSION);
         assert!(saved.sequences.is_empty());
-        let kinds: Vec<_> = saved.tracks.iter().map(|t| t.kind).collect();
+        let kinds: Vec<_> = saved.tracks.iter().map(|t| t.kind.clone()).collect();
         assert_eq!(
             kinds,
             vec![
@@ -271,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_migrates_version_seven_unchanged() -> Result<(), Box<dyn StdError>> {
+    fn test_parse_migrates_version_seven_to_c_major() -> Result<(), Box<dyn StdError>> {
         let v7 = r#"{"format_version":7,"sample_rate":48000,"connections":[],
             "nodes":[{"id":1,"kind":{"kind":"effect","effect":"delay","parameters":{}},
                       "curve_ports":{}}],
@@ -281,7 +306,39 @@ mod tests {
         let saved = parse(Path::new("p"), v7)?;
         assert_eq!(saved.format_version, FORMAT_VERSION);
         assert_eq!(saved.nodes.len(), 1);
-        assert_eq!(saved.tracks[0].kind, SavedTrackKind::Midi {});
+        assert_eq!(saved.tracks[0].kind, c_major());
+        Ok(())
+    }
+
+    fn c_major() -> SavedTrackKind {
+        SavedTrackKind::Midi {
+            key: SavedKey::Major { root: 0 },
+            names: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_parse_migrates_version_eight_midi_tracks_to_c_major() -> Result<(), Box<dyn StdError>> {
+        let v8 = r#"{"format_version":8,"sample_rate":48000,"connections":[],"nodes":[],
+            "tracks":[{"id":1,"name":"a","kind":{"kind":"audio","layout":"mono"},"clips":[]},
+                      {"id":2,"name":"m","kind":{"kind":"midi"},"clips":[]}],
+            "tempo":{"bpm":90.0,"beats_per_bar":3,"beat_unit":4},"curves":[],
+            "sequences":[]}"#;
+        let saved = parse(Path::new("p"), v8)?;
+        assert_eq!(saved.format_version, FORMAT_VERSION);
+        assert_eq!(
+            saved.tracks[0].kind,
+            SavedTrackKind::Audio {
+                layout: SavedLayout::Mono
+            }
+        );
+        assert_eq!(saved.tracks[1].kind, c_major());
+        // A version 9 MIDI track must have its key and names.
+        let v9 = v8.replace("\"format_version\":8", "\"format_version\":9");
+        assert!(matches!(
+            parse(Path::new("p"), &v9),
+            Err(Error::Json { .. })
+        ));
         Ok(())
     }
 
@@ -293,12 +350,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":9");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":10");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 9,
-                supported: 8,
+                found: 10,
+                supported: 9,
                 ..
             })
         ));

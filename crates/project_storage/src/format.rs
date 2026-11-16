@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 8;
+pub const FORMAT_VERSION: u32 = 9;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,14 +103,40 @@ pub(crate) enum SavedLayout {
 }
 
 /// Since version 7: what a track holds; before, every track was audio with a `layout`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SavedTrackKind {
     Audio {
         layout: SavedLayout,
     },
+    Midi {
+        /// Since version 9: the track's key.
+        key: SavedKey,
+        /// Since version 9: pitch names, in strictly ascending pitch order.
+        names: Vec<SavedName>,
+    },
+}
+
+/// Since version 9: a MIDI track's key (`docs/architecture/track-pane.md` "Key and pitch
+/// names"), as `{"mode": "major", "root": 0}` or `{"mode": "indefinite"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SavedKey {
+    /// A major key; `root` is the pitch class, 0 (C) to 11.
+    Major { root: u8 },
+    /// A minor key; `root` is the pitch class, 0 (C) to 11.
+    Minor { root: u8 },
     /// A struct variant, not a unit one, so that unknown fields are refused.
-    Midi {},
+    Indefinite {},
+}
+
+/// Since version 9: the name of one pitch of a MIDI track.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SavedName {
+    /// The MIDI pitch, 0 to 127.
+    pub pitch: u8,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

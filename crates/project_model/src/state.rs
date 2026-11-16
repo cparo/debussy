@@ -3,6 +3,7 @@
 use audio_buffers::Layout;
 
 use crate::error::Error;
+use crate::notation::Notation;
 use crate::routing::{Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind};
 use crate::tempo::Tempo;
 use crate::types::{ClipId, CurveId, Source, TrackId, TrackKind};
@@ -101,6 +102,8 @@ pub struct Track {
     pub kind: TrackKind,
     /// Its clips from the bottom layer up. Where clips overlap, the higher one plays.
     pub clips: Vec<(ClipId, Clip)>,
+    /// A MIDI track's key and pitch names; `None` for an audio track, which has none.
+    pub notation: Option<Notation>,
 }
 
 impl Track {
@@ -114,13 +117,14 @@ impl Track {
         Track::of_kind(id, name, TrackKind::Midi)
     }
 
-    /// An empty track of `kind`.
+    /// An empty track of `kind`; a MIDI track in C major with no pitch names.
     pub fn of_kind(id: TrackId, name: &str, kind: TrackKind) -> Self {
         Track {
             id,
             name: name.to_owned(),
             kind,
             clips: Vec::new(),
+            notation: (kind == TrackKind::Midi).then(Notation::default),
         }
     }
 

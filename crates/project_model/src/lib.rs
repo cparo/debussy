@@ -32,6 +32,7 @@
 //!
 //! - `types`: [`TrackId`], [`ClipId`], [`CurveId`], [`AudioFile`], [`Source`], [`TrackKind`].
 //! - `midi`: [`Sequence`], [`Note`], [`Control`].
+//! - `notation`: a MIDI track's [`Key`] and pitch names ([`Notation`]), and pitch naming.
 //! - `state`: [`State`], [`Track`], [`Clip`], [`CurveLane`].
 //! - `routing`: [`Node`], [`NodeKind`], [`Connection`], [`Endpoint`] and their ids.
 //! - `edit`: [`Edit`].
@@ -45,6 +46,7 @@
 mod edit;
 mod error;
 mod midi;
+pub mod notation;
 mod range;
 mod routing;
 mod session;
@@ -55,6 +57,7 @@ mod types;
 pub use edit::Edit;
 pub use error::Error;
 pub use midi::{Control, Note, Sequence};
+pub use notation::{Key, Mode, Notation};
 pub use range::{Excerpt, Lane, Range};
 pub use routing::{
     Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId,

@@ -8,15 +8,16 @@ use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
 use project_model::{
     AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane, Edit, Endpoint,
-    MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId, NodeKind, Note, Position, Sequence, Side,
-    Source, State, Tempo, Track, TrackId, TrackKind, WireHandle, WirePoint, WireShape,
+    Key, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Mode, Node, NodeId, NodeKind, Notation, Note,
+    Position, Sequence, Side, Source, State, Tempo, Track, TrackId, TrackKind, WireHandle,
+    WirePoint, WireShape,
 };
 
 use crate::format::{
     FORMAT_VERSION, SavedClip, SavedConnection, SavedCurve, SavedEndpoint, SavedFile, SavedHandle,
-    SavedLayout, SavedNode, SavedNodeKind, SavedPoint, SavedPosition, SavedProject, SavedSequence,
-    SavedSide, SavedSource, SavedTempo, SavedTrack, SavedTrackKind, SavedWireHandle,
-    SavedWirePoint,
+    SavedKey, SavedLayout, SavedName, SavedNode, SavedNodeKind, SavedPoint, SavedPosition,
+    SavedProject, SavedSequence, SavedSide, SavedSource, SavedTempo, SavedTrack, SavedTrackKind,
+    SavedWireHandle, SavedWirePoint,
 };
 
 fn side_to_saved(side: Option<Side>) -> Option<SavedSide> {
@@ -356,7 +357,27 @@ fn track_to_saved(track: &Track, sequences: &mut SequenceTable) -> SavedTrack {
             TrackKind::Audio(layout) => SavedTrackKind::Audio {
                 layout: layout_to_saved(layout),
             },
-            TrackKind::Midi => SavedTrackKind::Midi {},
+            TrackKind::Midi => {
+                let notation = track.notation.clone().unwrap_or_default();
+                SavedTrackKind::Midi {
+                    key: match notation.key {
+                        Key::Tonal {
+                            root,
+                            mode: Mode::Major,
+                        } => SavedKey::Major { root },
+                        Key::Tonal {
+                            root,
+                            mode: Mode::Minor,
+                        } => SavedKey::Minor { root },
+                        Key::Indefinite => SavedKey::Indefinite {},
+                    },
+                    names: notation
+                        .names
+                        .into_iter()
+                        .map(|(pitch, name)| SavedName { pitch, name })
+                        .collect(),
+                }
+            }
         },
         clips: track
             .clips
@@ -384,6 +405,31 @@ fn track_to_saved(track: &Track, sequences: &mut SequenceTable) -> SavedTrack {
             })
             .collect(),
     }
+}
+
+/// A MIDI track's key and names from the file: a root of 0 to 11, names in strictly ascending
+/// pitch order, within `project_model::notation`'s limits.
+fn notation_from_saved(key: SavedKey, names: Vec<SavedName>) -> Result<Notation, String> {
+    let key = match key {
+        SavedKey::Major { root } => Key::Tonal {
+            root,
+            mode: Mode::Major,
+        },
+        SavedKey::Minor { root } => Key::Tonal {
+            root,
+            mode: Mode::Minor,
+        },
+        SavedKey::Indefinite {} => Key::Indefinite,
+    };
+    ensure(names.windows(2).all(|w| w[0].pitch < w[1].pitch), || {
+        "pitch names are not in strictly ascending pitch order".to_owned()
+    })?;
+    let notation = Notation {
+        key,
+        names: names.into_iter().map(|n| (n.pitch, n.name)).collect(),
+    };
+    notation.check().map_err(|e| e.to_string())?;
+    Ok(notation)
 }
 
 fn kind_to_saved(kind: &NodeKind) -> SavedNodeKind {
@@ -580,11 +626,18 @@ pub(crate) fn from_saved(saved: SavedProject) -> Result<State, String> {
         ensure(item_ids.insert(saved_track.id), || {
             format!("id {} is used twice", saved_track.id)
         })?;
-        let kind = match saved_track.kind {
-            SavedTrackKind::Audio { layout } => TrackKind::Audio(layout_from_saved(layout)),
-            SavedTrackKind::Midi {} => TrackKind::Midi,
+        let (kind, notation) = match saved_track.kind {
+            SavedTrackKind::Audio { layout } => (TrackKind::Audio(layout_from_saved(layout)), None),
+            SavedTrackKind::Midi { key, names } => (
+                TrackKind::Midi,
+                Some(
+                    notation_from_saved(key, names)
+                        .map_err(|e| format!("track {}: {e}", saved_track.id))?,
+                ),
+            ),
         };
         let mut track = Track::of_kind(TrackId(saved_track.id), &saved_track.name, kind);
+        track.notation = notation;
         for saved_clip in saved_track.clips {
             ensure(item_ids.insert(saved_clip.id), || {
                 format!("id {} is used twice", saved_clip.id)
@@ -754,6 +807,61 @@ mod tests {
             notes: vec![[0, 1, 0, 60, 100]; notes],
             controls: vec![[0, 0, 7, 0]; controls],
         }
+    }
+
+    fn name(pitch: u8, name: &str) -> SavedName {
+        SavedName {
+            pitch,
+            name: name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_notation_round_trips_tonal_and_indefinite() -> Result<(), String> {
+        for notation in [
+            Notation {
+                key: Key::Tonal {
+                    root: 10,
+                    mode: Mode::Minor,
+                },
+                names: BTreeMap::from([(36, "kick".to_owned())]),
+            },
+            Notation::gm_drums(),
+        ] {
+            let mut track = Track::new_midi(TrackId(1), "T");
+            track.notation = Some(notation.clone());
+            let state = State {
+                tracks: vec![track],
+                ..State::default()
+            };
+            let saved = to_saved(&state, 48_000);
+            let SavedTrackKind::Midi { key, names } = saved.tracks[0].kind.clone() else {
+                return Err("not saved as MIDI".to_owned());
+            };
+            assert_eq!(notation_from_saved(key, names)?, notation);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_notation_from_saved_refuses_bad_keys_and_names() {
+        let major = SavedKey::Major { root: 0 };
+        assert!(notation_from_saved(SavedKey::Minor { root: 12 }, Vec::new()).is_err());
+        for names in [
+            vec![name(128, "x")],
+            vec![name(36, "kick"), name(36, "kick")],
+            vec![name(38, "snare"), name(36, "kick")],
+            vec![name(36, "")],
+            vec![name(36, "   ")],
+            vec![name(36, "a\u{7}")],
+            vec![name(36, &"x".repeat(33))],
+        ] {
+            assert!(
+                notation_from_saved(major, names.clone()).is_err(),
+                "{names:?}"
+            );
+        }
+        assert!(notation_from_saved(SavedKey::Indefinite {}, vec![name(36, "kick")]).is_ok());
     }
 
     #[test]
