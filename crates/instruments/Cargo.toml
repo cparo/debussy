@@ -9,7 +9,14 @@ license.workspace = true
 
 [dependencies]
 audio_buffers = { path = "../audio_buffers" }
+dsp = { path = "../dsp" }
+midi = { path = "../midi" }
+modulation = { path = "../modulation" }
 signal_graph = { path = "../signal_graph" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+realtime_guard = { path = "../realtime_guard" }
 
 [lints]
 workspace = true

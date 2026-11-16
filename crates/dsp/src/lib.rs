@@ -20,6 +20,8 @@
 //! - `delay`: [`TapDelay`], a delay line read at any whole-frame tap, or at a fractional one by
 //!   linear or cubic Hermite interpolation.
 //! - `resample`: [`Resampler`], exact rational polyphase sample-rate conversion (ADR-0036).
+//! - `oscillator`: [`Oscillator`], saw, pulse and triangle waves band-limited by a [`MinBlep`]
+//!   table, and [`note_to_hz`] (ADR-0148).
 //! - `oversample`: [`Oversampler`], 2× or 4× oversampling around a nonlinearity (ADR-0102).
 //! - `error`: [`Error`].
 
@@ -33,6 +35,7 @@ mod fft;
 mod filter;
 mod level;
 mod noise;
+mod oscillator;
 mod oversample;
 mod resample;
 
@@ -53,5 +56,6 @@ pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,
 };
 pub use noise::{Noise, Pink};
+pub use oscillator::{BLEP_SAMPLES, MinBlep, Oscillator, Wave, note_to_hz};
 pub use oversample::{Factor, MAX_FACTOR as MAX_OVERSAMPLING, Oversampler};
 pub use resample::{MAX_PHASES, Quality, Resampler};

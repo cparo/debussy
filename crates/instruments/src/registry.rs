@@ -3,6 +3,8 @@
 
 use signal_graph::{Node, ParameterInfo};
 
+use crate::synth::Synth;
+
 /// A built-in instrument kind.
 #[derive(Debug, Clone, Copy)]
 pub struct InstrumentKind {
@@ -16,7 +18,15 @@ pub struct InstrumentKind {
 }
 
 /// Every built-in instrument kind, in the order a menu lists them.
-pub const INSTRUMENTS: &[InstrumentKind] = &[];
+pub const INSTRUMENTS: &[InstrumentKind] = &[InstrumentKind {
+    id: "synth",
+    name: "Synthesizer",
+    build: build_synth,
+}];
+
+fn build_synth() -> Option<Box<dyn Node>> {
+    Synth::new().ok().map(|s| Box::new(s) as Box<dyn Node>)
+}
 
 /// A new instrument of kind `kind` at its defaults, or `None` if this build does not know it.
 /// Allocates.

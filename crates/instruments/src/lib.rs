@@ -7,11 +7,18 @@
 //! - `registry`: [`instrument`], [`display_name`], [`parameter_infos`] and [`INSTRUMENTS`], the
 //!   built-in instruments by kind id.
 //! - `silence`: [`Silence`], the stand-in for an instrument kind this build does not know.
+//! - `synth`: [`Synth`], the polyphonic subtractive synthesizer
+//!   (`docs/architecture/instruments.md` "Synthesizer").
+//! - `error`: [`Error`].
 
 #![forbid(unsafe_code)]
 
+mod error;
 mod registry;
 mod silence;
+mod synth;
 
+pub use error::Error;
 pub use registry::{INSTRUMENTS, InstrumentKind, display_name, instrument, parameter_infos};
 pub use silence::Silence;
+pub use synth::{MAX_VOICES, Synth};
