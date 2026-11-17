@@ -64,6 +64,7 @@ mod gain_display;
 mod grid;
 mod icon;
 mod impulse_display;
+mod joins;
 mod kit_map;
 mod launcher;
 mod menu;
@@ -102,6 +103,7 @@ pub use app::{App, Message, NewNode, Renaming};
 pub use curve_lane::Grab;
 pub use effect_display::{DisplayContext, Pixels};
 pub use export_dialog::{AAC_BITRATES, ExportDepth, ExportKind, ExportSettings, MP3_BITRATES};
+pub use joins::{Join, SNAP_REACH};
 pub use launcher::{Launcher, ProjectEntry, Start};
 pub use menu::Menu;
 pub use midi_edit::QuantizeSettings;
@@ -109,7 +111,7 @@ pub use mixer_strip::MixerFocus;
 pub use node_dialog::{DialogFocus, DialogMessage};
 pub use open_requests::OpenRequests;
 pub use patch_board::{
-    Board, BoardState, BoardView, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire,
+    Board, BoardState, BoardView, Hit, NODE_WIDTH, NodeBox, PORT_SPACING, Pin, Selection, Wire,
 };
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{

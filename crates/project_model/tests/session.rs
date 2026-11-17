@@ -712,3 +712,63 @@ fn test_set_tempo_undoes_and_versions_carry_it() -> TestResult {
     assert_eq!(session.state().tempo, waltz);
     Ok(())
 }
+
+#[test]
+fn test_place_nodes_moves_unshapes_and_joins_as_one_step() -> TestResult {
+    use project_model::{JoinSpec, Position, WireHandle, WireShape};
+    let mut session = Session::new();
+    let a = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+    let b = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+    let c = session.add_node(NodeKind::Bus(Layout::Stereo))?;
+    let ab = session.connect(Endpoint::Node(a), 0, Endpoint::Node(b), 0)?;
+    session.shape_wire(
+        ab,
+        WireShape {
+            out_handle: Some(WireHandle { dx: 4.0, dy: 4.0 }),
+            ..WireShape::default()
+        },
+    )?;
+    let before = session.state().clone();
+    let at = |x| Position { x, y: 50.0 };
+    session.place_nodes(
+        vec![(b, at(200.0)), (a, at(100.0))],
+        vec![JoinSpec {
+            from: Endpoint::Node(b),
+            output: 0,
+            from_side: Some(project_model::Side::Right),
+            to: Endpoint::Node(c),
+            input: 0,
+            to_side: None,
+        }],
+        vec![ab],
+    )?;
+    let state = session.state();
+    assert_eq!(state.node(a).and_then(|n| n.position), Some(at(100.0)));
+    assert_eq!(state.node(b).and_then(|n| n.position), Some(at(200.0)));
+    assert_eq!(
+        state.connection(ab).map(|c| c.shape.clone()),
+        Some(WireShape::default())
+    );
+    assert!(state.connections.iter().any(|x| x.from == Endpoint::Node(b)
+        && x.to == Endpoint::Node(c)
+        && x.from_side == Some(project_model::Side::Right)));
+    assert!(session.undo());
+    assert_eq!(session.state(), &before);
+    // A refused join refuses the whole placement: C has no input 5.
+    let taken = session.state().clone();
+    let join = JoinSpec {
+        from: Endpoint::Node(b),
+        output: 0,
+        from_side: None,
+        to: Endpoint::Node(c),
+        input: 5,
+        to_side: None,
+    };
+    assert!(
+        session
+            .place_nodes(vec![(b, at(300.0))], vec![join], Vec::new())
+            .is_err()
+    );
+    assert_eq!(session.state(), &taken);
+    Ok(())
+}
