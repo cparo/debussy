@@ -1,6 +1,6 @@
 //! A patch-board wire's geometry and the edits to its shape: the cubic segments it is drawn
 //! as, the grips a selected wire shows, and what dragging, adding or deleting one does
-//! (`docs/architecture/user-interface.md` "Patch board", ADR-0134).
+//! (`docs/architecture/patch-board.md` "Patch board", ADR-0134).
 //!
 //! A wire runs from its output pin through the connection's points to its input pin. The
 //! second wire of a whole-port stereo connection passes through the same points moved by its

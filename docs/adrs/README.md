@@ -182,4 +182,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0156](0156-sampler-zones-are-edited-in-rows-in-the-sampler-s.md) | Sampler zones are edited in rows in the sampler's dialog, added from a file on C3 or a folder mapped by name to General MIDI drum keys | Accepted | [Sampler zones](../architecture/node-dialogs.md#sampler-zones) |
 | [ADR-0157](0157-refused-imports-open-an-alert-with-the-reason-and.md) | Refused imports open an alert with the reason and the files concerned | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
 | [ADR-0158](0158-each-sampler-zone-has-its-own-semitone-tune-saved.md) | Each sampler zone has its own semitone tune, saved as format 12 | Accepted | [Sampler](../architecture/instruments.md#sampler) |
+| [ADR-0159](0159-the-patch-board-is-drawn-at-two-thirds-size-node.md) | The patch board is drawn at two-thirds size, node titles level with the first port and curve ports along the bottom edge | Accepted | [Patch board](../architecture/patch-board.md#patch-board) |
+| [ADR-0160](0160-a-wire-s-input-end-is-dragged-to-another-input-to.md) | A wire's input end is dragged to another input to move the connection | Accepted | [Patch board](../architecture/patch-board.md#patch-board) |
 

@@ -108,7 +108,9 @@ pub use midi_edit::QuantizeSettings;
 pub use mixer_strip::MixerFocus;
 pub use node_dialog::{DialogFocus, DialogMessage};
 pub use open_requests::OpenRequests;
-pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
+pub use patch_board::{
+    Board, BoardState, BoardView, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire,
+};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
     ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,

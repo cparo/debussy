@@ -1,6 +1,6 @@
 //! The patch board: the routing drawn as nodes and mono wires beside the tracks, with the
 //! track lanes' and curve lanes' ports in the gutter between them
-//! (`docs/architecture/user-interface.md` "Patch board").
+//! (`docs/architecture/patch-board.md` "Patch board").
 //!
 //! [`layout`] places everything from the model, so it is tested without a window; [`BoardView`]
 //! and [`GutterView`] draw it.
@@ -11,39 +11,58 @@ use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{
-    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, TrackKind, WireShape,
+    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, TrackKind, WireHandle,
+    WireShape,
 };
 
 use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 use crate::wire_edit::{self, Grip, Segment};
 
+/// The scale the board is drawn at; every size below is its base size times this
+/// (`docs/architecture/patch-board.md` "Patch board").
+const SCALE: f32 = 0.67;
+/// The size of a node's title and the output labels.
+const TITLE_TEXT: f32 = 18.0 * SCALE;
+/// The size of a curve port's number.
+const PORT_TEXT: f32 = 11.0 * SCALE;
+
 /// The distance between two port circles on a node, in logical pixels.
-pub const PORT_SPACING: f32 = 48.0;
+pub const PORT_SPACING: f32 = 48.0 * SCALE;
 /// A node's width.
-pub const NODE_WIDTH: f32 = 160.0;
+pub const NODE_WIDTH: f32 = 160.0 * SCALE;
 /// The width of the port gutter between the track pane and the board.
-pub const GUTTER_WIDTH: f32 = 40.0;
+pub const GUTTER_WIDTH: f32 = 40.0 * SCALE;
 /// The space between columns of nodes.
-const COLUMN_GAP: f32 = 96.0;
+const COLUMN_GAP: f32 = 96.0 * SCALE;
 /// The space left of the first column and above the first node.
-const MARGIN: f32 = 64.0;
+const MARGIN: f32 = 64.0 * SCALE;
 /// A port circle's radius.
-pub(crate) const PIN_RADIUS: f32 = 10.0;
+pub(crate) const PIN_RADIUS: f32 = 10.0 * SCALE;
 /// How far a gutter pin's outer edge, its stroke included, sits from the divider.
-const GUTTER_PIN_INSET: f32 = 4.0;
+const GUTTER_PIN_INSET: f32 = 4.0 * SCALE;
 /// The L and R output circles' radius.
-const OUTPUT_RADIUS: f32 = 18.0;
+const OUTPUT_RADIUS: f32 = 18.0 * SCALE;
 /// How far the output circles sit inside the board's right edge, to their centres.
-const OUTPUT_INSET: f32 = 36.0;
+const OUTPUT_INSET: f32 = 36.0 * SCALE;
 /// The width of a wire.
-const WIRE_WIDTH: f32 = 3.0;
+const WIRE_WIDTH: f32 = 3.0 * SCALE;
 /// A wire handle's radius.
-const HANDLE_RADIUS: f32 = 5.0;
+const HANDLE_RADIUS: f32 = 5.0 * SCALE;
 /// How close to a wire handle or point a press must be to catch it.
 const HANDLE_REACH: f32 = 6.0;
 /// The side of a wire point's square.
-const WIRE_POINT_SIZE: f32 = 8.0;
+const WIRE_POINT_SIZE: f32 = 8.0 * SCALE;
+
+/// The space between a node's top or bottom edge and the nearest port circle's edge.
+const PORT_PAD: f32 = 8.0;
+/// How far below a node's top its first port's centre sits; its title sits level with it.
+const FIRST_PORT: f32 = PORT_PAD + PIN_RADIUS;
+
+/// A stroke width of `full` pixels at the original size, scaled but never thinner than one pixel.
+fn stroke(full: f32) -> f32 {
+    (full * SCALE).max(1.0)
+}
 
 /// One circle on the board: a mono port, or one side of a stereo one. Every wire joins two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -224,6 +243,32 @@ pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
         && !occupied(state, to)
 }
 
+/// Where connection `id`'s far end would go if dropped on input `to`: the target's endpoint,
+/// port and side, if the connection may end there and that is not where it already ends. A
+/// connection drawn as a `pair` of wires goes to the whole port; a single wire, to the side
+/// it is dropped on.
+pub fn reconnect_target(
+    state: &State,
+    id: ConnectionId,
+    to: Pin,
+    pair: bool,
+) -> Option<(Endpoint, usize, Option<Side>)> {
+    let c = state.connection(id)?;
+    let side = if pair { None } else { to.side };
+    if (c.to, c.input, c.to_side) == (to.endpoint, to.port, side) {
+        return None;
+    }
+    let from = Pin {
+        endpoint: c.from,
+        output: true,
+        port: c.output,
+        side: c.from_side,
+    };
+    let mut without = state.clone();
+    without.connections.retain(|other| other.id != id);
+    can_connect(&without, from, Pin { side, ..to }).then_some((to.endpoint, to.port, side))
+}
+
 /// Whether `pin` carries events: a MIDI track's output, or an instrument's input 0.
 fn is_event(state: &State, pin: Pin) -> bool {
     match pin.endpoint {
@@ -285,7 +330,7 @@ fn pins_of(endpoint: Endpoint, output: bool, layouts: &[Layout]) -> Vec<Pin> {
 
 /// The height of a node with `slots` pins down its taller side.
 pub fn node_height(slots: usize) -> f32 {
-    PORT_SPACING * (slots.max(1) + 1) as f32
+    2.0 * FIRST_PORT + PORT_SPACING * (slots.max(1) - 1) as f32
 }
 
 /// Each node's column: one more than the deepest node feeding it, from 1. Cycles stop growing
@@ -379,8 +424,8 @@ pub fn layout(
         let mut next_free = MARGIN - PORT_SPACING / 2.0;
         for (key, node) in placed {
             let (inputs, outputs) = ports(&node.kind);
-            let mut inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
-            inputs.extend(curve_port_pins(node));
+            let inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
+            let curve_ports = curve_port_pins(node);
             let outputs = pins_of(Endpoint::Node(node.id), true, &outputs);
             let height = node_height(inputs.len().max(outputs.len()));
             // A node the user placed stays there; the rest stack down their column.
@@ -390,7 +435,7 @@ pub fn layout(
                     let wanted = if key == f32::MAX {
                         next_free
                     } else {
-                        key - PORT_SPACING
+                        key - FIRST_PORT
                     };
                     let y = wanted.max(next_free);
                     next_free = y + height + PORT_SPACING;
@@ -399,8 +444,16 @@ pub fn layout(
             };
             for (side, list) in [(x, inputs), (x + NODE_WIDTH, outputs)] {
                 for (slot, pin) in list.into_iter().enumerate() {
-                    pins.insert(pin, Point::new(side, y + PORT_SPACING * (slot + 1) as f32));
+                    pins.insert(
+                        pin,
+                        Point::new(side, y + FIRST_PORT + PORT_SPACING * slot as f32),
+                    );
                 }
+            }
+            // Curve ports sit along the bottom edge, spread evenly across it.
+            let spread = NODE_WIDTH / (curve_ports.len() + 1) as f32;
+            for (slot, pin) in curve_ports.into_iter().enumerate() {
+                pins.insert(pin, Point::new(x + spread * (slot + 1) as f32, y + height));
             }
             nodes.push(NodeBox {
                 id: node.id,
@@ -498,16 +551,32 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
             let (a, b) = (*pins.get(&from)?, *pins.get(&to)?);
             let (a0, b0) = first?;
             let shift = ((a - a0) + (b - b0)) * 0.5;
+            // A wire into a curve port arrives from below unless the user shaped that end.
+            let shape = match to.endpoint {
+                Endpoint::CurvePort(..) if c.shape.in_handle.is_none() => &WireShape {
+                    in_handle: Some(from_below(a, b)),
+                    ..c.shape.clone()
+                },
+                _ => &c.shape,
+            };
             Some(Wire {
                 connection: c.id,
                 from,
                 to,
                 shift,
-                segments: wire_edit::segments(a, b, &c.shape, shift),
+                segments: wire_edit::segments(a, b, shape, shift),
             })
         }));
     }
     wires
+}
+
+/// The handle that brings a wire from `a` into a curve port at `b` straight up from below.
+fn from_below(a: Point, b: Point) -> WireHandle {
+    WireHandle {
+        dx: 0.0,
+        dy: ((b.y - a.y).abs() / 2.0).max(40.0),
+    }
 }
 
 /// A wire's course as a path.
@@ -573,6 +642,8 @@ pub struct BoardView {
     pub selection: Option<Selection>,
     /// The output a wire is being dragged from.
     pub wiring: Option<Pin>,
+    /// The connection whose far end is being moved, hidden while it is.
+    pub rewiring: Option<ConnectionId>,
 }
 
 /// A drag the board is following.
@@ -645,7 +716,20 @@ impl Program<Message> for BoardView {
                         return Some(canvas::Action::capture());
                     }
                     Hit::Pin(pin) if pin.output => Message::StartWire(pin),
-                    Hit::Pin(_) => return Some(canvas::Action::capture()),
+                    // An input with a wire: pick up that wire's far end.
+                    Hit::Pin(pin) => match self.board.wires.iter().find(|w| w.to == pin) {
+                        Some(w) => Message::PickUpWire(
+                            w.connection,
+                            w.from,
+                            self.board
+                                .wires
+                                .iter()
+                                .filter(|o| o.connection == w.connection)
+                                .count()
+                                > 1,
+                        ),
+                        None => return Some(canvas::Action::capture()),
+                    },
                     Hit::Node(id) => {
                         let corner = self
                             .board
@@ -772,7 +856,11 @@ impl Program<Message> for BoardView {
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
         let shaping = self.selection.and_then(Selection::shaping);
-        for w in &board.wires {
+        for w in board
+            .wires
+            .iter()
+            .filter(|w| self.rewiring != Some(w.connection))
+        {
             let chosen = shaping == Some(w.connection);
             let colour = if chosen {
                 tint(w.from.endpoint)
@@ -780,7 +868,11 @@ impl Program<Message> for BoardView {
                 signal_colour(t, w.from.endpoint)
             };
             let stroke = Stroke::default()
-                .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
+                .with_width(if chosen {
+                    WIRE_WIDTH + stroke(2.0)
+                } else {
+                    WIRE_WIDTH
+                })
                 .with_color(colour);
             frame.stroke(&curve(&w.segments), stroke);
         }
@@ -792,11 +884,11 @@ impl Program<Message> for BoardView {
             for (grip, place, stem) in wire_edit::grips(&w.segments, open) {
                 let held = self.selection == Some(Selection::Grip(w.connection, grip));
                 let fill = if held { colour } else { t.pane };
-                let outline = Stroke::default().with_width(1.5).with_color(colour);
+                let outline = Stroke::default().with_width(stroke(1.5)).with_color(colour);
                 if let Some(stem) = stem {
                     frame.stroke(
                         &Path::line(stem, place),
-                        Stroke::default().with_width(1.0).with_color(colour),
+                        Stroke::default().with_width(stroke(1.0)).with_color(colour),
                     );
                     let circle = Path::circle(place, HANDLE_RADIUS);
                     frame.fill(&circle, fill);
@@ -818,7 +910,12 @@ impl Program<Message> for BoardView {
             let stroke = Stroke::default()
                 .with_width(WIRE_WIDTH)
                 .with_color(tint(from.endpoint));
-            let (c1, c2) = wire_edit::automatic(*a, to);
+            let (c1, mut c2) = wire_edit::automatic(*a, to);
+            // A control signal can only end at a curve port, which a wire enters from below.
+            if from.endpoint.is_control() {
+                let h = from_below(*a, to);
+                c2 = Point::new(to.x + h.dx, to.y + h.dy);
+            }
             frame.stroke(&curve(&[[*a, c1, c2, to]]), stroke);
         }
         for node in &board.nodes {
@@ -826,14 +923,16 @@ impl Program<Message> for BoardView {
             if self.selection == Some(Selection::Node(node.id)) {
                 frame.stroke(
                     &Path::rectangle(node.rect.position(), node.rect.size()),
-                    Stroke::default().with_width(2.0).with_color(selected),
+                    Stroke::default()
+                        .with_width(stroke(2.0))
+                        .with_color(selected),
                 );
             }
             frame.fill_text(Text {
                 content: node.title.clone(),
-                position: Point::new(node.rect.center_x(), node.rect.y + PORT_SPACING / 2.0),
+                position: Point::new(node.rect.center_x(), node.rect.y + FIRST_PORT),
                 color: t.text,
-                size: 18.0.into(),
+                size: TITLE_TEXT.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
                 align_y: iced::alignment::Vertical::Center,
                 ..Text::default()
@@ -854,7 +953,7 @@ impl Program<Message> for BoardView {
                         .to_owned(),
                         position: *at,
                         color: t.text,
-                        size: 18.0.into(),
+                        size: TITLE_TEXT.into(),
                         align_x: iced::alignment::Horizontal::Center.into(),
                         align_y: iced::alignment::Vertical::Center,
                         ..Text::default()
@@ -867,7 +966,7 @@ impl Program<Message> for BoardView {
                         content: number.to_string(),
                         position: *at,
                         color: t.text,
-                        size: 11.0.into(),
+                        size: PORT_TEXT.into(),
                         align_x: iced::alignment::Horizontal::Center.into(),
                         align_y: iced::alignment::Vertical::Center,
                         ..Text::default()
@@ -1233,10 +1332,9 @@ mod tests {
             }
             // The second passes the point moved as far as its pins are from the first's.
             assert_eq!(wires[0].segments[0][3], Point::new(400.0, 500.0));
-            assert_eq!(
-                wires[1].segments[0][3],
-                Point::new(400.0, 500.0 + PORT_SPACING)
-            );
+            let second = wires[1].segments[0][3];
+            assert_eq!(second.x, 400.0);
+            assert!((second.y - (500.0 + PORT_SPACING)).abs() < 1e-3);
             Ok(())
         };
         let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
@@ -1377,7 +1475,115 @@ mod tests {
     }
 
     #[test]
-    fn test_layout_adds_curve_pins_and_ports_and_grows_nodes() -> Result {
+    fn test_reconnect_target_takes_a_free_fitting_input_only() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        session.add_mixer_channels(mixer, 1)?;
+        let id_from = |session: &Session, from: Endpoint| {
+            session
+                .state()
+                .connections
+                .iter()
+                .find(|c| c.from == from)
+                .map(|c| c.id)
+                .ok_or("not wired")
+        };
+        let vocal_wire = id_from(&session, Endpoint::Track(vocal))?;
+        let mixer_out = id_from(&session, Endpoint::Node(mixer))?;
+        let input = |port| Pin {
+            endpoint: Endpoint::Node(mixer),
+            output: false,
+            port,
+            side: None,
+        };
+        let left = Pin {
+            endpoint: Endpoint::Output,
+            output: false,
+            port: 0,
+            side: Some(Side::Left),
+        };
+        let state = session.state();
+        assert_eq!(
+            reconnect_target(state, vocal_wire, input(1), false),
+            Some((Endpoint::Node(mixer), 1, None))
+        );
+        // Back where it was, onto a taken input, or into its own source: nowhere.
+        assert_eq!(reconnect_target(state, vocal_wire, input(0), false), None);
+        assert_eq!(reconnect_target(state, vocal_wire, left, false), None);
+        assert_eq!(reconnect_target(state, mixer_out, input(1), true), None);
+        // A pair of wires stays whole, so it cannot go back onto the port it fills.
+        assert_eq!(reconnect_target(state, mixer_out, left, true), None);
+        session.disconnect(mixer_out)?;
+        assert_eq!(
+            reconnect_target(session.state(), vocal_wire, left, false),
+            Some((Endpoint::Output, 0, Some(Side::Left)))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_reconnect_target_any_moved_wire_end_can_go_back() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let keys = session.add_track("Keys", Layout::Stereo)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        session.add_mixer_channels(mixer, 2)?;
+        session.add_node(NodeKind::Bus(Layout::Stereo))?;
+        let curve = session.add_curve("Curve 1", modulation::Curve::default())?;
+        session.assign_curve_port(mixer, "channel 1 gain")?;
+        session.assign_curve_port(mixer, "channel 2 gain")?;
+        session.connect_curve(curve, mixer, 1)?;
+        let lanes = [(vocal, vec![90.0]), (keys, vec![244.0, 372.0])];
+        let board = |s: &Session| {
+            layout(
+                s.state(),
+                &lanes,
+                &[(curve, 500.0)],
+                Size::new(800.0, 600.0),
+            )
+        };
+        let start = board(&session);
+        let inputs: Vec<Pin> = start.pins.keys().filter(|p| !p.output).copied().collect();
+        let mut failures = Vec::new();
+        for wire in &start.wires {
+            let pair = start
+                .wires
+                .iter()
+                .filter(|w| w.connection == wire.connection)
+                .count()
+                > 1;
+            for &target in &inputs {
+                let Some((to, input, side)) =
+                    reconnect_target(session.state(), wire.connection, target, pair)
+                else {
+                    continue;
+                };
+                let mut moved = session.clone();
+                moved.reconnect(wire.connection, to, input, side)?;
+                let back = layout(
+                    moved.state(),
+                    &lanes,
+                    &[(curve, 500.0)],
+                    Size::new(800.0, 600.0),
+                );
+                let pair = back
+                    .wires
+                    .iter()
+                    .filter(|w| w.connection == wire.connection)
+                    .count()
+                    > 1;
+                if reconnect_target(moved.state(), wire.connection, wire.to, pair).is_none() {
+                    failures.push((wire.from, wire.to, target));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "cannot go back: {failures:#?}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_layout_adds_curve_pins_and_ports_along_the_bottom() -> Result {
         let mut session = Session::new_project();
         let mixer = session.state().project_mixer().ok_or("no mixer")?;
         let curve = session.add_curve("Curve 1", modulation::Curve::default())?;
@@ -1404,18 +1610,19 @@ mod tests {
             &[(curve, 50.0)],
             Size::new(100.0, 100.0),
         );
-        // One mono input and two curve ports now outnumber the stereo output's two pins.
-        assert!(after.nodes[0].rect.height > height);
-        assert_eq!(after.nodes[0].rect.height, node_height(3));
+        // Curve ports sit on the bottom edge, so they do not make the node taller.
+        assert_eq!(after.nodes[0].rect.height, height);
         let port = |n| Pin {
             endpoint: Endpoint::CurvePort(mixer, n),
             output: false,
             port: 0,
             side: None,
         };
-        // Below the audio inputs, in number order.
+        // Along the bottom edge, in number order from the left.
         let (one, two) = (after.pins[&port(1)], after.pins[&port(2)]);
-        assert!(two.y > one.y);
+        let bottom = after.nodes[0].rect.y + after.nodes[0].rect.height;
+        assert_eq!((one.y, two.y), (bottom, bottom));
+        assert!(two.x > one.x);
         assert!(
             after
                 .wires

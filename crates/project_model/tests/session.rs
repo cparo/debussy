@@ -549,6 +549,51 @@ fn test_disconnect_is_a_step() -> TestResult {
 }
 
 #[test]
+fn test_reconnect_moves_the_far_end_as_one_step() -> TestResult {
+    use project_model::{Position, WireShape};
+    let mut session = Session::new_project();
+    session.add_track("Vocal", Layout::Mono)?;
+    let mixer = session.state().project_mixer().ok_or("no mixer")?;
+    session.add_mixer_channels(mixer, 1)?;
+    let id = session.state().connections[1].id;
+    let before = session
+        .state()
+        .connection(id)
+        .cloned()
+        .ok_or("no connection")?;
+    session.apply(Edit::SetPan {
+        connection: id,
+        pan: 0.5,
+    })?;
+    let bent = WireShape {
+        points: vec![project_model::WirePoint {
+            at: Position { x: 10.0, y: 10.0 },
+            in_handle: project_model::WireHandle { dx: -5.0, dy: 0.0 },
+            out_handle: project_model::WireHandle { dx: 5.0, dy: 0.0 },
+        }],
+        ..WireShape::default()
+    };
+    session.shape_wire(id, bent)?;
+    session.reconnect(id, before.to, before.input + 1, None)?;
+    let after = session.state().connection(id).ok_or("no connection")?;
+    assert_eq!((after.to, after.input), (before.to, before.input + 1));
+    assert_eq!((after.from, after.pan), (before.from, 0.5));
+    assert_eq!(after.shape, WireShape::default());
+    assert_eq!(session.state().connections[1].id, id);
+    assert!(session.undo());
+    let undone = session.state().connection(id).ok_or("no connection")?;
+    assert_eq!(undone.input, before.input);
+    // A missing connection is refused.
+    session.disconnect(id)?;
+    assert!(
+        session
+            .reconnect(id, before.to, before.input, None)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
 fn test_revision_counts_edits_undo_and_redo() -> TestResult {
     let mut session = Session::new();
     assert_eq!(session.revision(), 0);

@@ -624,6 +624,39 @@ impl Session {
         self.apply(Edit::Disconnect(id))
     }
 
+    /// Moves connection `id`'s far end to `to_side` of input `input` of `to`, as one step. It
+    /// keeps its id, source and pan, takes its place in the connection order again, and its
+    /// wires go back to the automatic curve.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownConnection`], and as [`Session::connect_sides`].
+    pub fn reconnect(
+        &mut self,
+        id: ConnectionId,
+        to: Endpoint,
+        input: usize,
+        to_side: Option<Side>,
+    ) -> Result<(), Error> {
+        let index = self
+            .state
+            .connections
+            .iter()
+            .position(|c| c.id == id)
+            .ok_or(Error::UnknownConnection(id))?;
+        let connection = Connection {
+            to,
+            input,
+            to_side,
+            shape: WireShape::default(),
+            ..self.state.connections[index].clone()
+        };
+        self.apply(Edit::Batch(vec![
+            Edit::Disconnect(id),
+            Edit::Connect { index, connection },
+        ]))
+    }
+
     /// Removes a routing node and its connections, as one step.
     ///
     /// # Errors
