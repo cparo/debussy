@@ -1,6 +1,6 @@
 //! The patch board: the routing drawn as nodes and mono wires beside the tracks, with the
 //! track lanes' and curve lanes' ports in the gutter between them
-//! (`docs/architecture/user-interface.md` "Patch board").
+//! (`docs/architecture/patch-board.md` "Patch board").
 //!
 //! [`layout`] places everything from the model, so it is tested without a window; [`BoardView`]
 //! and [`GutterView`] draw it.
@@ -19,7 +19,8 @@ use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 use crate::wire_edit::{self, Grip, Segment};
 
-/// Prototype: the board's drawing scale (1.0 = the original sizes).
+/// The scale the board is drawn at; every size below is its base size times this
+/// (`docs/architecture/patch-board.md` "Patch board").
 const SCALE: f32 = 0.67;
 /// The size of a node's title and the output labels.
 const TITLE_TEXT: f32 = 18.0 * SCALE;
