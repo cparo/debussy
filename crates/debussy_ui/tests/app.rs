@@ -3455,6 +3455,19 @@ fn test_add_sample_and_kit_import_and_add_zones_in_one_step() -> Result<(), Box<
     );
     assert_eq!(app.status(), Some("Added 5 samples."));
     let alert = app.alert().ok_or("no alert for the skipped file")?;
+    assert!(
+        alert
+            .text()
+            .ends_with("• long: a sample can be at most 60 seconds long"),
+        "{}",
+        alert.text()
+    );
+    // Selecting the text to copy it leaves the alert and the status line as they are.
+    app.update(Message::AlertAction(
+        iced::widget::text_editor::Action::SelectAll,
+    ));
+    assert_eq!(app.status(), Some("Added 5 samples."));
+    let alert = app.alert().ok_or("the alert closed")?;
     assert_eq!(alert.title, "Some files were skipped");
     assert_eq!(
         alert.items,
@@ -3476,6 +3489,8 @@ fn test_zone_edits_and_removal_are_undo_steps() -> Result<(), Box<dyn Error>> {
         node: sampler,
         kit: true,
     }));
+    // The fake kit skips a file; close the alert, which takes the shortcuts while open.
+    app.update(Message::DismissAlert);
     let mut hat = zones_of(&app, sampler)[2].clone();
     hat.choke = Some(2);
     hat.high = 45;
@@ -3608,5 +3623,21 @@ fn test_a_sample_that_cannot_be_added_says_why() -> Result<(), Box<dyn Error>> {
     assert_eq!(alert.message, "The file could not be added.");
     assert_eq!(alert.items.len(), 1);
     assert!(zones_of(&app, sampler).is_empty());
+    Ok(())
+}
+
+#[test]
+fn test_an_open_alert_keeps_undo_and_delete_from_the_project() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    assert!(app.alert().is_some());
+    let revision = app.session().revision();
+    app.update(Message::Undo);
+    app.update(Message::DeleteRange);
+    assert_eq!(app.session().revision(), revision);
+    assert!(app.alert().is_some());
     Ok(())
 }

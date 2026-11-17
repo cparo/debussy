@@ -27,8 +27,11 @@ meaningful pop-up when an import is refused.
   - the reason and what to do about it;
   - the files concerned, each with its reason: the first 8, then a count of the rest.
 
-  Every line can be selected and copied. It has one OK button. Enter, Space, Escape or a press
-  outside dismisses it, and it takes the keyboard while open.
+  The reason and the list form one read-only `text_editor`. Its text wraps to the alert's width,
+  so all of it is visible at once, and it can be selected and copied with ⌘C. An edit is
+  ignored, so the text stays as written. It has one OK button. Enter, Space, Escape or a press
+  outside dismisses it. While open, it takes the focus keys and the window's shortcuts, so ⌘C
+  copies only the alert's text and Undo or Delete can't change the project behind it.
 - **Reasons that say what to do.** The cases worded for users are:
   - an empty folder;
   - a folder of more than 128 files (choose a single kit's folder);
@@ -44,6 +47,9 @@ meaningful pop-up when an import is refused.
 
 - **A longer status-line message.** It costs nothing to add, but it is easy to miss, it is replaced
   by the next action, and it can't hold a list of files.
+- **Selectable single-line `text_input`s, as the status line uses.** They can be copied, but
+  they don't wrap, so a long reason or file name runs out of sight.
+- **Plain wrapped `text`.** It shows everything, but it can't be selected or copied.
 - **A system dialog through `rfd`.** It is native, but it would put platform UI calls behind the
   `Services` seam for every refusal, and its text can't be selected in iced's theme. It is also
   awkward to test.

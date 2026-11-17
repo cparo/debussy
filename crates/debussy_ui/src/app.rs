@@ -387,6 +387,8 @@ pub enum Message {
     CancelExport,
     /// Close the alert saying what was refused.
     DismissAlert,
+    /// A selection or copy in the open alert's text.
+    AlertAction(iced::widget::text_editor::Action),
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
@@ -920,6 +922,7 @@ impl App {
             && !matches!(
                 message,
                 Message::Tick
+                    | Message::AlertAction(_)
                     | Message::Scrolled(_)
                     | Message::Rescaled(_)
                     | Message::RenameText(_)
@@ -1386,6 +1389,11 @@ impl App {
             }
             Message::CancelExport => self.export_dialog = None,
             Message::DismissAlert => self.alert = None,
+            Message::AlertAction(action) => {
+                if let Some(alert) = &mut self.alert {
+                    alert.act(action);
+                }
+            }
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
@@ -1554,11 +1562,7 @@ impl App {
                     ),
                 ),
             };
-            self.alert = Some(Alert {
-                title: title.to_owned(),
-                message,
-                items: skipped,
-            });
+            self.alert = Some(Alert::with_items(title, message, skipped));
         }
         self.report_bridge_warnings();
     }
