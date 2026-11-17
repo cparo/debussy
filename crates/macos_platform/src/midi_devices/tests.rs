@@ -101,18 +101,20 @@ fn test_endpoint_changes_fire_listeners_and_update_endpoints() -> TestResult {
     midi.on_change(Box::new(move || {
         counter.fetch_add(1, Ordering::AcqRel);
     }));
-    let listed = |id: &MidiEndpointId| -> Result<bool, Error> {
-        Ok(midi
-            .endpoints()?
-            .iter()
-            .any(|e| e.id == *id && e.direction == MidiDirection::Input))
+    let listed = |id: &MidiEndpointId| {
+        midi.endpoints().is_ok_and(|all| {
+            all.iter()
+                .any(|e| e.id == *id && e.direction == MidiDirection::Input)
+        })
     };
+    // CoreMIDI's endpoint list can lag a source made or disposed while other tests are changing
+    // the setup too, so the list is polled rather than read once.
     let (source, id) = source("debussy-test-hotplug")?;
-    assert!(listed(&id)?);
+    assert!(wait_until(|| listed(&id)));
     assert!(wait_until(|| changes.load(Ordering::Acquire) > 0));
     let seen = changes.load(Ordering::Acquire);
     drop(source);
-    assert!(!listed(&id)?);
+    assert!(wait_until(|| !listed(&id)));
     assert!(wait_until(|| changes.load(Ordering::Acquire) > seen));
     Ok(())
 }
