@@ -527,10 +527,7 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
             // A wire into a curve port arrives from below unless the user shaped that end.
             let shape = match to.endpoint {
                 Endpoint::CurvePort(..) if c.shape.in_handle.is_none() => &WireShape {
-                    in_handle: Some(WireHandle {
-                        dx: 0.0,
-                        dy: ((b.y - a.y).abs() / 2.0).max(40.0),
-                    }),
+                    in_handle: Some(from_below(a, b)),
                     ..c.shape.clone()
                 },
                 _ => &c.shape,
@@ -545,6 +542,14 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
         }));
     }
     wires
+}
+
+/// The handle that brings a wire from `a` into a curve port at `b` straight up from below.
+fn from_below(a: Point, b: Point) -> WireHandle {
+    WireHandle {
+        dx: 0.0,
+        dy: ((b.y - a.y).abs() / 2.0).max(40.0),
+    }
 }
 
 /// A wire's course as a path.
@@ -859,7 +864,12 @@ impl Program<Message> for BoardView {
             let stroke = Stroke::default()
                 .with_width(WIRE_WIDTH)
                 .with_color(tint(from.endpoint));
-            let (c1, c2) = wire_edit::automatic(*a, to);
+            let (c1, mut c2) = wire_edit::automatic(*a, to);
+            // A control signal can only end at a curve port, which a wire enters from below.
+            if from.endpoint.is_control() {
+                let h = from_below(*a, to);
+                c2 = Point::new(to.x + h.dx, to.y + h.dy);
+            }
             frame.stroke(&curve(&[[*a, c1, c2, to]]), stroke);
         }
         for node in &board.nodes {
