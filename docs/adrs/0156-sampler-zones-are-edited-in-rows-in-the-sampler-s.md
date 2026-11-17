@@ -1,4 +1,4 @@
-# ADR-0156 — Sampler zones are edited in rows in the sampler's dialog, added from files on C3 or as a kit from C1
+# ADR-0156 — Sampler zones are edited in rows in the sampler's dialog, added from files on C3 or as a kit from the General MIDI kick
 
 - **Status:** Accepted
 - **Decided by:** agent, ratified by Chris Paro
@@ -25,7 +25,8 @@ drum kit of one-shots with choke groups.
   - "Add sample…" takes one file and makes a gated zone on C3 (48), rooted on C3. That is a
     one-key zone to widen, a common starting point for a melodic instrument.
   - "Add kit…" takes several files and makes one-shot zones on consecutive single keys from
-    C1 (24).
+    36 (C2), the General MIDI kick, so a kit ordered kick, side stick, snare… plays General MIDI
+    drum parts as recorded. Chris Paro chose 36 over the plan's C1 (24).
 
   Both import through `import_export::import_sample` behind the `Services` seam, and both are
   disabled while playing, like Import.
@@ -37,9 +38,9 @@ drum kit of one-shots with choke groups.
 - **A keyboard-map canvas with drag-to-resize zones.** It shows overlaps at a glance, but it is a
   new custom widget with its own hit testing and keyboard model. Rows with pick lists use existing
   widgets and are enough for the first version.
-- **Starting a kit on the General MIDI kick (36, C2).** That would make GM drum patterns play
-  straight away. The plan chose C1. Keys are easy to change per row, and General MIDI mapping can
-  come later.
+- **Starting a kit on C1 (24), as the plan had it.** In this project's naming (middle C = C4), that
+  is two octaves below the General MIDI kick, so General MIDI drum parts would miss every kit
+  until each zone was moved.
 - **Choosing the zone's keys before importing.** This adds a step before every import. Fixed
   defaults followed by editing in the rows is quicker for the common case.
 

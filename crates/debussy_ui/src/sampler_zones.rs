@@ -15,8 +15,9 @@ use crate::view::{Face, tool};
 
 /// The key a sample added on its own plays on, and is pitched from: C3.
 pub(crate) const SAMPLE_KEY: u8 = 48;
-/// The key a kit's first sample plays on: C1; the rest follow on consecutive keys.
-pub(crate) const KIT_FIRST_KEY: u8 = 24;
+/// The key a kit's first sample plays on: 36 (C2), the General MIDI kick; the rest follow on
+/// consecutive keys.
+pub(crate) const KIT_FIRST_KEY: u8 = 36;
 
 /// The zones `imported` files become: with `kit`, one-shot zones on consecutive single keys from
 /// [`KIT_FIRST_KEY`], stopping at the top key; otherwise gated zones on [`SAMPLE_KEY`].
@@ -225,17 +226,17 @@ mod tests {
     }
 
     #[test]
-    fn test_new_zones_kit_is_one_shot_on_consecutive_keys_from_c1() {
+    fn test_new_zones_kit_is_one_shot_on_consecutive_keys_from_the_gm_kick() {
         let zones = new_zones(vec![imported("kick"), imported("snare")], true);
         let keys: Vec<_> = zones.iter().map(|z| (z.low, z.high, z.root)).collect();
-        assert_eq!(keys, [(24, 24, 24), (25, 25, 25)]);
+        assert_eq!(keys, [(36, 36, 36), (37, 37, 37)]);
         assert!(zones.iter().all(|z| z.mode == ZoneMode::OneShot));
-        assert_eq!(pitch_name(KIT_FIRST_KEY, &Key::Indefinite), "C1");
+        assert_eq!(pitch_name(KIT_FIRST_KEY, &Key::Indefinite), "C2");
     }
 
     #[test]
     fn test_new_zones_kit_stops_at_the_top_key() {
         let many = (0..200).map(|n| imported(&format!("s{n}"))).collect();
-        assert_eq!(new_zones(many, true).len(), 104);
+        assert_eq!(new_zones(many, true).len(), 92);
     }
 }

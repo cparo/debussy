@@ -3425,7 +3425,7 @@ fn test_add_sample_and_kit_import_and_add_zones_in_one_step() -> Result<(), Box<
         kit: true,
     }));
     let keys: Vec<u8> = zones_of(&app, sampler).iter().map(|z| z.low).collect();
-    assert_eq!(keys, [48, 24, 25, 26]);
+    assert_eq!(keys, [48, 36, 37, 38]);
     assert_eq!(calls.borrow().sample_imports, [false, true]);
     // The kit was one undo step.
     app.update(Message::Undo);
