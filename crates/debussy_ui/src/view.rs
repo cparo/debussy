@@ -304,6 +304,19 @@ impl App {
                 .into()
             }
         };
+        if let Some(alert) = &self.alert {
+            return stack![
+                base,
+                // A press outside the alert dismisses it, as OK does.
+                mouse_area(
+                    container(opaque(alert.view()))
+                        .center(Fill)
+                        .style(theme::scrim)
+                )
+                .on_press(Message::DismissAlert),
+            ]
+            .into();
+        }
         match &self.export_dialog {
             None => base,
             Some(dialog) => stack![

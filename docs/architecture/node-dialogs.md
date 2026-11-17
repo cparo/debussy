@@ -87,8 +87,10 @@ file becomes a one-shot single-key zone placed by the words of its path within t
 second crash or ride key, a tom not named floor, low, mid or high the next free tom key; any other
 file, or one whose drum is taken, takes the next free key from 82, and files past 127 are left out.
 When the kit has more than one hi-hat (42, 44, 46), they share choke group 1. A file that cannot be
-imported (too long, unreadable) is skipped; the status line counts the samples a kit added and
-names the first file skipped. Each adds all its zones as one step after the existing ones, and both
+imported (too long, unreadable) is skipped; the status line counts the samples a kit added, and an
+alert lists the files skipped (`docs/architecture/user-interface.md` "Files and devices"). A kit
+that would take the sampler past 128 zones, an empty folder, or a folder of more than 128 files is
+refused with an alert saying so. Each adds all its zones as one step after the existing ones, and both
 are disabled while playing. Choosing a different instrument for the track removes the zones with the sampler
 ([ADR-0156](../adrs/0156-sampler-zones-are-edited-in-rows-in-the-sampler-s.md)).
 

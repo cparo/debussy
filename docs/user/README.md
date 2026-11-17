@@ -193,8 +193,11 @@ to open its controls. Changes are heard while you drag; letting go makes one und
     in folders such as `Kicks/`, `Snares/` and `Hats/` works too. A second file for a drum that
     already has one, or a file no name rule matches, goes on the keys from A#5 (82) up, above the
     drum map. When the kit has more than one hi-hat, they share choke group 1, so a closed hat
-    cuts off a ringing open one. The status line says how many samples were added and which
-    files were skipped (longer than 60 seconds, unreadable, or past the last key).
+    cuts off a ringing open one. The status line says how many samples were added. If any file
+    could not be added (longer than 60 seconds, unreadable, or past the last key), a message
+    lists them and why; press OK or Escape to close it. A folder holding more than 128 audio
+    files is refused, since that is all one sampler holds: choose the folder of a single kit
+    rather than a whole library.
   - Each zone's row shows its file, its **low** and **high** keys, its **root** key, a button that
     switches it between **Gated** (the note stops, through the **Amp release**, when you let go)
     and **One-shot** (the whole sample plays, as drums want), its **choke** group, where a note

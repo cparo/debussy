@@ -13,10 +13,11 @@ use audio_buffers::Layout;
 use audio_engine::Engine;
 use engine_bridge::Bridge;
 use project_model::{
-    ConnectionId, CurveId, Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session,
-    Track, TrackId, WireShape,
+    ConnectionId, CurveId, Edit, Endpoint, Excerpt, MAX_ZONES, NodeId, NodeKind, Position, Range,
+    Session, Track, TrackId, WireShape,
 };
 
+use crate::alert::Alert;
 use crate::click::Click;
 use crate::curve_edit::{self, Side};
 use crate::curve_lane::Grab;
@@ -384,6 +385,8 @@ pub enum Message {
     ConfirmExport,
     /// Close the Export dialog without exporting.
     CancelExport,
+    /// Close the alert saying what was refused.
+    DismissAlert,
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
@@ -491,6 +494,8 @@ pub struct App {
     catalog: ParameterCatalog,
     /// The open Export dialog.
     pub(crate) export_dialog: Option<ExportDialog>,
+    /// The open alert saying what was refused, such as an import.
+    pub(crate) alert: Option<Alert>,
     /// The settings the Export dialog opens on: the last chosen.
     export_settings: ExportSettings,
 }
@@ -569,6 +574,7 @@ impl App {
             note_hover: None,
             catalog: ParameterCatalog::new(),
             export_dialog: None,
+            alert: None,
             export_settings,
         };
         app.saved_revision = app.session.revision();
@@ -607,6 +613,11 @@ impl App {
     /// Shows `message` on the status line.
     pub fn set_status(&mut self, message: String) {
         self.status = Some(message);
+    }
+
+    /// The open alert saying what was refused, if any.
+    pub fn alert(&self) -> Option<&Alert> {
+        self.alert.as_ref()
     }
 
     /// The status line's text, if any.
@@ -870,7 +881,12 @@ impl App {
 
     /// Handles `message`, without saving.
     fn handle(&mut self, message: Message) {
-        // The MP3 bit rate dialog takes the keyboard while it is open.
+        // An open alert, then the Export dialog, takes the keyboard.
+        let message = match self.alert.as_ref().map(|_| Alert::key(&message)) {
+            Some(Key::Taken) => return,
+            Some(Key::Press(pressed)) => pressed,
+            Some(Key::Ignored) | None => message,
+        };
         let message = match self.export_dialog.as_mut().map(|d| d.key(&message)) {
             Some(Key::Taken) => return,
             Some(Key::Press(pressed)) => pressed,
@@ -1369,6 +1385,7 @@ impl App {
                 }
             }
             Message::CancelExport => self.export_dialog = None,
+            Message::DismissAlert => self.alert = None,
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
@@ -1464,10 +1481,15 @@ impl App {
         if self.refuse_while_playing("add samples") {
             return;
         }
+        let title = if kit {
+            "Kit not added"
+        } else {
+            "Sample not added"
+        };
         let import = match self.services.import_samples(kit) {
             Ok(import) => import,
             Err(message) => {
-                self.status = Some(message);
+                self.alert = Some(Alert::new(title, message));
                 return;
             }
         };
@@ -1485,7 +1507,7 @@ impl App {
             skipped.extend(
                 left_out
                     .into_iter()
-                    .map(|name| format!("{name}: no key left")),
+                    .map(|name| format!("{name}: no free key left (keys 82 to 127 are taken)")),
             );
         } else {
             zones.extend(
@@ -1496,16 +1518,48 @@ impl App {
             );
         }
         let added = zones.len() - before;
+        if zones.len() > MAX_ZONES {
+            self.alert = Some(Alert::new(
+                title,
+                format!(
+                    "The sampler has {before} zones and this would add {added}, but a sampler \
+                     holds at most {MAX_ZONES}. Remove some zones, or choose a folder with fewer \
+                     files."
+                ),
+            ));
+            return;
+        }
         if added > 0 {
             let result = self
                 .bridge
                 .edit(&mut self.session, |s| s.set_zones(node, zones));
             if let Err(error) = result {
-                self.status = Some(error.to_string());
+                self.alert = Some(Alert::new(title, error.to_string()));
                 return;
             }
         }
-        self.status = import_summary(kit, added, &skipped);
+        self.status = (kit && added > 0).then(|| format!("Added {added} samples."));
+        if !skipped.is_empty() {
+            let (title, message) = match (added, kit) {
+                (0, true) => (
+                    title,
+                    "None of the folder's files could be added.".to_owned(),
+                ),
+                (0, false) => (title, "The file could not be added.".to_owned()),
+                _ => (
+                    "Some files were skipped",
+                    format!(
+                        "Added {added} samples; {} files could not be added.",
+                        skipped.len()
+                    ),
+                ),
+            };
+            self.alert = Some(Alert {
+                title: title.to_owned(),
+                message,
+                items: skipped,
+            });
+        }
         self.report_bridge_warnings();
     }
 
@@ -1649,7 +1703,7 @@ impl App {
         let imported = match self.services.import() {
             Ok(imported) => imported,
             Err(message) => {
-                self.status = Some(message);
+                self.alert = Some(Alert::new("Import failed", message));
                 return;
             }
         };
@@ -2193,19 +2247,4 @@ impl App {
 /// The view start of `span` frames that puts frame `bound` last in the view, or 0.
 fn last_start(bound: u64, span: u64) -> u64 {
     bound.saturating_add(1).saturating_sub(span)
-}
-
-/// The status line after adding samples: how many a kit added, and what was skipped; nothing
-/// for a single sample added cleanly.
-fn import_summary(kit: bool, added: usize, skipped: &[String]) -> Option<String> {
-    let added = (kit && added > 0).then(|| format!("Added {added} samples."));
-    let skipped = match skipped {
-        [] => None,
-        [only] => Some(format!("Skipped {only}")),
-        [first, rest @ ..] => Some(format!("Skipped {} files; first {first}", rest.len() + 1)),
-    };
-    match (added, skipped) {
-        (Some(a), Some(s)) => Some(format!("{a} {s}")),
-        (a, s) => a.or(s),
-    }
 }

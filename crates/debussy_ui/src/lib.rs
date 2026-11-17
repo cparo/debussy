@@ -48,6 +48,7 @@
 
 #![forbid(unsafe_code)]
 
+mod alert;
 mod amplifier_display;
 mod app;
 mod click;
@@ -96,6 +97,7 @@ use std::sync::Mutex;
 
 use shell::Shell;
 
+pub use alert::Alert;
 pub use app::{App, Message, NewNode, Renaming};
 pub use curve_lane::Grab;
 pub use effect_display::{DisplayContext, Pixels};

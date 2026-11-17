@@ -459,9 +459,17 @@ impl Services for AppServices {
                 .map_or_else(|| "Sample".to_owned(), |s| s.to_string_lossy().into_owned());
             vec![(path, name)]
         };
+        if kit && found.is_empty() {
+            return Err(format!(
+                "No audio files ({}) were found in the folder or its subfolders.",
+                IMPORT_TYPES.join(", ")
+            ));
+        }
         if found.len() > MAX_ZONES {
             return Err(format!(
-                "The folder holds {} audio files; a sampler takes at most {MAX_ZONES}.",
+                "The folder and its subfolders hold {} audio files, but a sampler holds at most \
+                 {MAX_ZONES}. Choose a folder with one kit in it, such as a single kit from a \
+                 larger pack.",
                 found.len()
             ));
         }

@@ -267,7 +267,11 @@ Import and export use the system's file dialogs through `rfd`, used only in `deb
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
 Import is refused while playing. A sampler's "Add sample…" (one file) and "Add kit…" (a folder) import
 into its zones instead (`docs/architecture/node-dialogs.md` "Sampler zones"), skipping a file longer
-than 60 s; a zone file the engine cannot read is reported on the status line.
+than 60 s; a zone file the engine cannot read is reported on the status line. An import that is
+refused, or that skips files, opens an alert over the window: a title naming what was not done,
+the reason and what to do, and the files concerned, each with its reason (the first 8, then a
+count), all selectable, with one OK button. Enter, Space, Escape or a press outside dismisses it;
+it takes the keyboard while open ([ADR-0157](../adrs/0157-refused-imports-open-an-alert-with-the-reason-and.md)).
 
 Export… opens a modal before any file dialog: a row for the format (WAV, FLAC, AAC, and MP3 only
 when `lame` was found), one for that format's setting (WAV 16-bit, 24-bit or 32-bit float; FLAC

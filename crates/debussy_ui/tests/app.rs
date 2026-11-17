@@ -46,6 +46,8 @@ struct Calls {
     archives: usize,
     /// Each sample import asked for: whether it was a kit.
     sample_imports: Vec<bool>,
+    /// What the next sample import gives instead of the usual files.
+    sample_result: Option<Result<SampleImport, String>>,
     /// Whether the save dialog is cancelled.
     export_cancelled: bool,
     /// Whether MP3 is offered.
@@ -228,6 +230,9 @@ impl Services for Fake {
 
     fn import_samples(&mut self, kit: bool) -> Result<SampleImport, String> {
         self.calls.borrow_mut().sample_imports.push(kit);
+        if let Some(result) = self.calls.borrow_mut().sample_result.take() {
+            return result;
+        }
         let names: &[&str] = if kit {
             &["Kicks/kick", "snare", "Hats/closed", "Hats/open", "vox"]
         } else {
@@ -3448,10 +3453,15 @@ fn test_add_sample_and_kit_import_and_add_zones_in_one_step() -> Result<(), Box<
             (82, None)
         ]
     );
+    assert_eq!(app.status(), Some("Added 5 samples."));
+    let alert = app.alert().ok_or("no alert for the skipped file")?;
+    assert_eq!(alert.title, "Some files were skipped");
     assert_eq!(
-        app.status(),
-        Some("Added 5 samples. Skipped long: a sample can be at most 60 seconds long")
+        alert.items,
+        ["long: a sample can be at most 60 seconds long"]
     );
+    app.update(Message::DismissAlert);
+    assert!(app.alert().is_none());
     assert_eq!(calls.borrow().sample_imports, [false, true]);
     // The kit was one undo step.
     app.update(Message::Undo);
@@ -3530,5 +3540,73 @@ fn test_choosing_another_instrument_removes_the_zones() -> Result<(), Box<dyn Er
             .iter()
             .all(|f| *f != "piano.wav")
     );
+    Ok(())
+}
+
+#[test]
+fn test_a_refused_kit_folder_pops_up_its_reason() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    let reason =
+        "The folder and its subfolders hold 300 audio files, but a sampler holds at most 128.";
+    calls.borrow_mut().sample_result = Some(Err(reason.into()));
+    let revision = app.session().revision();
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Kit not added");
+    assert_eq!(alert.message, reason);
+    assert_eq!(app.session().revision(), revision);
+    // Escape dismisses it, and nothing else happens.
+    app.update(Message::ClearRange);
+    assert!(app.alert().is_none());
+    Ok(())
+}
+
+#[test]
+fn test_a_kit_that_would_pass_the_zone_limit_is_refused_with_a_reason() -> Result<(), Box<dyn Error>>
+{
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    // 126 zones, then a kit of five: over the 128 a sampler holds.
+    for _ in 0..126 {
+        app.update(Message::Dialog(DialogMessage::AddSamples {
+            node: sampler,
+            kit: false,
+        }));
+    }
+    assert_eq!(zones_of(&app, sampler).len(), 126);
+    calls.borrow_mut().sample_result = None;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    assert_eq!(zones_of(&app, sampler).len(), 126);
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Kit not added");
+    assert!(alert.message.contains("has 126 zones"), "{}", alert.message);
+    assert!(alert.message.contains("at most 128"), "{}", alert.message);
+    // Enter dismisses it.
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert!(app.alert().is_none());
+    Ok(())
+}
+
+#[test]
+fn test_a_sample_that_cannot_be_added_says_why() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    calls.borrow_mut().sample_result = Some(Ok(SampleImport {
+        imported: Vec::new(),
+        skipped: vec!["huge: a sample can be at most 60 seconds long".into()],
+    }));
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Sample not added");
+    assert_eq!(alert.message, "The file could not be added.");
+    assert_eq!(alert.items.len(), 1);
+    assert!(zones_of(&app, sampler).is_empty());
     Ok(())
 }
