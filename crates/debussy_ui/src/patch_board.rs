@@ -19,7 +19,7 @@ use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 use crate::wire_edit::{self, Grip, Segment};
 
 /// Prototype: the board's drawing scale (1.0 = the original sizes).
-const SCALE: f32 = 0.5;
+const SCALE: f32 = 0.67;
 /// The size of a node's title and the output labels.
 const TITLE_TEXT: f32 = 18.0 * SCALE;
 /// The size of a curve port's number.
@@ -51,6 +51,11 @@ const HANDLE_RADIUS: f32 = 5.0 * SCALE;
 const HANDLE_REACH: f32 = 6.0;
 /// The side of a wire point's square.
 const WIRE_POINT_SIZE: f32 = 8.0 * SCALE;
+
+/// The space between a node's top or bottom edge and the nearest port circle's edge.
+const PORT_PAD: f32 = 8.0;
+/// How far below a node's top its first port's centre sits; its title sits level with it.
+const FIRST_PORT: f32 = PORT_PAD + PIN_RADIUS;
 
 /// A stroke width of `full` pixels at the original size, scaled but never thinner than one pixel.
 fn stroke(full: f32) -> f32 {
@@ -297,7 +302,7 @@ fn pins_of(endpoint: Endpoint, output: bool, layouts: &[Layout]) -> Vec<Pin> {
 
 /// The height of a node with `slots` pins down its taller side.
 pub fn node_height(slots: usize) -> f32 {
-    PORT_SPACING * (slots.max(1) + 1) as f32
+    2.0 * FIRST_PORT + PORT_SPACING * (slots.max(1) - 1) as f32
 }
 
 /// Each node's column: one more than the deepest node feeding it, from 1. Cycles stop growing
@@ -402,7 +407,7 @@ pub fn layout(
                     let wanted = if key == f32::MAX {
                         next_free
                     } else {
-                        key - PORT_SPACING
+                        key - FIRST_PORT
                     };
                     let y = wanted.max(next_free);
                     next_free = y + height + PORT_SPACING;
@@ -411,7 +416,10 @@ pub fn layout(
             };
             for (side, list) in [(x, inputs), (x + NODE_WIDTH, outputs)] {
                 for (slot, pin) in list.into_iter().enumerate() {
-                    pins.insert(pin, Point::new(side, y + PORT_SPACING * (slot + 1) as f32));
+                    pins.insert(
+                        pin,
+                        Point::new(side, y + FIRST_PORT + PORT_SPACING * slot as f32),
+                    );
                 }
             }
             nodes.push(NodeBox {
@@ -849,7 +857,7 @@ impl Program<Message> for BoardView {
             }
             frame.fill_text(Text {
                 content: node.title.clone(),
-                position: Point::new(node.rect.center_x(), node.rect.y + PORT_SPACING / 2.0),
+                position: Point::new(node.rect.center_x(), node.rect.y + FIRST_PORT),
                 color: t.text,
                 size: TITLE_TEXT.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
@@ -1251,10 +1259,9 @@ mod tests {
             }
             // The second passes the point moved as far as its pins are from the first's.
             assert_eq!(wires[0].segments[0][3], Point::new(400.0, 500.0));
-            assert_eq!(
-                wires[1].segments[0][3],
-                Point::new(400.0, 500.0 + PORT_SPACING)
-            );
+            let second = wires[1].segments[0][3];
+            assert_eq!(second.x, 400.0);
+            assert!((second.y - (500.0 + PORT_SPACING)).abs() < 1e-3);
             Ok(())
         };
         let board = layout(session.state(), &[], &[], Size::new(800.0, 400.0));
