@@ -1471,23 +1471,192 @@ fn test_picked_up_wire_end_moves_to_a_free_input_as_a_step() -> Result<(), Box<d
     };
     let start = ends_at(&app).ok_or("no wire")?;
     // Dropped nowhere, or back where it was: the wire stays, and nothing is recorded.
-    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::PickUpWire(wire, out, false));
     app.update(Message::FinishWire(None));
     assert_eq!(ends_at(&app), Some(start));
     set_channels(&mut app, mixer, "4");
     let steps = app.session().revision();
-    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::PickUpWire(wire, out, false));
     app.update(Message::FinishWire(Some(input(mixer, start.1))));
     assert_eq!(app.session().revision(), steps);
     // Dropped on a free input: it moves there, as one step.
-    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::PickUpWire(wire, out, false));
     app.update(Message::FinishWire(Some(input(mixer, 3))));
     assert_eq!(
         ends_at(&app),
         Some((project_model::Endpoint::Node(mixer), 3))
     );
+    // And back again.
+    app.update(Message::PickUpWire(wire, out, false));
+    app.update(Message::FinishWire(Some(input(mixer, start.1))));
+    assert_eq!(app.status(), None);
+    assert_eq!(ends_at(&app), Some(start));
+    app.update(Message::Undo);
     app.update(Message::Undo);
     assert_eq!(ends_at(&app), Some(start));
+    Ok(())
+}
+
+#[test]
+fn test_every_moved_wire_end_can_be_dragged_back() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::AddTrack(Layout::Stereo));
+    app.update(Message::AddCurve);
+    let (curve, _) = only_curve(&app)?;
+    app.update(Message::StepMixerChannels(mixer, 1));
+    app.update(Message::StepMixerChannels(mixer, 1));
+    app.update(Message::AddNode(debussy_ui::NewNode::Bus));
+    app.update(Message::Select(Some(Selection::Node(mixer))));
+    app.update(Message::Dialog(DialogMessage::TogglePort(GAIN.to_owned())));
+    app.update(Message::Dialog(DialogMessage::TogglePort(
+        "channel 2 gain".to_owned(),
+    )));
+    app.update(Message::Select(None));
+    app.update(Message::StartWire(debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Curve(curve),
+        output: true,
+        port: 0,
+        side: None,
+    }));
+    app.update(Message::FinishWire(Some(debussy_ui::Pin {
+        endpoint: project_model::Endpoint::CurvePort(mixer, 1),
+        output: false,
+        port: 0,
+        side: None,
+    })));
+    let board = app.board(iced::Size::new(800.0, 600.0));
+    let inputs: Vec<debussy_ui::Pin> = board.pins.keys().filter(|p| !p.output).copied().collect();
+    let end = |app: &App, id| {
+        app.session()
+            .state()
+            .connection(id)
+            .map(|c| (c.to, c.input, c.to_side))
+    };
+    let mut moves = 0;
+    let mut failures = Vec::new();
+    for wire in &board.wires {
+        let start = end(&app, wire.connection);
+        for &target in &inputs {
+            let revision = app.session().revision();
+            pick_up_wire(&mut app, wire.connection, wire.from);
+            app.update(Message::FinishWire(Some(target)));
+            if app.session().revision() == revision {
+                continue;
+            }
+            moves += 1;
+            let there = app.status().map(str::to_owned);
+            pick_up_wire(&mut app, wire.connection, wire.from);
+            app.update(Message::FinishWire(Some(wire.to)));
+            if app.session().revision() == revision + 1 || app.status().is_some() {
+                failures.push(format!(
+                    "{:?} -> {:?} -> {:?}: {there:?} / {:?}",
+                    wire.from,
+                    target,
+                    wire.to,
+                    app.status()
+                ));
+                app.update(Message::Undo);
+            } else {
+                app.update(Message::Undo);
+                app.update(Message::Undo);
+            }
+            if end(&app, wire.connection) != start {
+                return Err(format!("undo did not restore {wire:?}").into());
+            }
+        }
+    }
+    assert!(moves > 10, "only {moves} moves tried");
+    assert!(failures.is_empty(), "{failures:#?}");
+    Ok(())
+}
+
+/// Picks up the far end of connection `id`'s wire from `from`, as a press on its input does.
+fn pick_up_wire(app: &mut App, id: project_model::ConnectionId, from: debussy_ui::Pin) {
+    let board = app.board(iced::Size::new(800.0, 600.0));
+    let pair = board.wires.iter().filter(|w| w.connection == id).count() > 1;
+    app.update(Message::PickUpWire(id, from, pair));
+}
+
+/// Drags on the board canvas with real mouse events from pin `at` to pin `on`, feeding every
+/// message the canvas publishes to `app` as the window would, rebuilding the view between events.
+fn drag_on_board(
+    app: &mut App,
+    state: &mut debussy_ui::BoardState,
+    at: debussy_ui::Pin,
+    on: debussy_ui::Pin,
+) -> Result<(), Box<dyn Error>> {
+    use iced::widget::canvas::{self, Program};
+    use iced::{Rectangle, mouse};
+    let size = iced::Size::new(800.0, 600.0);
+    let bounds = Rectangle::new(iced::Point::ORIGIN, size);
+    let board = app.board(size);
+    let (from, to) = (board.pins[&at], board.pins[&on]);
+    let nudged = from + iced::Vector::new(5.0, 5.0);
+    let events = [
+        (from, mouse::Event::ButtonPressed(mouse::Button::Left)),
+        (nudged, mouse::Event::CursorMoved { position: nudged }),
+        (to, mouse::Event::CursorMoved { position: to }),
+        (to, mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ];
+    for (point, event) in events {
+        let view = app.board_view(size);
+        let action = view.update(
+            state,
+            &canvas::Event::Mouse(event),
+            bounds,
+            mouse::Cursor::Available(point),
+        );
+        if let Some(message) = action.and_then(|a| a.into_inner().0) {
+            app.update(message);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_one_side_of_a_filter_pair_drags_to_a_mixer_and_back() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    app.update(Message::StepMixerChannels(mixer, 1));
+    let a = add_effect(&mut app, "low-pass")?;
+    let b = add_effect(&mut app, "low-pass")?;
+    app.update(Message::Select(None));
+    let pins = |app: &App, node, output| -> Vec<debussy_ui::Pin> {
+        app.board(iced::Size::new(800.0, 600.0))
+            .pins
+            .keys()
+            .filter(|p| p.endpoint == project_model::Endpoint::Node(node) && p.output == output)
+            .copied()
+            .collect()
+    };
+    let mut state = debussy_ui::BoardState::default();
+    let (a_out, b_in) = (pins(&app, a, true), pins(&app, b, false));
+    // Left to left and right to right, each its own wire.
+    drag_on_board(&mut app, &mut state, a_out[0], b_in[0])?;
+    drag_on_board(&mut app, &mut state, a_out[1], b_in[1])?;
+    let sides = |app: &App| -> Vec<(project_model::Endpoint, usize, Option<project_model::Side>)> {
+        app.session()
+            .state()
+            .connections
+            .iter()
+            .filter(|c| c.from == project_model::Endpoint::Node(a))
+            .map(|c| (c.to, c.input, c.to_side))
+            .collect()
+    };
+    let wired = sides(&app);
+    assert_eq!(wired.len(), 2);
+    let mixer_in = pins(&app, mixer, false)
+        .into_iter()
+        .find(|p| p.port == 1)
+        .ok_or("no channel 2")?;
+    drag_on_board(&mut app, &mut state, b_in[0], mixer_in)?;
+    assert_eq!(
+        sides(&app)[0],
+        (project_model::Endpoint::Node(mixer), 1, None)
+    );
+    // Back onto the left side, beside the right side's wire.
+    drag_on_board(&mut app, &mut state, mixer_in, b_in[0])?;
+    assert_eq!(app.status(), None);
+    assert_eq!(sides(&app), wired);
     Ok(())
 }
 

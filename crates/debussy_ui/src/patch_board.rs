@@ -243,15 +243,17 @@ pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
 }
 
 /// Where connection `id`'s far end would go if dropped on input `to`: the target's endpoint,
-/// port and side (`None` keeps a whole-port connection whole), if the connection may end there
-/// and that is not where it already ends.
+/// port and side, if the connection may end there and that is not where it already ends. A
+/// connection drawn as a `pair` of wires goes to the whole port; a single wire, to the side
+/// it is dropped on.
 pub fn reconnect_target(
     state: &State,
     id: ConnectionId,
     to: Pin,
+    pair: bool,
 ) -> Option<(Endpoint, usize, Option<Side>)> {
     let c = state.connection(id)?;
-    let side = c.to_side.and(to.side);
+    let side = if pair { None } else { to.side };
     if (c.to, c.input, c.to_side) == (to.endpoint, to.port, side) {
         return None;
     }
@@ -715,7 +717,16 @@ impl Program<Message> for BoardView {
                     Hit::Pin(pin) if pin.output => Message::StartWire(pin),
                     // An input with a wire: pick up that wire's far end.
                     Hit::Pin(pin) => match self.board.wires.iter().find(|w| w.to == pin) {
-                        Some(w) => Message::PickUpWire(w.connection, w.from),
+                        Some(w) => Message::PickUpWire(
+                            w.connection,
+                            w.from,
+                            self.board
+                                .wires
+                                .iter()
+                                .filter(|o| o.connection == w.connection)
+                                .count()
+                                > 1,
+                        ),
                         None => return Some(canvas::Action::capture()),
                     },
                     Hit::Node(id) => {
@@ -1493,20 +1504,80 @@ mod tests {
         };
         let state = session.state();
         assert_eq!(
-            reconnect_target(state, vocal_wire, input(1)),
+            reconnect_target(state, vocal_wire, input(1), false),
             Some((Endpoint::Node(mixer), 1, None))
         );
         // Back where it was, onto a taken input, or into its own source: nowhere.
-        assert_eq!(reconnect_target(state, vocal_wire, input(0)), None);
-        assert_eq!(reconnect_target(state, vocal_wire, left), None);
-        assert_eq!(reconnect_target(state, mixer_out, input(1)), None);
-        // A whole-port wire grabbed by one side is still whole there.
-        assert_eq!(reconnect_target(state, mixer_out, left), None);
+        assert_eq!(reconnect_target(state, vocal_wire, input(0), false), None);
+        assert_eq!(reconnect_target(state, vocal_wire, left, false), None);
+        assert_eq!(reconnect_target(state, mixer_out, input(1), true), None);
+        // A pair of wires stays whole, so it cannot go back onto the port it fills.
+        assert_eq!(reconnect_target(state, mixer_out, left, true), None);
         session.disconnect(mixer_out)?;
         assert_eq!(
-            reconnect_target(session.state(), vocal_wire, left),
-            Some((Endpoint::Output, 0, None))
+            reconnect_target(session.state(), vocal_wire, left, false),
+            Some((Endpoint::Output, 0, Some(Side::Left)))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_reconnect_target_any_moved_wire_end_can_go_back() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let keys = session.add_track("Keys", Layout::Stereo)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        session.add_mixer_channels(mixer, 2)?;
+        session.add_node(NodeKind::Bus(Layout::Stereo))?;
+        let curve = session.add_curve("Curve 1", modulation::Curve::default())?;
+        session.assign_curve_port(mixer, "channel 1 gain")?;
+        session.assign_curve_port(mixer, "channel 2 gain")?;
+        session.connect_curve(curve, mixer, 1)?;
+        let lanes = [(vocal, vec![90.0]), (keys, vec![244.0, 372.0])];
+        let board = |s: &Session| {
+            layout(
+                s.state(),
+                &lanes,
+                &[(curve, 500.0)],
+                Size::new(800.0, 600.0),
+            )
+        };
+        let start = board(&session);
+        let inputs: Vec<Pin> = start.pins.keys().filter(|p| !p.output).copied().collect();
+        let mut failures = Vec::new();
+        for wire in &start.wires {
+            let pair = start
+                .wires
+                .iter()
+                .filter(|w| w.connection == wire.connection)
+                .count()
+                > 1;
+            for &target in &inputs {
+                let Some((to, input, side)) =
+                    reconnect_target(session.state(), wire.connection, target, pair)
+                else {
+                    continue;
+                };
+                let mut moved = session.clone();
+                moved.reconnect(wire.connection, to, input, side)?;
+                let back = layout(
+                    moved.state(),
+                    &lanes,
+                    &[(curve, 500.0)],
+                    Size::new(800.0, 600.0),
+                );
+                let pair = back
+                    .wires
+                    .iter()
+                    .filter(|w| w.connection == wire.connection)
+                    .count()
+                    > 1;
+                if reconnect_target(moved.state(), wire.connection, wire.to, pair).is_none() {
+                    failures.push((wire.from, wire.to, target));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "cannot go back: {failures:#?}");
         Ok(())
     }
 
