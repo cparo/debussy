@@ -18,32 +18,44 @@ use crate::app::Message;
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 use crate::wire_edit::{self, Grip, Segment};
 
+/// Prototype: the board's drawing scale (1.0 = the original sizes).
+const SCALE: f32 = 0.5;
+/// The size of a node's title and the output labels.
+const TITLE_TEXT: f32 = 18.0 * SCALE;
+/// The size of a curve port's number.
+const PORT_TEXT: f32 = 11.0 * SCALE;
+
 /// The distance between two port circles on a node, in logical pixels.
-pub const PORT_SPACING: f32 = 48.0;
+pub const PORT_SPACING: f32 = 48.0 * SCALE;
 /// A node's width.
-pub const NODE_WIDTH: f32 = 160.0;
+pub const NODE_WIDTH: f32 = 160.0 * SCALE;
 /// The width of the port gutter between the track pane and the board.
-pub const GUTTER_WIDTH: f32 = 40.0;
+pub const GUTTER_WIDTH: f32 = 40.0 * SCALE;
 /// The space between columns of nodes.
-const COLUMN_GAP: f32 = 96.0;
+const COLUMN_GAP: f32 = 96.0 * SCALE;
 /// The space left of the first column and above the first node.
-const MARGIN: f32 = 64.0;
+const MARGIN: f32 = 64.0 * SCALE;
 /// A port circle's radius.
-pub(crate) const PIN_RADIUS: f32 = 10.0;
+pub(crate) const PIN_RADIUS: f32 = 10.0 * SCALE;
 /// How far a gutter pin's outer edge, its stroke included, sits from the divider.
-const GUTTER_PIN_INSET: f32 = 4.0;
+const GUTTER_PIN_INSET: f32 = 4.0 * SCALE;
 /// The L and R output circles' radius.
-const OUTPUT_RADIUS: f32 = 18.0;
+const OUTPUT_RADIUS: f32 = 18.0 * SCALE;
 /// How far the output circles sit inside the board's right edge, to their centres.
-const OUTPUT_INSET: f32 = 36.0;
+const OUTPUT_INSET: f32 = 36.0 * SCALE;
 /// The width of a wire.
-const WIRE_WIDTH: f32 = 3.0;
+const WIRE_WIDTH: f32 = 3.0 * SCALE;
 /// A wire handle's radius.
-const HANDLE_RADIUS: f32 = 5.0;
+const HANDLE_RADIUS: f32 = 5.0 * SCALE;
 /// How close to a wire handle or point a press must be to catch it.
 const HANDLE_REACH: f32 = 6.0;
 /// The side of a wire point's square.
-const WIRE_POINT_SIZE: f32 = 8.0;
+const WIRE_POINT_SIZE: f32 = 8.0 * SCALE;
+
+/// A stroke width of `full` pixels at the original size, scaled but never thinner than one pixel.
+fn stroke(full: f32) -> f32 {
+    (full * SCALE).max(1.0)
+}
 
 /// One circle on the board: a mono port, or one side of a stereo one. Every wire joins two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -780,7 +792,11 @@ impl Program<Message> for BoardView {
                 signal_colour(t, w.from.endpoint)
             };
             let stroke = Stroke::default()
-                .with_width(if chosen { WIRE_WIDTH + 2.0 } else { WIRE_WIDTH })
+                .with_width(if chosen {
+                    WIRE_WIDTH + stroke(2.0)
+                } else {
+                    WIRE_WIDTH
+                })
                 .with_color(colour);
             frame.stroke(&curve(&w.segments), stroke);
         }
@@ -792,11 +808,11 @@ impl Program<Message> for BoardView {
             for (grip, place, stem) in wire_edit::grips(&w.segments, open) {
                 let held = self.selection == Some(Selection::Grip(w.connection, grip));
                 let fill = if held { colour } else { t.pane };
-                let outline = Stroke::default().with_width(1.5).with_color(colour);
+                let outline = Stroke::default().with_width(stroke(1.5)).with_color(colour);
                 if let Some(stem) = stem {
                     frame.stroke(
                         &Path::line(stem, place),
-                        Stroke::default().with_width(1.0).with_color(colour),
+                        Stroke::default().with_width(stroke(1.0)).with_color(colour),
                     );
                     let circle = Path::circle(place, HANDLE_RADIUS);
                     frame.fill(&circle, fill);
@@ -826,14 +842,16 @@ impl Program<Message> for BoardView {
             if self.selection == Some(Selection::Node(node.id)) {
                 frame.stroke(
                     &Path::rectangle(node.rect.position(), node.rect.size()),
-                    Stroke::default().with_width(2.0).with_color(selected),
+                    Stroke::default()
+                        .with_width(stroke(2.0))
+                        .with_color(selected),
                 );
             }
             frame.fill_text(Text {
                 content: node.title.clone(),
                 position: Point::new(node.rect.center_x(), node.rect.y + PORT_SPACING / 2.0),
                 color: t.text,
-                size: 18.0.into(),
+                size: TITLE_TEXT.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
                 align_y: iced::alignment::Vertical::Center,
                 ..Text::default()
@@ -854,7 +872,7 @@ impl Program<Message> for BoardView {
                         .to_owned(),
                         position: *at,
                         color: t.text,
-                        size: 18.0.into(),
+                        size: TITLE_TEXT.into(),
                         align_x: iced::alignment::Horizontal::Center.into(),
                         align_y: iced::alignment::Vertical::Center,
                         ..Text::default()
@@ -867,7 +885,7 @@ impl Program<Message> for BoardView {
                         content: number.to_string(),
                         position: *at,
                         color: t.text,
-                        size: 11.0.into(),
+                        size: PORT_TEXT.into(),
                         align_x: iced::alignment::Horizontal::Center.into(),
                         align_y: iced::alignment::Vertical::Center,
                         ..Text::default()
