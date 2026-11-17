@@ -242,6 +242,30 @@ pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
         && !occupied(state, to)
 }
 
+/// Where connection `id`'s far end would go if dropped on input `to`: the target's endpoint,
+/// port and side (`None` keeps a whole-port connection whole), if the connection may end there
+/// and that is not where it already ends.
+pub fn reconnect_target(
+    state: &State,
+    id: ConnectionId,
+    to: Pin,
+) -> Option<(Endpoint, usize, Option<Side>)> {
+    let c = state.connection(id)?;
+    let side = c.to_side.and(to.side);
+    if (c.to, c.input, c.to_side) == (to.endpoint, to.port, side) {
+        return None;
+    }
+    let from = Pin {
+        endpoint: c.from,
+        output: true,
+        port: c.output,
+        side: c.from_side,
+    };
+    let mut without = state.clone();
+    without.connections.retain(|other| other.id != id);
+    can_connect(&without, from, Pin { side, ..to }).then_some((to.endpoint, to.port, side))
+}
+
 /// Whether `pin` carries events: a MIDI track's output, or an instrument's input 0.
 fn is_event(state: &State, pin: Pin) -> bool {
     match pin.endpoint {
@@ -615,6 +639,8 @@ pub struct BoardView {
     pub selection: Option<Selection>,
     /// The output a wire is being dragged from.
     pub wiring: Option<Pin>,
+    /// The connection whose far end is being moved, hidden while it is.
+    pub rewiring: Option<ConnectionId>,
 }
 
 /// A drag the board is following.
@@ -687,7 +713,11 @@ impl Program<Message> for BoardView {
                         return Some(canvas::Action::capture());
                     }
                     Hit::Pin(pin) if pin.output => Message::StartWire(pin),
-                    Hit::Pin(_) => return Some(canvas::Action::capture()),
+                    // An input with a wire: pick up that wire's far end.
+                    Hit::Pin(pin) => match self.board.wires.iter().find(|w| w.to == pin) {
+                        Some(w) => Message::PickUpWire(w.connection, w.from),
+                        None => return Some(canvas::Action::capture()),
+                    },
                     Hit::Node(id) => {
                         let corner = self
                             .board
@@ -814,7 +844,11 @@ impl Program<Message> for BoardView {
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
         let shaping = self.selection.and_then(Selection::shaping);
-        for w in &board.wires {
+        for w in board
+            .wires
+            .iter()
+            .filter(|w| self.rewiring != Some(w.connection))
+        {
             let chosen = shaping == Some(w.connection);
             let colour = if chosen {
                 tint(w.from.endpoint)
@@ -1425,6 +1459,54 @@ mod tests {
         session.add_mixer_channels(mixer, 1)?;
         let free = Pin { port: 1, ..taken };
         assert!(can_connect(session.state(), out, free));
+        Ok(())
+    }
+
+    #[test]
+    fn test_reconnect_target_takes_a_free_fitting_input_only() -> Result {
+        let mut session = Session::new_project();
+        let vocal = session.add_track("Vocal", Layout::Mono)?;
+        let mixer = session.state().project_mixer().ok_or("no mixer")?;
+        session.add_mixer_channels(mixer, 1)?;
+        let id_from = |session: &Session, from: Endpoint| {
+            session
+                .state()
+                .connections
+                .iter()
+                .find(|c| c.from == from)
+                .map(|c| c.id)
+                .ok_or("not wired")
+        };
+        let vocal_wire = id_from(&session, Endpoint::Track(vocal))?;
+        let mixer_out = id_from(&session, Endpoint::Node(mixer))?;
+        let input = |port| Pin {
+            endpoint: Endpoint::Node(mixer),
+            output: false,
+            port,
+            side: None,
+        };
+        let left = Pin {
+            endpoint: Endpoint::Output,
+            output: false,
+            port: 0,
+            side: Some(Side::Left),
+        };
+        let state = session.state();
+        assert_eq!(
+            reconnect_target(state, vocal_wire, input(1)),
+            Some((Endpoint::Node(mixer), 1, None))
+        );
+        // Back where it was, onto a taken input, or into its own source: nowhere.
+        assert_eq!(reconnect_target(state, vocal_wire, input(0)), None);
+        assert_eq!(reconnect_target(state, vocal_wire, left), None);
+        assert_eq!(reconnect_target(state, mixer_out, input(1)), None);
+        // A whole-port wire grabbed by one side is still whole there.
+        assert_eq!(reconnect_target(state, mixer_out, left), None);
+        session.disconnect(mixer_out)?;
+        assert_eq!(
+            reconnect_target(session.state(), vocal_wire, left),
+            Some((Endpoint::Output, 0, None))
+        );
         Ok(())
     }
 

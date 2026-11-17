@@ -719,6 +719,7 @@ impl App {
                     board,
                     selection: self.selection,
                     wiring: self.wiring,
+                    rewiring: self.rewiring,
                 })
                 .width(Length::Fixed(board_size.width))
                 .height(Length::Fixed(height)),

@@ -1446,6 +1446,52 @@ fn test_wires_connect_free_inputs_and_delete_as_steps() -> Result<(), Box<dyn Er
 }
 
 #[test]
+fn test_picked_up_wire_end_moves_to_a_free_input_as_a_step() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, mixer) = app()?;
+    let vocal = app.session().state().tracks[0].id;
+    let out = debussy_ui::Pin {
+        endpoint: project_model::Endpoint::Track(vocal),
+        output: true,
+        port: 0,
+        side: None,
+    };
+    let wire = app
+        .session()
+        .state()
+        .connections
+        .iter()
+        .find(|c| c.from == out.endpoint)
+        .ok_or("vocal not wired")?
+        .id;
+    let ends_at = |app: &App| {
+        app.session()
+            .state()
+            .connection(wire)
+            .map(|c| (c.to, c.input))
+    };
+    let start = ends_at(&app).ok_or("no wire")?;
+    // Dropped nowhere, or back where it was: the wire stays, and nothing is recorded.
+    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::FinishWire(None));
+    assert_eq!(ends_at(&app), Some(start));
+    set_channels(&mut app, mixer, "4");
+    let steps = app.session().revision();
+    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::FinishWire(Some(input(mixer, start.1))));
+    assert_eq!(app.session().revision(), steps);
+    // Dropped on a free input: it moves there, as one step.
+    app.update(Message::PickUpWire(wire, out));
+    app.update(Message::FinishWire(Some(input(mixer, 3))));
+    assert_eq!(
+        ends_at(&app),
+        Some((project_model::Endpoint::Node(mixer), 3))
+    );
+    app.update(Message::Undo);
+    assert_eq!(ends_at(&app), Some(start));
+    Ok(())
+}
+
+#[test]
 fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
     app.update(Message::AddNode(debussy_ui::NewNode::Bus));

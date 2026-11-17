@@ -26,7 +26,7 @@ use crate::menu::Menu;
 use crate::mixer_strip::MixerFocus;
 use crate::node_dialog::{Command, Context, DialogFocus, DialogMessage, NodeDialog};
 use crate::node_parameters::{NodeParameters, ParameterCatalog};
-use crate::patch_board::{Pin, Selection, can_connect};
+use crate::patch_board::{Pin, Selection, can_connect, reconnect_target};
 use crate::range_selection::RangeSelection;
 use crate::recording::{Activity, Arming, InputChoice, OpenMidi, Pass};
 use crate::services::Services;
@@ -340,6 +340,8 @@ pub enum Message {
     FinishRename,
     /// A wire is being dragged from this output.
     StartWire(Pin),
+    /// The far end of this connection's wire from this output was picked up off its input.
+    PickUpWire(ConnectionId, Pin),
     /// The wire being dragged was dropped on this input, or elsewhere.
     FinishWire(Option<Pin>),
     /// Select a node (opening its dialog) or a wire; `None` clears the selection and closes
@@ -454,6 +456,8 @@ pub struct App {
     clipboard: Option<Excerpt>,
     /// The output a wire is being dragged from.
     pub(crate) wiring: Option<Pin>,
+    /// The connection whose far end is being moved.
+    pub(crate) rewiring: Option<ConnectionId>,
     /// A node or the outputs being dragged.
     pub(crate) moving: Option<Moving>,
     /// A node dialog's field being typed: a feedback delay's time, or a mixer's channel count.
@@ -555,6 +559,7 @@ impl App {
             current_track: None,
             clipboard: None,
             wiring: None,
+            rewiring: None,
             moving: None,
             node_text: None,
             loaded: None,
@@ -1236,6 +1241,23 @@ impl App {
             }
             Message::FinishRename => self.finish_rename(),
             Message::StartWire(pin) => self.wiring = Some(pin),
+            Message::PickUpWire(connection, from) => {
+                self.wiring = Some(from);
+                self.rewiring = Some(connection);
+            }
+            Message::FinishWire(to) if self.rewiring.is_some() => {
+                self.wiring = None;
+                // Dropped anywhere but a fitting input, the wire stays where it was.
+                if let (Some(id), Some(to)) = (self.rewiring.take(), to)
+                    && let Some((endpoint, input, side)) =
+                        reconnect_target(self.session.state(), id, to)
+                {
+                    let result = self.bridge.edit(&mut self.session, |s| {
+                        s.reconnect(id, endpoint, input, side)
+                    });
+                    self.report(result.map_err(|e| e.to_string()));
+                }
+            }
             Message::FinishWire(to) => {
                 if let (Some(from), Some(to)) = (self.wiring.take(), to)
                     && can_connect(self.session.state(), from, to)
