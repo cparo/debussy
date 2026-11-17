@@ -1,7 +1,7 @@
 # ADR-0160 — A wire's input end is dragged to another input to move the connection
 
 - **Status:** Accepted
-- **Decided by:** Chris Paro (the gesture); agent, unratified (the drop and side rules)
+- **Decided by:** Chris Paro (the gesture); agent, ratified by Chris Paro (the drop and side rules)
 - **Date:** 2026-11-17
 - **Issue:** —
 - **Architecture:** [Patch board](../architecture/patch-board.md#patch-board)
