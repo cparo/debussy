@@ -19,8 +19,12 @@ drum kit of one-shots with choke groups.
   controls, following the custom-section precedent of the mixer and the effect displays. Each row
   holds the file name, the low, high and root keys as pick lists, a One-shot/Gated button, a choke
   pick list and Remove. Each change replaces the whole zone list in one step.
-- **Keys named in the track's key.** The key pick lists use the spelling of #192: pitch names
-  in the key of the first MIDI track that feeds the sampler, or sharps if no track does.
+- **Keys named for what the zone plays.** A gated zone plays notes, so its key pick lists use
+  the spelling of #192: pitch names in the key of the first MIDI track that feeds the sampler, or
+  sharps if no track does. A one-shot zone, the kind a kit makes, plays drums. Its keys are named
+  by the track's own pitch names when the track's key is Indefinite, as its lanes are, and
+  otherwise by the General MIDI drum names, falling back to the pitch name. Chris Paro asked for
+  drum names in the kit case.
 - **Two ways to add zones.**
   - "Add sample…" takes one file and makes a gated zone on C3 (48), rooted on C3. That is a
     one-key zone to widen, a common starting point for a melodic instrument.
@@ -58,6 +62,9 @@ drum kit of one-shots with choke groups.
   defaults followed by editing in the rows is quicker for the common case.
 
 ## Consequences
+
+- Switching a zone between One-shot and Gated also switches how its keys are named, since the
+  mode is how a zone tells drums from notes.
 
 - Zones that overlap are allowed and resolve to the first match. The rows don't flag overlaps.
 - The zone rows aren't in the dialog's Tab order; they are used with the pointer.

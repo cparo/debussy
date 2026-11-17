@@ -202,7 +202,10 @@ to open its controls. Changes are heard while you drag; letting go makes one und
     switches it between **Gated** (the note stops, through the **Amp release**, when you let go)
     and **One-shot** (the whole sample plays, as drums want), its **choke** group, where a note
     cuts off every other sound in the same group, and **Remove**. Each change can be undone.
-    Keys are named in the key of the MIDI track playing the sampler.
+    In a gated zone, keys are named as notes in the key of the MIDI track playing the sampler
+    (C2, F#3…). In a one-shot zone, as a kit makes, they are named as drums (kick, snare,
+    closed-hat, open-hat…), or by the track's own pitch names if you have named them in its
+    **Key…** dialog with the key set to Indefinite.
   - If two zones share a key, the one higher in the list plays. A sample can be at most 60
     seconds long. The **Amp envelope**, **Amp velocity**, **Bend range**, **Voices** and
     **Gain** work as on the synthesizer, and **Tune** shifts every zone up or down by up to an

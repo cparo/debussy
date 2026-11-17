@@ -3,9 +3,11 @@
 
 use iced::widget::{Space, column, pick_list, row, text};
 use iced::{Alignment, Element, Fill, Length};
-use project_model::notation::pitch_name;
+use std::collections::BTreeMap;
+
+use project_model::notation::{GM_DRUMS, pitch_name};
 use project_model::{
-    Endpoint, Key, MAX_CHOKE_GROUP, MAX_KEY, NodeId, SampleZone, Source, State, ZoneMode,
+    Endpoint, Key, MAX_CHOKE_GROUP, MAX_KEY, NodeId, Notation, SampleZone, Source, State, ZoneMode,
 };
 
 use crate::app::Message;
@@ -28,18 +30,35 @@ pub(crate) fn sample_zone(file: ImportedTrack) -> SampleZone {
     }
 }
 
-/// The key the sampler's notes are spelled in: that of the first MIDI track feeding it, or
-/// sharps.
-pub(crate) fn spelling(state: &State, node: NodeId) -> Key {
+/// The key and pitch names the sampler's keys are named by: those of the first MIDI track
+/// feeding it, or an indefinite key with no names (sharps).
+pub(crate) fn notation(state: &State, node: NodeId) -> Notation {
     state
         .connections
         .iter()
         .filter(|c| c.to == Endpoint::Node(node))
         .find_map(|c| match c.from {
-            Endpoint::Track(track) => state.track(track)?.notation.as_ref().map(|n| n.key),
+            Endpoint::Track(track) => state.track(track)?.notation.clone(),
             _ => None,
         })
-        .unwrap_or(Key::Indefinite)
+        .unwrap_or_else(|| Notation {
+            key: Key::Indefinite,
+            names: BTreeMap::new(),
+        })
+}
+
+/// The name of `pitch` as a drum, for a one-shot zone's keys: the track's own name for it under
+/// an indefinite key, else its General MIDI drum name, else its pitch name.
+pub(crate) fn drum_label(pitch: u8, notation: &Notation) -> String {
+    if notation.key == Key::Indefinite
+        && let Some(name) = notation.names.get(&pitch)
+    {
+        return name.clone();
+    }
+    GM_DRUMS.iter().find(|(p, _)| *p == pitch).map_or_else(
+        || pitch_name(pitch, &notation.key),
+        |(_, name)| (*name).to_owned(),
+    )
 }
 
 /// A key in a pick list, shown by its pitch name.
@@ -82,15 +101,20 @@ fn file_name(source: &Source) -> String {
 pub(crate) fn zone_panel<'a>(
     node: NodeId,
     zones: &[SampleZone],
-    key: Key,
+    notation: &Notation,
     stopped: bool,
 ) -> Element<'a, Message> {
-    let keys: Vec<KeyChoice> = (0..=MAX_KEY)
-        .map(|pitch| KeyChoice {
-            pitch,
-            name: pitch_name(pitch, &key),
-        })
-        .collect();
+    let choices = |label: &dyn Fn(u8) -> String| -> Vec<KeyChoice> {
+        (0..=MAX_KEY)
+            .map(|pitch| KeyChoice {
+                pitch,
+                name: label(pitch),
+            })
+            .collect()
+    };
+    // Gated zones play notes, named as the lanes name pitches; one-shot zones play drums.
+    let notes = choices(&|pitch| pitch_name(pitch, &notation.key));
+    let drums = choices(&|pitch| drum_label(pitch, notation));
     let chokes: Vec<Choke> = std::iter::once(Choke(None))
         .chain((1..=MAX_CHOKE_GROUP).map(|g| Choke(Some(g))))
         .collect();
@@ -101,6 +125,11 @@ pub(crate) fn zone_panel<'a>(
     for (index, zone) in zones.iter().enumerate() {
         let set =
             move |zone: SampleZone| Message::Dialog(DialogMessage::SetZone { node, index, zone });
+        let keys = if zone.mode == ZoneMode::OneShot {
+            &drums
+        } else {
+            &notes
+        };
         let key_list = |pitch: u8, change: fn(&mut SampleZone, u8)| {
             let base = zone.clone();
             pick_list(
@@ -197,6 +226,25 @@ mod tests {
             }),
             frames: 10,
         }
+    }
+
+    #[test]
+    fn test_drum_label_prefers_track_names_then_general_midi_then_pitch() {
+        let mut notation = Notation {
+            key: Key::Indefinite,
+            names: BTreeMap::from([(36, "808 boom".to_owned())]),
+        };
+        assert_eq!(drum_label(36, &notation), "808 boom");
+        assert_eq!(drum_label(38, &notation), "snare");
+        assert_eq!(drum_label(46, &notation), "open-hat");
+        assert_eq!(drum_label(82, &notation), "A#5");
+        // Under a tonal key the track's names are not shown, as on its lanes.
+        notation.key = Key::Tonal {
+            letter: project_model::Letter::C,
+            accidental: project_model::Accidental::Natural,
+            mode: project_model::Mode::Major,
+        };
+        assert_eq!(drum_label(36, &notation), "kick");
     }
 
     #[test]

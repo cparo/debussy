@@ -803,9 +803,9 @@ impl App {
                 .into()
             }
             NodeKind::Instrument { kind, zones, .. } if kind == SAMPLER_KIND => {
-                let key = crate::sampler_zones::spelling(self.session().state(), id);
+                let notation = crate::sampler_zones::notation(self.session().state(), id);
                 let stopped = !self.engine().is_playing();
-                let zones = crate::sampler_zones::zone_panel(id, zones, key, stopped);
+                let zones = crate::sampler_zones::zone_panel(id, zones, &notation, stopped);
                 match self.parameters(id) {
                     Some(parameters) => column![
                         zones,

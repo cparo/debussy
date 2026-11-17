@@ -74,9 +74,11 @@ vertical scrollbar, which never covers a control ([ADR-0109](../adrs/0109-moving
 ## Sampler zones
 
 A sampler's dialog has a "Zones" section above its parameters: one row per zone, in the
-sampler's order, with its file's name; pick lists for its low key, high key and root key, named as
-the lanes name pitches in the key of the first MIDI track feeding the sampler (sharps if none;
-`docs/architecture/track-pane.md` "Key and pitch names"); a button naming its mode, One-shot or
+sampler's order, with its file's name; pick lists for its low key, high key and root key, named by
+the first MIDI track feeding the sampler (`docs/architecture/track-pane.md` "Key and pitch names"):
+in a gated zone, by pitch name in the track's key (sharps if no track); in a one-shot zone, by
+drum: the track's own name for the key if its key is Indefinite, else the General MIDI drum name
+(`project_model::notation::GM_DRUMS`), else the pitch name; a button naming its mode, One-shot or
 Gated, that switches it; a choke pick list, "No choke" or groups 1 to 16; and Remove. A low key
 chosen above the high key raises the high key with it, and the reverse. Each change is one step.
 Below the rows, "Add sample…" asks for one file and adds a gated zone on C3 (48) with root C3.
