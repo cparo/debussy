@@ -11,7 +11,8 @@ use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
 use iced::{Point, Rectangle, Renderer, Size, Theme, mouse};
 use project_model::{
-    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, TrackKind, WireShape,
+    ConnectionId, CurveId, Endpoint, NodeId, NodeKind, Side, State, TrackKind, WireHandle,
+    WireShape,
 };
 
 use crate::app::Message;
@@ -396,8 +397,8 @@ pub fn layout(
         let mut next_free = MARGIN - PORT_SPACING / 2.0;
         for (key, node) in placed {
             let (inputs, outputs) = ports(&node.kind);
-            let mut inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
-            inputs.extend(curve_port_pins(node));
+            let inputs = pins_of(Endpoint::Node(node.id), false, &inputs);
+            let curve_ports = curve_port_pins(node);
             let outputs = pins_of(Endpoint::Node(node.id), true, &outputs);
             let height = node_height(inputs.len().max(outputs.len()));
             // A node the user placed stays there; the rest stack down their column.
@@ -421,6 +422,11 @@ pub fn layout(
                         Point::new(side, y + FIRST_PORT + PORT_SPACING * slot as f32),
                     );
                 }
+            }
+            // Curve ports sit along the bottom edge, spread evenly across it.
+            let spread = NODE_WIDTH / (curve_ports.len() + 1) as f32;
+            for (slot, pin) in curve_ports.into_iter().enumerate() {
+                pins.insert(pin, Point::new(x + spread * (slot + 1) as f32, y + height));
             }
             nodes.push(NodeBox {
                 id: node.id,
@@ -518,12 +524,23 @@ fn wires(state: &State, pins: &BTreeMap<Pin, Point>) -> Vec<Wire> {
             let (a, b) = (*pins.get(&from)?, *pins.get(&to)?);
             let (a0, b0) = first?;
             let shift = ((a - a0) + (b - b0)) * 0.5;
+            // A wire into a curve port arrives from below unless the user shaped that end.
+            let shape = match to.endpoint {
+                Endpoint::CurvePort(..) if c.shape.in_handle.is_none() => &WireShape {
+                    in_handle: Some(WireHandle {
+                        dx: 0.0,
+                        dy: ((b.y - a.y).abs() / 2.0).max(40.0),
+                    }),
+                    ..c.shape.clone()
+                },
+                _ => &c.shape,
+            };
             Some(Wire {
                 connection: c.id,
                 from,
                 to,
                 shift,
-                segments: wire_edit::segments(a, b, &c.shape, shift),
+                segments: wire_edit::segments(a, b, shape, shift),
             })
         }));
     }
@@ -1402,7 +1419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_layout_adds_curve_pins_and_ports_and_grows_nodes() -> Result {
+    fn test_layout_adds_curve_pins_and_ports_along_the_bottom() -> Result {
         let mut session = Session::new_project();
         let mixer = session.state().project_mixer().ok_or("no mixer")?;
         let curve = session.add_curve("Curve 1", modulation::Curve::default())?;
@@ -1429,18 +1446,19 @@ mod tests {
             &[(curve, 50.0)],
             Size::new(100.0, 100.0),
         );
-        // One mono input and two curve ports now outnumber the stereo output's two pins.
-        assert!(after.nodes[0].rect.height > height);
-        assert_eq!(after.nodes[0].rect.height, node_height(3));
+        // Curve ports sit on the bottom edge, so they do not make the node taller.
+        assert_eq!(after.nodes[0].rect.height, height);
         let port = |n| Pin {
             endpoint: Endpoint::CurvePort(mixer, n),
             output: false,
             port: 0,
             side: None,
         };
-        // Below the audio inputs, in number order.
+        // Along the bottom edge, in number order from the left.
         let (one, two) = (after.pins[&port(1)], after.pins[&port(2)]);
-        assert!(two.y > one.y);
+        let bottom = after.nodes[0].rect.y + after.nodes[0].rect.height;
+        assert_eq!((one.y, two.y), (bottom, bottom));
+        assert!(two.x > one.x);
         assert!(
             after
                 .wires
