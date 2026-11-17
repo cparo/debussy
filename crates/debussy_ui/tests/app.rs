@@ -3442,7 +3442,7 @@ fn test_zone_edits_and_removal_are_undo_steps() -> Result<(), Box<dyn Error>> {
     }));
     let mut hat = zones_of(&app, sampler)[2].clone();
     hat.choke = Some(1);
-    hat.high = 30;
+    hat.high = 45;
     app.update(Message::Dialog(DialogMessage::SetZone {
         node: sampler,
         index: 2,
