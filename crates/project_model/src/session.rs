@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::notation::Notation;
 use crate::range::{self, Excerpt, Range};
 use crate::routing::{
-    Connection, ConnectionId, Endpoint, Node, NodeId, NodeKind, Position, Side, WireShape,
+    Connection, ConnectionId, Endpoint, JoinSpec, Node, NodeId, NodeKind, Position, Side, WireShape,
 };
 use crate::state::{Clip, CurveLane, State, Track};
 use crate::tempo::Grid;
@@ -577,6 +577,43 @@ impl Session {
     /// beyond [`MAX_BOARD_COORDINATE`](crate::MAX_BOARD_COORDINATE).
     pub fn move_node(&mut self, id: NodeId, position: Option<Position>) -> Result<(), Error> {
         self.apply(Edit::MoveNode { node: id, position })
+    }
+
+    /// Places nodes on the patch board and joins the pins that meet there, as one step
+    /// (`docs/architecture/patch-board.md` "Patch board"): moves each node in `moves`, returns each
+    /// connection in `unshape` to the automatic curve, and makes each connection in `joins`.
+    /// If any part is refused, nothing changes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::move_node`], [`Session::shape_wire`] and [`Session::connect_sides`].
+    pub fn place_nodes(
+        &mut self,
+        moves: Vec<(NodeId, Position)>,
+        joins: Vec<JoinSpec>,
+        unshape: Vec<ConnectionId>,
+    ) -> Result<(), Error> {
+        let mut edits: Vec<Edit> = moves
+            .into_iter()
+            .map(|(node, position)| Edit::MoveNode {
+                node,
+                position: Some(position),
+            })
+            .collect();
+        edits.extend(unshape.into_iter().map(|connection| Edit::ShapeWire {
+            connection,
+            shape: WireShape::default(),
+        }));
+        let first = self.state.connections.len();
+        for (index, join) in (first..).zip(joins) {
+            let id = self.new_connection_id();
+            edits.push(Edit::Connect {
+                index,
+                connection: Connection::new(id, join.from, join.output, join.to, join.input)
+                    .with_sides(join.from_side, join.to_side),
+            });
+        }
+        self.apply(Edit::Batch(edits))
     }
 
     /// Sets how connection `id`'s wires run on the patch board, as one step.

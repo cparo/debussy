@@ -184,4 +184,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0158](0158-each-sampler-zone-has-its-own-semitone-tune-saved.md) | Each sampler zone has its own semitone tune, saved as format 12 | Accepted | [Sampler](../architecture/instruments.md#sampler) |
 | [ADR-0159](0159-the-patch-board-is-drawn-at-two-thirds-size-node.md) | The patch board is drawn at two-thirds size, node titles level with the first port and curve ports along the bottom edge | Accepted | [Patch board](../architecture/patch-board.md#patch-board) |
 | [ADR-0160](0160-a-wire-s-input-end-is-dragged-to-another-input-to.md) | A wire's input end is dragged to another input to move the connection | Accepted | [Patch board](../architecture/patch-board.md#patch-board) |
+| [ADR-0161](0161-butting-nodes-joins-their-aligned-ports.md) | Butting nodes joins their aligned ports | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 

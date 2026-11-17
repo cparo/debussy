@@ -309,6 +309,24 @@ impl Connection {
     }
 }
 
+/// A connection to make where two butted nodes' aligned pins meet: `from_side` of output
+/// `output` of `from` (or the whole port, with `None`) to `to_side` of input `input` of `to`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JoinSpec {
+    /// Where the signal comes from.
+    pub from: Endpoint,
+    /// The output port.
+    pub output: usize,
+    /// The side of a stereo output it takes, or `None` for the whole port.
+    pub from_side: Option<Side>,
+    /// Where it goes.
+    pub to: Endpoint,
+    /// The input port.
+    pub input: usize,
+    /// The side of a stereo input it feeds, or `None` for the whole port.
+    pub to_side: Option<Side>,
+}
+
 /// Checks a node's own values, and its curve ports: numbered from 1, no number twice, and for a
 /// mixer or an effect this build knows, each on a parameter that may be automated.
 pub(crate) fn check_node(node: &Node) -> Result<(), Error> {

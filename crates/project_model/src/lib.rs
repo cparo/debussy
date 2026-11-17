@@ -62,8 +62,8 @@ pub use midi::{Control, Note, Sequence};
 pub use notation::{Accidental, Key, Letter, Mode, Notation};
 pub use range::{Excerpt, Lane, Range};
 pub use routing::{
-    Connection, ConnectionId, Endpoint, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node, NodeId,
-    NodeKind, Position, Side, WireHandle, WirePoint, WireShape,
+    Connection, ConnectionId, Endpoint, JoinSpec, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node,
+    NodeId, NodeKind, Position, Side, WireHandle, WirePoint, WireShape,
 };
 pub use session::Session;
 pub use state::{Clip, CurveLane, State, Track};

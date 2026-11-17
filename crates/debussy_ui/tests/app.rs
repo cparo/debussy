@@ -1672,6 +1672,7 @@ fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error
         app.update(Message::DragNode(
             bus,
             project_model::Position { x, y: 30.0 },
+            false,
         ));
     }
     let board = app.board(iced::Size::new(600.0, 400.0));
@@ -3876,5 +3877,192 @@ fn test_zone_tune_is_an_undo_step() -> Result<(), Box<dyn Error>> {
     assert_eq!(zones_of(&app, sampler)[0].tune, -5);
     app.update(Message::Undo);
     assert_eq!(zones_of(&app, sampler)[0].tune, 0);
+    Ok(())
+}
+
+/// Drags node `node` on the board canvas with real mouse events so its corner lands at `to`,
+/// holding ⌥ if `alt`, feeding every message the canvas publishes to `app` as the window would.
+fn drag_node_on_board(
+    app: &mut App,
+    node: NodeId,
+    to: iced::Point,
+    alt: bool,
+) -> Result<(), Box<dyn Error>> {
+    use iced::keyboard::{self, Modifiers};
+    use iced::widget::canvas::{self, Program};
+    use iced::{Rectangle, mouse};
+    let size = iced::Size::new(800.0, 600.0);
+    let bounds = Rectangle::new(iced::Point::ORIGIN, size);
+    let rect = node_rect(app, node)?;
+    let grab = iced::Vector::new(rect.width / 2.0, rect.height / 2.0);
+    let (from, to) = (rect.position() + grab, to + grab);
+    let nudged = from + iced::Vector::new(1.0, 1.0);
+    let modifiers = if alt {
+        Modifiers::ALT
+    } else {
+        Modifiers::empty()
+    };
+    let events = [
+        (
+            from,
+            canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)),
+        ),
+        (
+            from,
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        ),
+        (
+            nudged,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: nudged }),
+        ),
+        (
+            to,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+        ),
+        (
+            to,
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ),
+    ];
+    let mut state = debussy_ui::BoardState::default();
+    for (point, event) in events {
+        let view = app.board_view(size);
+        let action = view.update(&mut state, &event, bounds, mouse::Cursor::Available(point));
+        if let Some(message) = action.and_then(|a| a.into_inner().0) {
+            app.update(message);
+        }
+    }
+    Ok(())
+}
+
+/// Node `node`'s box on the board.
+fn node_rect(app: &App, node: NodeId) -> Result<iced::Rectangle, Box<dyn Error>> {
+    Ok(app
+        .board(iced::Size::new(800.0, 600.0))
+        .nodes
+        .iter()
+        .find(|n| n.id == node)
+        .ok_or("node not on the board")?
+        .rect)
+}
+
+/// The connections from `from` to `to`, by their ports and sides.
+fn joined(app: &App, from: NodeId, to: NodeId) -> Vec<project_model::Connection> {
+    app.session()
+        .state()
+        .connections
+        .iter()
+        .filter(|c| {
+            c.from == project_model::Endpoint::Node(from)
+                && c.to == project_model::Endpoint::Node(to)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Two effects, A placed at (300, 300) and B dragged against its right edge, a little off.
+fn butted_pair(app: &mut App) -> Result<(NodeId, NodeId), Box<dyn Error>> {
+    let a = add_effect(app, "low-pass")?;
+    let b = add_effect(app, "low-pass")?;
+    app.update(Message::Select(None));
+    drag_node_on_board(app, a, iced::Point::new(300.0, 300.0), false)?;
+    let near = iced::Point::new(300.0 + debussy_ui::NODE_WIDTH + 4.0, 303.0);
+    drag_node_on_board(app, b, near, false)?;
+    Ok((a, b))
+}
+
+#[test]
+fn test_dragging_an_effect_against_another_snaps_and_joins_them() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let a = add_effect(&mut app, "low-pass")?;
+    let b = add_effect(&mut app, "low-pass")?;
+    app.update(Message::Select(None));
+    let a_at = node_rect(&app, a)?.position();
+    let near = a_at + iced::Vector::new(debussy_ui::NODE_WIDTH + 5.0, -4.0);
+    drag_node_on_board(&mut app, b, near, false)?;
+    assert_eq!(app.status(), None);
+    // B sits flush against A, and A, placed automatically, is kept where it was.
+    let position = |app: &App, n| app.session().state().node(n).and_then(|n| n.position);
+    assert_eq!(
+        position(&app, b),
+        Some(project_model::Position {
+            x: a_at.x + debussy_ui::NODE_WIDTH,
+            y: a_at.y,
+        })
+    );
+    assert_eq!(
+        position(&app, a),
+        Some(project_model::Position {
+            x: a_at.x,
+            y: a_at.y
+        })
+    );
+    let wires = joined(&app, a, b);
+    assert_eq!(wires.len(), 1);
+    assert_eq!((wires[0].from_side, wires[0].to_side), (None, None));
+    // Drawn as joints, with no wire between them.
+    let board = app.board(iced::Size::new(800.0, 600.0));
+    assert_eq!(board.joins.len(), 2);
+    // One step undoes it all.
+    app.update(Message::Undo);
+    assert!(joined(&app, a, b).is_empty());
+    assert_eq!((position(&app, a), position(&app, b)), (None, None));
+    Ok(())
+}
+
+#[test]
+fn test_a_plain_drag_out_of_a_chain_leaves_its_wires() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let (a, b) = butted_pair(&mut app)?;
+    assert_eq!(joined(&app, a, b).len(), 1);
+    let a_at = node_rect(&app, a)?.position();
+    drag_node_on_board(&mut app, b, iced::Point::new(600.0, 100.0), false)?;
+    assert_eq!(node_rect(&app, a)?.position(), a_at);
+    assert_eq!(
+        node_rect(&app, b)?.position(),
+        iced::Point::new(600.0, 100.0)
+    );
+    assert_eq!(joined(&app, a, b).len(), 1);
+    let board = app.board(iced::Size::new(800.0, 600.0));
+    assert!(board.joins.is_empty());
+    Ok(())
+}
+
+#[test]
+fn test_an_option_drag_moves_the_whole_chain() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let (a, b) = butted_pair(&mut app)?;
+    let (a_at, b_at) = (
+        node_rect(&app, a)?.position(),
+        node_rect(&app, b)?.position(),
+    );
+    drag_node_on_board(&mut app, b, b_at + iced::Vector::new(40.0, 150.0), true)?;
+    assert_eq!(app.status(), None);
+    assert_eq!(
+        node_rect(&app, a)?.position(),
+        a_at + iced::Vector::new(40.0, 150.0)
+    );
+    assert_eq!(
+        node_rect(&app, b)?.position(),
+        b_at + iced::Vector::new(40.0, 150.0)
+    );
+    assert_eq!(joined(&app, a, b).len(), 1);
+    // One step moved both.
+    app.update(Message::Undo);
+    assert_eq!(node_rect(&app, a)?.position(), a_at);
+    Ok(())
+}
+
+#[test]
+fn test_a_join_making_a_cycle_is_refused_and_the_node_stays() -> Result<(), Box<dyn Error>> {
+    let (mut app, _processor, _, _) = app()?;
+    let (a, b) = butted_pair(&mut app)?;
+    let b_at = node_rect(&app, b)?.position();
+    // A, moved against B's right edge, would join B's output back into A.
+    let near = b_at + iced::Vector::new(debussy_ui::NODE_WIDTH + 3.0, 2.0);
+    let before = app.session().state().clone();
+    drag_node_on_board(&mut app, a, near, false)?;
+    assert!(app.status().is_some(), "the cycle is reported");
+    assert_eq!(app.session().state(), &before);
     Ok(())
 }

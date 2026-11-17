@@ -92,8 +92,16 @@ impl NewNode {
 /// A move on the board not yet recorded.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Moving {
-    /// A node, now here.
-    Node(NodeId, Position),
+    /// Nodes moving together: `dragged`, held with its top-left corner at `to`, and each
+    /// member (`dragged` among them) by where its top-left corner was when the drag began.
+    Nodes {
+        /// The node under the pointer.
+        dragged: NodeId,
+        /// The moving nodes' corners at the start.
+        start: BTreeMap<NodeId, iced::Point>,
+        /// Where `dragged`'s corner is now.
+        to: Position,
+    },
     /// The L/R outputs, L now at this height.
     Output(f32),
     /// A connection's wires, now shaped like this.
@@ -348,8 +356,8 @@ pub enum Message {
     /// Select a node (opening its dialog) or a wire; `None` clears the selection and closes
     /// the dialog.
     Select(Option<Selection>),
-    /// A node is being dragged here: shown, not yet recorded.
-    DragNode(NodeId, Position),
+    /// A node is being dragged here, with its butted chain if `true`: shown, not yet recorded.
+    DragNode(NodeId, Position, bool),
     /// The L/R outputs are being dragged: L's height, shown, not yet recorded.
     DragOutput(f32),
     /// A wire's handle or point is being dragged, giving it this shape: shown, not yet
@@ -774,10 +782,8 @@ impl App {
         // Show the move under way without recording it.
         let mut shown = state.clone();
         match moving {
-            Moving::Node(id, position) => {
-                if let Some(node) = shown.nodes.iter_mut().find(|n| n.id == *id) {
-                    node.position = Some(*position);
-                }
+            Moving::Nodes { dragged, start, to } => {
+                shown = self.placed(*dragged, start, *to).0;
             }
             Moving::Output(y) => shown.output_y = Some(*y),
             Moving::Shape(id, shape) => {
@@ -787,6 +793,49 @@ impl App {
             }
         }
         crate::patch_board::layout(&shown, &lanes, &curves, min)
+    }
+
+    /// The state with nodes `start` moved together so `dragged`'s corner is at `to`, kept on the
+    /// board, then snapped to a butted place if one is near; and the snap, if any.
+    fn placed(
+        &self,
+        dragged: NodeId,
+        start: &BTreeMap<NodeId, iced::Point>,
+        to: Position,
+    ) -> (project_model::State, Option<crate::joins::Snap>) {
+        let state = self.session.state();
+        let mut shown = state.clone();
+        let Some(origin) = start.get(&dragged) else {
+            return (shown, None);
+        };
+        // No member leaves the board's top or left edge.
+        let left = start.values().map(|p| p.x).fold(f32::MAX, f32::min);
+        let top = start.values().map(|p| p.y).fold(f32::MAX, f32::min);
+        let delta = iced::Vector::new((to.x - origin.x).max(-left), (to.y - origin.y).max(-top));
+        let set = |shown: &mut project_model::State, id: NodeId, at: iced::Point| {
+            if let Some(node) = shown.nodes.iter_mut().find(|n| n.id == id) {
+                node.position = Some(Position {
+                    x: at.x.max(0.0),
+                    y: at.y.max(0.0),
+                });
+            }
+        };
+        for (id, corner) in start {
+            set(&mut shown, *id, *corner + delta);
+        }
+        let (lanes, curves) = (self.lane_centres(), self.curve_centres());
+        let board = crate::patch_board::layout(&shown, &lanes, &curves, iced::Size::ZERO);
+        let moving = start.keys().copied().collect();
+        let snap = crate::joins::snap(&board, &shown, &moving);
+        if let Some(snap) = &snap {
+            for n in board.nodes.iter().filter(|n| moving.contains(&n.id)) {
+                set(&mut shown, n.id, n.rect.position() + snap.offset);
+            }
+            for (id, at) in &snap.pin {
+                set(&mut shown, *id, iced::Point::new(at.x, at.y));
+            }
+        }
+        (shown, snap)
     }
 
     /// The selected node or wire.
@@ -1293,8 +1342,30 @@ impl App {
                 self.dialog.close();
                 self.selection = selection;
             }
-            Message::DragNode(node, position) => {
-                self.moving = Some(Moving::Node(node, position));
+            Message::DragNode(node, to, chain) => {
+                // The members and their corners are taken when the drag begins.
+                let start = match self.moving.take() {
+                    Some(Moving::Nodes { dragged, start, .. }) if dragged == node => start,
+                    _ => {
+                        let board = self.board(iced::Size::ZERO);
+                        let members = if chain {
+                            crate::joins::chain(&board, node)
+                        } else {
+                            [node].into()
+                        };
+                        board
+                            .nodes
+                            .iter()
+                            .filter(|n| members.contains(&n.id))
+                            .map(|n| (n.id, n.rect.position()))
+                            .collect()
+                    }
+                };
+                self.moving = Some(Moving::Nodes {
+                    dragged: node,
+                    start,
+                    to,
+                });
             }
             Message::DragOutput(y) => self.moving = Some(Moving::Output(y)),
             Message::DragShape(connection, shape) => {
@@ -1309,9 +1380,24 @@ impl App {
             }
             Message::Drop => {
                 let result = match self.moving.take() {
-                    Some(Moving::Node(node, position)) => self
-                        .bridge
-                        .edit(&mut self.session, |s| s.move_node(node, Some(position))),
+                    Some(Moving::Nodes { dragged, start, to }) => {
+                        let (shown, snap) = self.placed(dragged, &start, to);
+                        let mut moves: Vec<(NodeId, Position)> = shown
+                            .nodes
+                            .iter()
+                            .filter(|n| start.contains_key(&n.id))
+                            .filter_map(|n| Some((n.id, n.position?)))
+                            .collect();
+                        let (joins, unshape) = match snap {
+                            Some(snap) => {
+                                moves.extend(snap.pin);
+                                (snap.joins, snap.unshape)
+                            }
+                            None => (Vec::new(), Vec::new()),
+                        };
+                        self.bridge
+                            .edit(&mut self.session, |s| s.place_nodes(moves, joins, unshape))
+                    }
                     Some(Moving::Output(y)) => self
                         .bridge
                         .edit(&mut self.session, |s| s.move_output(Some(y))),

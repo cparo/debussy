@@ -5,7 +5,7 @@
 //! [`layout`] places everything from the model, so it is tested without a window; [`BoardView`]
 //! and [`GutterView`] draw it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use audio_buffers::Layout;
 use iced::widget::canvas::{self, Frame, Geometry, Path, Program, Stroke, Text};
@@ -16,6 +16,7 @@ use project_model::{
 };
 
 use crate::app::Message;
+use crate::joins::{self, Join};
 use crate::theme::{CONTROL, Tokens, mix, tokens, tone_of};
 use crate::wire_edit::{self, Grip, Segment};
 
@@ -115,6 +116,10 @@ pub struct Board {
     pub wires: Vec<Wire>,
     /// Each connection's shape, as drawn.
     pub shapes: BTreeMap<ConnectionId, WireShape>,
+    /// The wires whose two node pins meet, drawn as one pin with no wire.
+    pub joins: Vec<Join>,
+    /// The pins of [`Board::joins`]: not hit targets, so a press on one catches the node.
+    pub joints: BTreeSet<Pin>,
     /// The board's size: at least the pane's, and enough to hold everything.
     pub size: Size,
 }
@@ -190,7 +195,7 @@ impl Board {
                 }
             }
         }
-        for (pin, centre) in &self.pins {
+        for (pin, centre) in self.pins.iter().filter(|(p, _)| !self.joints.contains(p)) {
             let radius = match pin.endpoint {
                 Endpoint::Output => OUTPUT_RADIUS,
                 _ => PIN_RADIUS,
@@ -235,12 +240,17 @@ pub fn occupied(state: &State, pin: Pin) -> bool {
 /// another endpoint carrying the same kind of signal: audio to audio, control to control, or
 /// events (a MIDI track's output) to events (an instrument's input).
 pub fn can_connect(state: &State, from: Pin, to: Pin) -> bool {
+    kinds_match(state, from, to) && !occupied(state, to)
+}
+
+/// Whether output `from` and input `to` are of different endpoints and carry the same kind of
+/// signal, whatever else is wired to them.
+pub(crate) fn kinds_match(state: &State, from: Pin, to: Pin) -> bool {
     from.output
         && !to.output
         && from.endpoint != to.endpoint
         && from.endpoint.is_control() == to.endpoint.is_control()
         && is_event(state, from) == is_event(state, to)
-        && !occupied(state, to)
 }
 
 /// Where connection `id`'s far end would go if dropped on input `to`: the target's endpoint,
@@ -496,6 +506,8 @@ pub fn layout(
     }
 
     let wires = wires(state, &pins);
+    let joins = joins::joins(&pins, &wires);
+    let joints = joins.iter().flat_map(|j| [j.from, j.to]).collect();
     let bottom = pins.values().map(|p| p.y).fold(0.0, f32::max);
     let bottom = nodes
         .iter()
@@ -516,6 +528,8 @@ pub fn layout(
         pins,
         wires,
         shapes,
+        joins,
+        joints,
         size: Size::new(width, min.height.max(bottom + PORT_SPACING)),
     }
 }
@@ -652,8 +666,9 @@ pub enum BoardDrag {
     /// None.
     #[default]
     Idle,
-    /// A node, held at this offset from its top-left corner.
-    Node(NodeId, iced::Vector),
+    /// A node, held at this offset from its top-left corner; `true` if its butted chain moves
+    /// with it.
+    Node(NodeId, iced::Vector, bool),
     /// The L/R outputs, held this far below L's centre.
     Output(f32),
     /// A grip of wire `wire` (in [`Board::wires`]) of `connection`, held at `grab` from its
@@ -737,7 +752,8 @@ impl Program<Message> for BoardView {
                             .iter()
                             .find(|n| n.id == id)
                             .map(|n| n.rect.position())?;
-                        state.drag = BoardDrag::Node(id, at - corner);
+                        // ⌥ moves the node's whole butted chain.
+                        state.drag = BoardDrag::Node(id, at - corner, state.alt);
                         Message::Select(Some(Selection::Node(id)))
                     }
                     Hit::Wire(id) => Message::Select(Some(Selection::Wire(id))),
@@ -776,7 +792,7 @@ impl Program<Message> for BoardView {
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let at = relative(cursor, bounds)?;
                 match state.drag {
-                    BoardDrag::Node(id, grab) => {
+                    BoardDrag::Node(id, grab, chain) => {
                         let corner = at - grab;
                         Some(canvas::Action::publish(Message::DragNode(
                             id,
@@ -784,6 +800,7 @@ impl Program<Message> for BoardView {
                                 x: corner.x.max(0.0),
                                 y: corner.y.max(0.0),
                             },
+                            chain,
                         )))
                     }
                     BoardDrag::Output(grab) => Some(canvas::Action::publish(Message::DragOutput(
@@ -856,11 +873,16 @@ impl Program<Message> for BoardView {
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), t.pane);
         let board = &self.board;
         let shaping = self.selection.and_then(Selection::shaping);
-        for w in board
-            .wires
-            .iter()
-            .filter(|w| self.rewiring != Some(w.connection))
-        {
+        for w in board.wires.iter().filter(|w| {
+            self.rewiring != Some(w.connection)
+                && board
+                    .joins
+                    .binary_search(&Join {
+                        from: w.from,
+                        to: w.to,
+                    })
+                    .is_err()
+        }) {
             let chosen = shaping == Some(w.connection);
             let colour = if chosen {
                 tint(w.from.endpoint)
@@ -959,7 +981,24 @@ impl Program<Message> for BoardView {
                         ..Text::default()
                     });
                 }
-                Endpoint::Node(_) => pin(&mut frame, *at, PIN_RADIUS, t.lane, t.audio),
+                // Drawn with its output.
+                Endpoint::Node(_) if !p.output && board.joints.contains(p) => {}
+                Endpoint::Node(_) => {
+                    pin(&mut frame, *at, PIN_RADIUS, t.lane, t.audio);
+                    // A joint is drawn once, from its output, with a seam across it.
+                    if p.output && board.joints.contains(p) {
+                        let half = PIN_RADIUS * 0.6;
+                        frame.stroke(
+                            &Path::line(
+                                Point::new(at.x, at.y - half),
+                                Point::new(at.x, at.y + half),
+                            ),
+                            Stroke::default()
+                                .with_width(stroke(1.5))
+                                .with_color(t.audio),
+                        );
+                    }
+                }
                 Endpoint::CurvePort(_, number) => {
                     pin(&mut frame, *at, PIN_RADIUS, t.lane, CONTROL);
                     frame.fill_text(Text {

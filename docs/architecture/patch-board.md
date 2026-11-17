@@ -45,6 +45,19 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
   port, a single wire to the side it is dropped on. A drop anywhere else changes nothing
   ([ADR-0160](../adrs/0160-a-wire-s-input-end-is-dragged-to-another-input-to.md)).
 - Drag a node, or the L and R outputs (vertically), to move them; the move is one undo step.
+- A connection whose two node pins coincide is a joint: drawn as one pin, its output's circle
+  with a seam across it, with no wire, and not a hit target, so a press there catches the node
+  under the pointer. Pins that coincide but are not connected are ordinary pins.
+- A dragged node snaps flush, in the preview and on drop, to the nearest place within 8 pixels
+  across and up or down where its edge meets another node's opposite edge with their pin rows in
+  step, if at least one output and input pin meet there and every pair that meets carries the
+  same kind of signal and is wired to nothing but the other. The drop connects each pair not yet
+  wired (one whole-port connection when both sides of a stereo port meet both sides of another in
+  order, otherwise one per pin), resets joined connections' shapes, and pins an automatically
+  placed neighbour where it is drawn, all as one undo step; if the signal graph refuses it,
+  nothing changes. Pulling butted nodes apart leaves their connections as wires. ⌥-drag moves a
+  node with every node reachable from it through joints
+  ([ADR-0161](../adrs/0161-butting-nodes-joins-their-aligned-ports.md)).
 - A selected wire shows its two end handles as circles on stems from their pins, at the
   automatic place when unset, and its points as squares about 5 pixels across; a selected point shows its two
   handles. A whole-port stereo connection's second wire passes its points moved as far as its
