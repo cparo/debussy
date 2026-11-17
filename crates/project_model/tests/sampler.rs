@@ -21,6 +21,7 @@ fn zone(name: &str, key: u8) -> SampleZone {
         root: key,
         mode: ZoneMode::OneShot,
         choke: None,
+        tune: 0,
     }
 }
 

@@ -176,6 +176,10 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   sets how far the pitch wheel bends, in semitones, and **Voices** how many notes sound at once;
   a note beyond that takes over the quietest or oldest one. The sustain pedal holds notes.
 
+- **Sampler**, also under **Instruments**, plays your own audio files from notes: a recorded
+  instrument across the keyboard, or a drum kit from a folder of samples. See
+  [The sampler](sampler.md) for how to set it up.
+
 Effect and instrument settings are saved with the project.
 
 ## Exporting

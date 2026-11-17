@@ -179,4 +179,7 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0153](0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md) | MIDI tracks carry a key and pitch names; lanes label roots and named pitches | Accepted | [Key and pitch names](../architecture/track-pane.md#key-and-pitch-names) |
 | [ADR-0154](0154-sampler-zones-are-saved-on-the-instrument-node-and.md) | Sampler zones are saved on the instrument node and their samples are loaded whole | Accepted | [Sampler](../architecture/instruments.md#sampler) |
 | [ADR-0155](0155-the-sampler-s-varispeed-playback-zones-one-shot.md) | The sampler's varispeed playback, zones, one-shot and gated modes and choke groups may be built in-house | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0156](0156-sampler-zones-are-edited-in-rows-in-the-sampler-s.md) | Sampler zones are edited in rows in the sampler's dialog, added from a file on C3 or a folder mapped by name to General MIDI drum keys | Accepted | [Sampler zones](../architecture/node-dialogs.md#sampler-zones) |
+| [ADR-0157](0157-refused-imports-open-an-alert-with-the-reason-and.md) | Refused imports open an alert with the reason and the files concerned | Accepted | [Files and devices](../architecture/user-interface.md#files-and-devices) |
+| [ADR-0158](0158-each-sampler-zone-has-its-own-semitone-tune-saved.md) | Each sampler zone has its own semitone tune, saved as format 12 | Accepted | [Sampler](../architecture/instruments.md#sampler) |
 

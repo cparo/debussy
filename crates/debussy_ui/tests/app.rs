@@ -18,8 +18,8 @@ use audio_engine::{
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
     ImportedTrack, Menu, Message, MidiInputChoice, MidiTakeFile, MixerFocus, NewNode, PassMarker,
-    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services,
-    Spectrum, TakeFiles, TakeStatus, Takes,
+    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, SampleImport, Selection,
+    Services, Spectrum, TakeFiles, TakeStatus, Takes,
 };
 use engine_bridge::{Bridge, Samples};
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
@@ -44,6 +44,10 @@ struct Calls {
     exports: Vec<(PathBuf, ExportSettings)>,
     /// How many times Share/Archive… ran.
     archives: usize,
+    /// Each sample import asked for: whether it was a kit.
+    sample_imports: Vec<bool>,
+    /// What the next sample import gives instead of the usual files.
+    sample_result: Option<Result<SampleImport, String>>,
     /// Whether the save dialog is cancelled.
     export_cancelled: bool,
     /// Whether MP3 is offered.
@@ -222,6 +226,37 @@ impl Services for Fake {
             return Err("disk full".into());
         }
         Ok(())
+    }
+
+    fn import_samples(&mut self, kit: bool) -> Result<SampleImport, String> {
+        self.calls.borrow_mut().sample_imports.push(kit);
+        if let Some(result) = self.calls.borrow_mut().sample_result.take() {
+            return result;
+        }
+        let names: &[&str] = if kit {
+            &["Kicks/kick", "snare", "Hats/closed", "Hats/open", "vox"]
+        } else {
+            &["piano"]
+        };
+        Ok(SampleImport {
+            imported: names
+                .iter()
+                .map(|name| ImportedTrack {
+                    name: (*name).into(),
+                    layout: Layout::Mono,
+                    source: Source::Mono(AudioFile {
+                        name: format!("{}.wav", name.replace('/', "-")),
+                        frames: 4800,
+                    }),
+                    frames: 4800,
+                })
+                .collect(),
+            skipped: if kit {
+                vec!["long: a sample can be at most 60 seconds long".into()]
+            } else {
+                Vec::new()
+            },
+        })
     }
 
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
@@ -3362,5 +3397,269 @@ fn test_instrument_menu_wires_the_synth_and_undo_removes_it() -> Result<(), Box<
             .count(),
         0
     );
+    Ok(())
+}
+
+/// The zones of sampler `node`.
+fn zones_of(app: &App, node: NodeId) -> Vec<project_model::SampleZone> {
+    match app.session().state().node(node).map(|n| &n.kind) {
+        Some(NodeKind::Instrument { zones, .. }) => zones.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// The fixture with a sampler on its MIDI track, and the sampler's id.
+fn app_with_sampler() -> Result<(Fixture, NodeId), Box<dyn Error>> {
+    let ((mut app, processor, calls, mixer), track) = app_with_midi()?;
+    app.update(Message::SetInstrument(track, project_model::SAMPLER_KIND));
+    let sampler = app
+        .session()
+        .state()
+        .connections_of(Endpoint::Track(track))
+        .find_map(|c| c.to.node())
+        .ok_or("the track feeds nothing")?;
+    Ok(((app, processor, calls, mixer), sampler))
+}
+
+#[test]
+fn test_add_sample_and_kit_import_and_add_zones_in_one_step() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    let zones = zones_of(&app, sampler);
+    assert_eq!(zones.len(), 1);
+    assert_eq!((zones[0].low, zones[0].root), (48, 48));
+    assert_eq!(zones[0].mode, project_model::ZoneMode::Gated);
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    // Drums by name on their General MIDI keys, the hats choking each other, the unknown file
+    // above the drum map.
+    let keys: Vec<(u8, Option<u8>)> = zones_of(&app, sampler)
+        .iter()
+        .map(|z| (z.low, z.choke))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            (48, None),
+            (36, None),
+            (38, None),
+            (42, Some(1)),
+            (46, Some(1)),
+            (82, None)
+        ]
+    );
+    assert_eq!(app.status(), Some("Added 5 samples."));
+    let alert = app.alert().ok_or("no alert for the skipped file")?;
+    assert!(
+        alert
+            .text()
+            .ends_with("• long: a sample can be at most 60 seconds long"),
+        "{}",
+        alert.text()
+    );
+    // Selecting the text to copy it leaves the alert and the status line as they are.
+    app.update(Message::AlertAction(
+        iced::widget::text_editor::Action::SelectAll,
+    ));
+    assert_eq!(app.status(), Some("Added 5 samples."));
+    let alert = app.alert().ok_or("the alert closed")?;
+    assert_eq!(alert.title, "Some files were skipped");
+    assert_eq!(
+        alert.items,
+        ["long: a sample can be at most 60 seconds long"]
+    );
+    app.update(Message::DismissAlert);
+    assert!(app.alert().is_none());
+    assert_eq!(calls.borrow().sample_imports, [false, true]);
+    // The kit was one undo step.
+    app.update(Message::Undo);
+    assert_eq!(zones_of(&app, sampler).len(), 1);
+    Ok(())
+}
+
+#[test]
+fn test_zone_edits_and_removal_are_undo_steps() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    // The fake kit skips a file; close the alert, which takes the shortcuts while open.
+    app.update(Message::DismissAlert);
+    let mut hat = zones_of(&app, sampler)[2].clone();
+    hat.choke = Some(2);
+    hat.high = 45;
+    app.update(Message::Dialog(DialogMessage::SetZone {
+        node: sampler,
+        index: 2,
+        zone: hat.clone(),
+    }));
+    assert_eq!(zones_of(&app, sampler)[2], hat);
+    app.update(Message::Dialog(DialogMessage::RemoveZone {
+        node: sampler,
+        index: 0,
+    }));
+    let names: Vec<String> = zones_of(&app, sampler)
+        .iter()
+        .flat_map(|z| z.file.files().map(|f| f.name.clone()).collect::<Vec<_>>())
+        .collect();
+    assert_eq!(
+        names,
+        ["snare.wav", "Hats-closed.wav", "Hats-open.wav", "vox.wav"]
+    );
+    app.update(Message::Undo);
+    assert_eq!(zones_of(&app, sampler).len(), 5);
+    app.update(Message::Undo);
+    assert_eq!(zones_of(&app, sampler)[2].choke, Some(1));
+    // A bad zone is refused and leaves the project as it was.
+    let revision = app.session().revision();
+    let backwards = project_model::SampleZone {
+        low: 40,
+        high: 30,
+        ..hat
+    };
+    app.update(Message::Dialog(DialogMessage::SetZone {
+        node: sampler,
+        index: 0,
+        zone: backwards,
+    }));
+    assert_eq!(app.session().revision(), revision);
+    assert!(app.status().is_some());
+    Ok(())
+}
+
+#[test]
+fn test_choosing_another_instrument_removes_the_zones() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), track) = app_with_midi()?;
+    app.update(Message::SetInstrument(track, project_model::SAMPLER_KIND));
+    let sampler = app
+        .session()
+        .state()
+        .connections_of(Endpoint::Track(track))
+        .find_map(|c| c.to.node())
+        .ok_or("no sampler")?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    app.update(Message::SetInstrument(track, "synth"));
+    assert!(app.session().state().node(sampler).is_none());
+    assert!(
+        app.session()
+            .referenced_files()
+            .iter()
+            .all(|f| *f != "piano.wav")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_a_refused_kit_folder_pops_up_its_reason() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    let reason =
+        "The folder and its subfolders hold 300 audio files, but a sampler holds at most 128.";
+    calls.borrow_mut().sample_result = Some(Err(reason.into()));
+    let revision = app.session().revision();
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Kit not added");
+    assert_eq!(alert.message, reason);
+    assert_eq!(app.session().revision(), revision);
+    // Escape dismisses it, and nothing else happens.
+    app.update(Message::ClearRange);
+    assert!(app.alert().is_none());
+    Ok(())
+}
+
+#[test]
+fn test_a_kit_that_would_pass_the_zone_limit_is_refused_with_a_reason() -> Result<(), Box<dyn Error>>
+{
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    // 126 zones, then a kit of five: over the 128 a sampler holds.
+    for _ in 0..126 {
+        app.update(Message::Dialog(DialogMessage::AddSamples {
+            node: sampler,
+            kit: false,
+        }));
+    }
+    assert_eq!(zones_of(&app, sampler).len(), 126);
+    calls.borrow_mut().sample_result = None;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    assert_eq!(zones_of(&app, sampler).len(), 126);
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Kit not added");
+    assert!(alert.message.contains("has 126 zones"), "{}", alert.message);
+    assert!(alert.message.contains("at most 128"), "{}", alert.message);
+    // Enter dismisses it.
+    app.update(Message::Dialog(DialogMessage::FocusPress));
+    assert!(app.alert().is_none());
+    Ok(())
+}
+
+#[test]
+fn test_a_sample_that_cannot_be_added_says_why() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), sampler) = app_with_sampler()?;
+    calls.borrow_mut().sample_result = Some(Ok(SampleImport {
+        imported: Vec::new(),
+        skipped: vec!["huge: a sample can be at most 60 seconds long".into()],
+    }));
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    let alert = app.alert().ok_or("no alert")?;
+    assert_eq!(alert.title, "Sample not added");
+    assert_eq!(alert.message, "The file could not be added.");
+    assert_eq!(alert.items.len(), 1);
+    assert!(zones_of(&app, sampler).is_empty());
+    Ok(())
+}
+
+#[test]
+fn test_an_open_alert_keeps_undo_and_delete_from_the_project() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: true,
+    }));
+    assert!(app.alert().is_some());
+    let revision = app.session().revision();
+    app.update(Message::Undo);
+    app.update(Message::DeleteRange);
+    assert_eq!(app.session().revision(), revision);
+    assert!(app.alert().is_some());
+    Ok(())
+}
+
+#[test]
+fn test_zone_tune_is_an_undo_step() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    let tuned = project_model::SampleZone {
+        tune: -5,
+        ..zones_of(&app, sampler)[0].clone()
+    };
+    app.update(Message::Dialog(DialogMessage::SetZone {
+        node: sampler,
+        index: 0,
+        zone: tuned,
+    }));
+    assert_eq!(zones_of(&app, sampler)[0].tune, -5);
+    app.update(Message::Undo);
+    assert_eq!(zones_of(&app, sampler)[0].tune, 0);
     Ok(())
 }

@@ -15,19 +15,19 @@ use audio_engine::{NoteSink, Processor, TakeInfo, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
     ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, MidiInputChoice,
-    MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, Services, Spectrum,
-    TakeFiles, TakeStatus, Takes, spectrum_bands,
+    MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, SampleImport, Services,
+    Spectrum, TakeFiles, TakeStatus, Takes, spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
     WavClipAudio,
 };
 use engine_bridge::{ClickSound, track_renderers};
-use import_export::{Lame, import, safe_stem, unique_names};
+use import_export::{Lame, import, import_sample, safe_stem, unique_names};
 use macos_platform::MacCodecs;
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
-use project_model::{Session, Source, State, TrackId};
+use project_model::{MAX_ZONES, Session, Source, State, TrackId};
 use project_storage::{
     ARCHIVE_SUFFIX, AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart,
     Recovery, write_archive,
@@ -68,6 +68,35 @@ impl Streams for NoStreams {
 
 /// The file types offered by the import dialog.
 const IMPORT_TYPES: [&str; 6] = ["wav", "rf64", "flac", "m4a", "aac", "mp3"];
+
+/// Every file under `dir`, in it and its subfolders, whose extension is one of
+/// [`IMPORT_TYPES`], added to `out`. Hidden files and folders are left out, and symbolic links are
+/// not followed, so a link cannot loop the walk.
+fn audio_files_in(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let path = entry.path();
+        let hidden = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        if hidden {
+            continue;
+        }
+        if kind.is_dir() {
+            audio_files_in(&path, out)?;
+        } else if kind.is_file()
+            && path.extension().is_some_and(|e| {
+                IMPORT_TYPES
+                    .iter()
+                    .any(|t| e.to_string_lossy().eq_ignore_ascii_case(t))
+            })
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
 
 /// The application's services.
 pub struct AppServices {
@@ -396,6 +425,97 @@ impl Services for AppServices {
         Ok(imported)
     }
 
+    fn import_samples(&mut self, kit: bool) -> Result<SampleImport, String> {
+        let mut found: Vec<(PathBuf, String)> = if kit {
+            let Some(folder) = rfd::FileDialog::new().set_title("Add kit").pick_folder() else {
+                return Ok(SampleImport::default());
+            };
+            let mut files = Vec::new();
+            audio_files_in(&folder, &mut files)
+                .map_err(|e| format!("{}: {e}", folder.display()))?;
+            files.sort();
+            files
+                .into_iter()
+                .map(|path| {
+                    let name = path
+                        .strip_prefix(&folder)
+                        .unwrap_or(&path)
+                        .with_extension("")
+                        .to_string_lossy()
+                        .into_owned();
+                    (path, name)
+                })
+                .collect()
+        } else {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Add sample")
+                .add_filter("Audio", &IMPORT_TYPES)
+                .pick_file()
+            else {
+                return Ok(SampleImport::default());
+            };
+            let name = path
+                .file_stem()
+                .map_or_else(|| "Sample".to_owned(), |s| s.to_string_lossy().into_owned());
+            vec![(path, name)]
+        };
+        if kit && found.is_empty() {
+            return Err(format!(
+                "No audio files ({}) were found in the folder or its subfolders.",
+                IMPORT_TYPES.join(", ")
+            ));
+        }
+        if found.len() > MAX_ZONES {
+            return Err(format!(
+                "The folder and its subfolders hold {} audio files, but a sampler holds at most \
+                 {MAX_ZONES}. Choose a folder with one kit in it, such as a single kit from a \
+                 larger pack.",
+                found.len()
+            ));
+        }
+        let mut result = SampleImport::default();
+        for (path, name) in found.drain(..) {
+            let stored = import_sample(
+                &path,
+                &self.bundle.audio_dir(),
+                self.bundle.sample_rate(),
+                &MacCodecs::new(),
+            );
+            let stored = match stored {
+                Ok(stored) if stored.frames > 0 => stored,
+                Ok(_) => {
+                    result.skipped.push(format!("{name}: the file is empty"));
+                    continue;
+                }
+                Err(error) => {
+                    result.skipped.push(format!("{name}: {error}"));
+                    continue;
+                }
+            };
+            let (layout, source) = match stored.files.as_slice() {
+                [mono] => (Layout::Mono, Source::Mono(mono.clone())),
+                [left, right] => (
+                    Layout::Stereo,
+                    Source::Stereo {
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                ),
+                _ => {
+                    result.skipped.push(format!("{name}: imported oddly"));
+                    continue;
+                }
+            };
+            result.imported.push(ImportedTrack {
+                name,
+                layout,
+                source,
+                frames: stored.frames,
+            });
+        }
+        Ok(result)
+    }
+
     fn export_settings(&mut self) -> ExportSettings {
         export_settings::from_saved(self.settings.export)
     }
@@ -698,5 +818,39 @@ impl Services for AppServices {
         self.settings
             .save(&self.settings_path)
             .map_err(|e| format!("the click settings could not be remembered: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    #[test]
+    fn test_audio_files_in_walks_subfolders_and_skips_hidden_and_other_files()
+    -> Result<(), Box<dyn Error>> {
+        let dir = std::env::temp_dir().join(format!("debussy-kit-{}", std::process::id()));
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        std::fs::create_dir_all(dir.join("Hats"))?;
+        std::fs::create_dir_all(dir.join(".cache"))?;
+        for name in [
+            "Kick.wav",
+            "Hats/Open.WAV",
+            "Hats/notes.txt",
+            ".hidden.wav",
+            ".cache/x.wav",
+        ] {
+            std::fs::write(dir.join(name), b"")?;
+        }
+        std::os::unix::fs::symlink(&dir, dir.join("Hats/loop"))?;
+        let mut found = Vec::new();
+        audio_files_in(&dir, &mut found)?;
+        found.sort();
+        assert_eq!(found, [dir.join("Hats/Open.WAV"), dir.join("Kick.wav")]);
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 }

@@ -66,6 +66,7 @@ fn session(file: &str) -> Result<Session, Box<dyn Error>> {
             root: 36,
             mode: ZoneMode::OneShot,
             choke: None,
+            tune: 0,
         }],
     })?;
     session.connect(Endpoint::Track(keys), 0, Endpoint::Node(sampler), 0)?;

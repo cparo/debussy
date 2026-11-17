@@ -26,6 +26,15 @@ pub struct ImportedTrack {
     pub frames: u64,
 }
 
+/// What a sample import stored, and what it skipped.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SampleImport {
+    /// The stored samples, in the order found: a kit's sorted by path.
+    pub imported: Vec<ImportedTrack>,
+    /// Each file skipped, with why, such as `"long.wav: a sample can be at most 60 seconds long"`.
+    pub skipped: Vec<String>,
+}
+
 /// An audio device the user can choose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceChoice {
@@ -251,6 +260,19 @@ pub trait Services {
     /// A message for the status line; files imported before the failure are still returned
     /// in the message's place only if none failed.
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String>;
+
+    /// Asks the user for one sample file, or with `kit` for a folder, and imports it, or every
+    /// audio file in the folder and its subfolders, as sampler zone samples at most
+    /// `project_model::MAX_ZONE_SECONDS` long (`docs/architecture/instruments.md` "Sampler"). A
+    /// kit's files are named by their path within the folder, without extension, such as
+    /// `"Hats/open 1"`. A file that cannot be imported is skipped and listed. Nothing if the user
+    /// cancelled.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line, such as for a folder holding more audio files than a
+    /// sampler has zones.
+    fn import_samples(&mut self, kit: bool) -> Result<SampleImport, String>;
 
     /// The last export's settings, remembered between launches; the Export dialog opens on
     /// them (ADR-0130).

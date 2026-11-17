@@ -42,6 +42,8 @@ pub struct Zone {
     pub playback: Playback,
     /// The choke group: a note in it fades out every other voice in it.
     pub choke: Option<u8>,
+    /// Semitones the zone plays above (or below) the pitch its root gives it.
+    pub tune: i8,
     /// The left channel, or the only one, at the project rate.
     pub left: Arc<[f32]>,
     /// The right channel, as long as `left`; `None` for a mono sample.
@@ -361,7 +363,7 @@ fn choke(pool: &mut Pool<Playhead>, group: u8) {
 fn zone_start(zones: &[Zone], note: u8) -> Option<ZoneStart> {
     let zone = zones.iter().position(|z| z.contains(note))?;
     let z = &zones[zone];
-    let semitones = f64::from(i16::from(note) - i16::from(z.root));
+    let semitones = f64::from(i16::from(note) - i16::from(z.root) + i16::from(z.tune));
     Some(ZoneStart {
         zone,
         gated: z.playback == Playback::Gated,
@@ -393,6 +395,7 @@ mod tests {
             root,
             playback: Playback::Gated,
             choke: None,
+            tune: 0,
             left: Arc::clone(&samples),
             right: None,
         };

@@ -37,6 +37,7 @@ fn kit() -> Vec<SampleZone> {
             root: 36,
             mode: ZoneMode::OneShot,
             choke: None,
+            tune: 0,
         },
         SampleZone {
             file: Source::Stereo {
@@ -48,6 +49,7 @@ fn kit() -> Vec<SampleZone> {
             root: 60,
             mode: ZoneMode::Gated,
             choke: Some(16),
+            tune: -3,
         },
     ]
 }
@@ -108,6 +110,13 @@ fn test_open_reads_version_10_instruments_and_refuses_bad_zones() -> Result<(), 
     ))?;
     let (bundle, _) = Bundle::open(&path)?;
     drop(bundle);
+    write(instrument_project(
+        12,
+        SAMPLER_KIND,
+        &zone("a.wav", 0, 127, 60, r#","tune":-24"#),
+    ))?;
+    let (bundle, _) = Bundle::open(&path)?;
+    drop(bundle);
 
     let bad = [
         instrument_project(11, SAMPLER_KIND, &zone("../a.wav", 0, 1, 0, "")),
@@ -120,6 +129,9 @@ fn test_open_reads_version_10_instruments_and_refuses_bad_zones() -> Result<(), 
         instrument_project(11, SAMPLER_KIND, &zone("a.wav", 0, 1, 0, ""))
             .replace(r#""mode":"gated""#, r#""mode":"looped""#),
         instrument_project(11, "synth", &zone("a.wav", 0, 1, 0, "")),
+        instrument_project(12, SAMPLER_KIND, &zone("a.wav", 0, 1, 0, r#","tune":25"#)),
+        instrument_project(12, SAMPLER_KIND, &zone("a.wav", 0, 1, 0, r#","tune":-25"#)),
+        instrument_project(12, SAMPLER_KIND, &zone("a.wav", 0, 1, 0, r#","tune":200"#)),
         instrument_project(
             11,
             SAMPLER_KIND,

@@ -4,7 +4,7 @@
 //! the project through a [`Context`] and returns [`Command`]s for `App` to carry out.
 
 use audio_effects::{Control, Mode, parameter_name};
-use project_model::{Edit, NodeId, NodeKind, State};
+use project_model::{Edit, NodeId, NodeKind, SampleZone, State};
 
 use crate::effect_panel;
 use crate::mixer_strip::{MixerFocus, toggled};
@@ -74,6 +74,31 @@ pub enum DialogMessage {
     /// A parameter's curve port button: give the open node's parameter of this name the lowest
     /// free curve port, or take its port away, as one undo step.
     TogglePort(String),
+    /// A sampler's "Add sample…" (`kit` false) or "Add kit…" (`kit` true): ask for files,
+    /// import them and add zones for them, as one undo step
+    /// (`docs/architecture/node-dialogs.md` "Sampler zones").
+    AddSamples {
+        /// The sampler node.
+        node: NodeId,
+        /// Whether several files become a kit on consecutive keys.
+        kit: bool,
+    },
+    /// A sampler zone's row changed: its keys, mode or choke group, as one undo step.
+    SetZone {
+        /// The sampler node.
+        node: NodeId,
+        /// The zone's index in the sampler's list.
+        index: usize,
+        /// The zone as changed.
+        zone: SampleZone,
+    },
+    /// A sampler zone's remove button: take it out of the list, as one undo step.
+    RemoveZone {
+        /// The sampler node.
+        node: NodeId,
+        /// The zone's index in the sampler's list.
+        index: usize,
+    },
     /// A mixer channel's mute or solo button: set the channel to `mode`, or back to playing if it
     /// is already. Soloing a channel unsolos the mixer's others in the same undo step.
     ToggleMode {
@@ -129,6 +154,13 @@ pub(crate) enum Command {
     CommitNodeText,
     /// Delete this node: its delete confirmation's "Delete" was pressed.
     DeleteNode(NodeId),
+    /// Ask for sample files, import them and add zones for them to sampler `node`.
+    ImportSamples {
+        /// The sampler node.
+        node: NodeId,
+        /// Whether several files become a kit on consecutive keys.
+        kit: bool,
+    },
     /// Assign node `node`'s parameter `name` a curve port, or take its port away, as one step.
     TogglePort {
         /// The mixer or effect node.
@@ -171,6 +203,23 @@ pub(crate) struct NodeDialog {
     live: Option<Live>,
     /// The node whose deletion is waiting to be confirmed, and the confirmation's focused button.
     confirming: Option<(NodeId, ConfirmFocus)>,
+}
+
+/// The edit replacing sampler `node`'s zones with what `change` makes of them; nothing if
+/// `change` returns false (no change) or `node` is not an instrument.
+fn edit_zones(
+    cx: &Context<'_>,
+    node: NodeId,
+    change: impl FnOnce(&mut Vec<SampleZone>) -> bool,
+) -> Vec<Command> {
+    let Some(NodeKind::Instrument { zones, .. }) = cx.state.node(node).map(|n| &n.kind) else {
+        return Vec::new();
+    };
+    let mut zones = zones.clone();
+    if !change(&mut zones) {
+        return Vec::new();
+    }
+    vec![Command::Edit(Edit::SetZones { node, zones })]
 }
 
 impl NodeDialog {
@@ -216,6 +265,19 @@ impl NodeDialog {
                 channel,
                 mode,
             } => self.toggle_mode(cx, node, channel, mode),
+            DialogMessage::AddSamples { node, kit } => vec![Command::ImportSamples { node, kit }],
+            DialogMessage::SetZone { node, index, zone } => {
+                edit_zones(cx, node, |zones| match zones.get_mut(index) {
+                    Some(old) if *old != zone => {
+                        *old = zone;
+                        true
+                    }
+                    _ => false,
+                })
+            }
+            DialogMessage::RemoveZone { node, index } => edit_zones(cx, node, |zones| {
+                (index < zones.len()).then(|| zones.remove(index)).is_some()
+            }),
             DialogMessage::FocusNext | DialogMessage::FocusPrevious => {
                 let forward = matches!(message, DialogMessage::FocusNext);
                 match effect_panel::moved(self.focus, &self.tab_order(cx), forward) {

@@ -14,6 +14,9 @@ pub const MAX_CHOKE_GROUP: u8 = 16;
 /// longer file found in the bundle is cut to this length (ADR-0154).
 pub const MAX_ZONE_SECONDS: u32 = 60;
 
+/// The most a zone may be tuned up or down, in semitones.
+pub const MAX_ZONE_TUNE: i8 = 24;
+
 /// The most zones a sampler may have.
 pub const MAX_ZONES: usize = 128;
 
@@ -44,6 +47,9 @@ pub struct SampleZone {
     pub mode: ZoneMode,
     /// The choke group, 1–16: a note in the group cuts every other voice in it.
     pub choke: Option<u8>,
+    /// Semitones the zone plays above (or below, negative) the pitch its root gives it,
+    /// −24 to 24.
+    pub tune: i8,
 }
 
 impl SampleZone {
@@ -56,8 +62,8 @@ impl SampleZone {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidZone`] for a MIDI source, a key above 127, `low` above `high`, or a choke
-    /// group outside 1–16.
+    /// [`Error::InvalidZone`] for a MIDI source, a key above 127, `low` above `high`, a choke
+    /// group outside 1–16, or a tune beyond [`MAX_ZONE_TUNE`].
     pub fn check(&self) -> Result<(), Error> {
         if matches!(self.file, Source::Midi(_)) {
             return Err(Error::InvalidZone("a zone plays an audio file, not MIDI"));
@@ -70,6 +76,11 @@ impl SampleZone {
         }
         if self.choke.is_some_and(|g| g == 0 || g > MAX_CHOKE_GROUP) {
             return Err(Error::InvalidZone("choke groups are 1 to 16"));
+        }
+        if self.tune.unsigned_abs() > MAX_ZONE_TUNE.unsigned_abs() {
+            return Err(Error::InvalidZone(
+                "a zone is tuned at most 24 semitones up or down",
+            ));
         }
         Ok(())
     }
@@ -107,6 +118,7 @@ mod tests {
             root: 36,
             mode: ZoneMode::OneShot,
             choke: None,
+            tune: 0,
         }
     }
 
@@ -134,6 +146,11 @@ mod tests {
             },
             SampleZone {
                 choke: Some(17),
+                ..zone()
+            },
+            SampleZone { tune: 25, ..zone() },
+            SampleZone {
+                tune: -25,
                 ..zone()
             },
         ] {

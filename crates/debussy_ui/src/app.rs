@@ -13,10 +13,11 @@ use audio_buffers::Layout;
 use audio_engine::Engine;
 use engine_bridge::Bridge;
 use project_model::{
-    ConnectionId, CurveId, Edit, Endpoint, Excerpt, NodeId, NodeKind, Position, Range, Session,
-    Track, TrackId, WireShape,
+    ConnectionId, CurveId, Edit, Endpoint, Excerpt, MAX_ZONES, NodeId, NodeKind, Position, Range,
+    Session, Track, TrackId, WireShape,
 };
 
+use crate::alert::Alert;
 use crate::click::Click;
 use crate::curve_edit::{self, Side};
 use crate::curve_lane::Grab;
@@ -384,6 +385,10 @@ pub enum Message {
     ConfirmExport,
     /// Close the Export dialog without exporting.
     CancelExport,
+    /// Close the alert saying what was refused.
+    DismissAlert,
+    /// A selection or copy in the open alert's text.
+    AlertAction(iced::widget::text_editor::Action),
     /// Use this audio device for input and output.
     Device(crate::services::DeviceChoice),
     /// Re-read the devices present, so one plugged in since shows.
@@ -491,6 +496,8 @@ pub struct App {
     catalog: ParameterCatalog,
     /// The open Export dialog.
     pub(crate) export_dialog: Option<ExportDialog>,
+    /// The open alert saying what was refused, such as an import.
+    pub(crate) alert: Option<Alert>,
     /// The settings the Export dialog opens on: the last chosen.
     export_settings: ExportSettings,
 }
@@ -569,6 +576,7 @@ impl App {
             note_hover: None,
             catalog: ParameterCatalog::new(),
             export_dialog: None,
+            alert: None,
             export_settings,
         };
         app.saved_revision = app.session.revision();
@@ -607,6 +615,11 @@ impl App {
     /// Shows `message` on the status line.
     pub fn set_status(&mut self, message: String) {
         self.status = Some(message);
+    }
+
+    /// The open alert saying what was refused, if any.
+    pub fn alert(&self) -> Option<&Alert> {
+        self.alert.as_ref()
     }
 
     /// The status line's text, if any.
@@ -870,7 +883,12 @@ impl App {
 
     /// Handles `message`, without saving.
     fn handle(&mut self, message: Message) {
-        // The MP3 bit rate dialog takes the keyboard while it is open.
+        // An open alert, then the Export dialog, takes the keyboard.
+        let message = match self.alert.as_ref().map(|_| Alert::key(&message)) {
+            Some(Key::Taken) => return,
+            Some(Key::Press(pressed)) => pressed,
+            Some(Key::Ignored) | None => message,
+        };
         let message = match self.export_dialog.as_mut().map(|d| d.key(&message)) {
             Some(Key::Taken) => return,
             Some(Key::Press(pressed)) => pressed,
@@ -904,6 +922,7 @@ impl App {
             && !matches!(
                 message,
                 Message::Tick
+                    | Message::AlertAction(_)
                     | Message::Scrolled(_)
                     | Message::Rescaled(_)
                     | Message::RenameText(_)
@@ -1369,6 +1388,12 @@ impl App {
                 }
             }
             Message::CancelExport => self.export_dialog = None,
+            Message::DismissAlert => self.alert = None,
+            Message::AlertAction(action) => {
+                if let Some(alert) = &mut self.alert {
+                    alert.act(action);
+                }
+            }
             Message::RefreshDevices => self.refresh_devices(),
             Message::Device(choice) => {
                 if self.engine.is_playing() {
@@ -1452,7 +1477,100 @@ impl App {
                 }
                 Command::DeleteNode(node) => self.delete_node(node),
                 Command::TogglePort { node, name } => self.toggle_port(node, &name),
+                Command::ImportSamples { node, kit } => self.import_samples(node, kit),
             }
+        }
+    }
+
+    /// Asks for sample files, imports them and adds their zones to sampler `node` as one step
+    /// (`docs/architecture/node-dialogs.md` "Sampler zones"); a zone whose file the engine could
+    /// not load is reported on the status line.
+    fn import_samples(&mut self, node: NodeId, kit: bool) {
+        if self.refuse_while_playing("add samples") {
+            return;
+        }
+        let title = if kit {
+            "Kit not added"
+        } else {
+            "Sample not added"
+        };
+        let import = match self.services.import_samples(kit) {
+            Ok(import) => import,
+            Err(message) => {
+                self.alert = Some(Alert::new(title, message));
+                return;
+            }
+        };
+        let Some(NodeKind::Instrument { zones, .. }) =
+            self.session.state().node(node).map(|n| &n.kind)
+        else {
+            return;
+        };
+        let mut zones = zones.clone();
+        let before = zones.len();
+        let mut skipped = import.skipped;
+        if kit {
+            let (added, left_out) = crate::kit_map::kit_zones(import.imported);
+            zones.extend(added);
+            skipped.extend(
+                left_out
+                    .into_iter()
+                    .map(|name| format!("{name}: no free key left (keys 82 to 127 are taken)")),
+            );
+        } else {
+            zones.extend(
+                import
+                    .imported
+                    .into_iter()
+                    .map(crate::sampler_zones::sample_zone),
+            );
+        }
+        let added = zones.len() - before;
+        if zones.len() > MAX_ZONES {
+            self.alert = Some(Alert::new(
+                title,
+                format!(
+                    "The sampler has {before} zones and this would add {added}, but a sampler \
+                     holds at most {MAX_ZONES}. Remove some zones, or choose a folder with fewer \
+                     files."
+                ),
+            ));
+            return;
+        }
+        if added > 0 {
+            let result = self
+                .bridge
+                .edit(&mut self.session, |s| s.set_zones(node, zones));
+            if let Err(error) = result {
+                self.alert = Some(Alert::new(title, error.to_string()));
+                return;
+            }
+        }
+        self.status = (kit && added > 0).then(|| format!("Added {added} samples."));
+        if !skipped.is_empty() {
+            let (title, message) = match (added, kit) {
+                (0, true) => (
+                    title,
+                    "None of the folder's files could be added.".to_owned(),
+                ),
+                (0, false) => (title, "The file could not be added.".to_owned()),
+                _ => (
+                    "Some files were skipped",
+                    format!(
+                        "Added {added} samples; {} files could not be added.",
+                        skipped.len()
+                    ),
+                ),
+            };
+            self.alert = Some(Alert::with_items(title, message, skipped));
+        }
+        self.report_bridge_warnings();
+    }
+
+    /// Shows the engine bridge's latest warning, if any, on the status line.
+    fn report_bridge_warnings(&mut self) {
+        if let Some(warning) = self.bridge.take_warnings().pop() {
+            self.status = Some(warning);
         }
     }
 
@@ -1589,7 +1707,7 @@ impl App {
         let imported = match self.services.import() {
             Ok(imported) => imported,
             Err(message) => {
-                self.status = Some(message);
+                self.alert = Some(Alert::new("Import failed", message));
                 return;
             }
         };

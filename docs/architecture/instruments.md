@@ -58,7 +58,8 @@ the voices summed, a stereo zone's channels on their own sides and a mono zone's
 
 - **Zones.** A sampler node carries a list of zones, each a file in the bundle's `audio/`
   directory (mono or stereo), a key range (`low` to `high`, 0–127), a root key, a mode (one-shot or
-  gated) and an optional choke group (1–16), at most 128 zones. Only a `sampler` instrument has
+  gated), an optional choke group (1–16) and a tune in whole semitones (−24 to 24, default 0;
+[ADR-0158](../adrs/0158-each-sampler-zone-has-its-own-semitone-tune-saved.md)), at most 128 zones. Only a `sampler` instrument has
   zones; choosing a different instrument removes them. Zone files count as used for cleanup
   (`docs/architecture/project.md` "Cleanup").
 - **Loading.** Zone samples are imported like any other audio, at the project rate, and are at
@@ -73,7 +74,8 @@ the voices summed, a stereo zone's channels on their own sides and a mono zone's
   over 3 ms and restarts it rather than retriggering in place. A one-shot zone ignores note-off and
   the pedal; a gated zone releases through the amplitude envelope.
 - **Playback.** Each voice steps a fractional playhead from the sample's first frame by
-  `2^((note − root + tune + bend · bend range)/12)` frames per sample and reads it by 4-point
+  `2^((note − root + zone tune + tune + bend · bend range)/12)` frames per sample, `tune` being the
+sampler's parameter and reads it by 4-point
   Hermite interpolation (`dsp::hermite`); frames outside the sample read as zero. A voice frees
   itself when its playhead passes the end.
 - **Choke.** A note-on in choke group g fades out over 3 ms every other voice sounding, or waiting

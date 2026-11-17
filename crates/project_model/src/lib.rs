@@ -70,6 +70,6 @@ pub use state::{Clip, CurveLane, State, Track};
 pub use tempo::{Beat, Grid, Tempo};
 pub use types::{AudioFile, ClipId, CurveId, Source, TrackId, TrackKind};
 pub use zones::{
-    MAX_CHOKE_GROUP, MAX_KEY, MAX_ZONE_SECONDS, MAX_ZONES, SAMPLER_KIND, SampleZone, ZoneMode,
-    check_zones,
+    MAX_CHOKE_GROUP, MAX_KEY, MAX_ZONE_SECONDS, MAX_ZONE_TUNE, MAX_ZONES, SAMPLER_KIND, SampleZone,
+    ZoneMode, check_zones,
 };

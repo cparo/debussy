@@ -200,6 +200,22 @@ pub fn plain_text(
     }
 }
 
+/// Read-only text in a text editor, as [`plain_text`]: no background or border, with a
+/// selection highlight, for wrapped text the user may want to copy.
+pub fn plain_editor(
+    theme: &Theme,
+    _status: iced::widget::text_editor::Status,
+) -> iced::widget::text_editor::Style {
+    let t = tokens(tone_of(theme));
+    iced::widget::text_editor::Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border::default(),
+        placeholder: t.text,
+        value: t.text,
+        selection: Color { a: 0.4, ..t.audio },
+    }
+}
+
 /// A dialog that fills a pane: chrome abutting the bars and divider, with no outline, rounding
 /// or shadow.
 pub fn panel(theme: &Theme) -> container::Style {

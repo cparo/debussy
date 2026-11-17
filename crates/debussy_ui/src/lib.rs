@@ -48,6 +48,7 @@
 
 #![forbid(unsafe_code)]
 
+mod alert;
 mod amplifier_display;
 mod app;
 mod click;
@@ -63,6 +64,7 @@ mod gain_display;
 mod grid;
 mod icon;
 mod impulse_display;
+mod kit_map;
 mod launcher;
 mod menu;
 mod midi_edit;
@@ -77,6 +79,7 @@ mod raster;
 mod recording;
 mod response_display;
 mod reveal;
+mod sampler_zones;
 mod services;
 mod shell;
 mod shortcuts;
@@ -94,6 +97,7 @@ use std::sync::Mutex;
 
 use shell::Shell;
 
+pub use alert::Alert;
 pub use app::{App, Message, NewNode, Renaming};
 pub use curve_lane::Grab;
 pub use effect_display::{DisplayContext, Pixels};
@@ -108,8 +112,8 @@ pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
     ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,
-    MidiInputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, Services,
-    TakeFiles, TakeStatus, Takes,
+    MidiInputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass,
+    SampleImport, Services, TakeFiles, TakeStatus, Takes,
 };
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;
