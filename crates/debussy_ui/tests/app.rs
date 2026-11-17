@@ -18,8 +18,8 @@ use audio_engine::{
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
     ImportedTrack, Menu, Message, MidiInputChoice, MidiTakeFile, MixerFocus, NewNode, PassMarker,
-    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, Selection, Services,
-    Spectrum, TakeFiles, TakeStatus, Takes,
+    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, SampleImport, Selection,
+    Services, Spectrum, TakeFiles, TakeStatus, Takes,
 };
 use engine_bridge::{Bridge, Samples};
 use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
@@ -44,7 +44,7 @@ struct Calls {
     exports: Vec<(PathBuf, ExportSettings)>,
     /// How many times Share/Archive… ran.
     archives: usize,
-    /// Each sample import asked for: whether several files were.
+    /// Each sample import asked for: whether it was a kit.
     sample_imports: Vec<bool>,
     /// Whether the save dialog is cancelled.
     export_cancelled: bool,
@@ -226,25 +226,32 @@ impl Services for Fake {
         Ok(())
     }
 
-    fn import_samples(&mut self, several: bool) -> Result<Vec<ImportedTrack>, String> {
-        self.calls.borrow_mut().sample_imports.push(several);
-        let names: &[&str] = if several {
-            &["kick", "snare", "hat"]
+    fn import_samples(&mut self, kit: bool) -> Result<SampleImport, String> {
+        self.calls.borrow_mut().sample_imports.push(kit);
+        let names: &[&str] = if kit {
+            &["Kicks/kick", "snare", "Hats/closed", "Hats/open", "vox"]
         } else {
             &["piano"]
         };
-        Ok(names
-            .iter()
-            .map(|name| ImportedTrack {
-                name: (*name).into(),
-                layout: Layout::Mono,
-                source: Source::Mono(AudioFile {
-                    name: format!("{name}.wav"),
+        Ok(SampleImport {
+            imported: names
+                .iter()
+                .map(|name| ImportedTrack {
+                    name: (*name).into(),
+                    layout: Layout::Mono,
+                    source: Source::Mono(AudioFile {
+                        name: format!("{}.wav", name.replace('/', "-")),
+                        frames: 4800,
+                    }),
                     frames: 4800,
-                }),
-                frames: 4800,
-            })
-            .collect())
+                })
+                .collect(),
+            skipped: if kit {
+                vec!["long: a sample can be at most 60 seconds long".into()]
+            } else {
+                Vec::new()
+            },
+        })
     }
 
     fn import(&mut self) -> Result<Vec<ImportedTrack>, String> {
@@ -3424,8 +3431,27 @@ fn test_add_sample_and_kit_import_and_add_zones_in_one_step() -> Result<(), Box<
         node: sampler,
         kit: true,
     }));
-    let keys: Vec<u8> = zones_of(&app, sampler).iter().map(|z| z.low).collect();
-    assert_eq!(keys, [48, 36, 37, 38]);
+    // Drums by name on their General MIDI keys, the hats choking each other, the unknown file
+    // above the drum map.
+    let keys: Vec<(u8, Option<u8>)> = zones_of(&app, sampler)
+        .iter()
+        .map(|z| (z.low, z.choke))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            (48, None),
+            (36, None),
+            (38, None),
+            (42, Some(1)),
+            (46, Some(1)),
+            (82, None)
+        ]
+    );
+    assert_eq!(
+        app.status(),
+        Some("Added 5 samples. Skipped long: a sample can be at most 60 seconds long")
+    );
     assert_eq!(calls.borrow().sample_imports, [false, true]);
     // The kit was one undo step.
     app.update(Message::Undo);
@@ -3441,7 +3467,7 @@ fn test_zone_edits_and_removal_are_undo_steps() -> Result<(), Box<dyn Error>> {
         kit: true,
     }));
     let mut hat = zones_of(&app, sampler)[2].clone();
-    hat.choke = Some(1);
+    hat.choke = Some(2);
     hat.high = 45;
     app.update(Message::Dialog(DialogMessage::SetZone {
         node: sampler,
@@ -3457,11 +3483,14 @@ fn test_zone_edits_and_removal_are_undo_steps() -> Result<(), Box<dyn Error>> {
         .iter()
         .flat_map(|z| z.file.files().map(|f| f.name.clone()).collect::<Vec<_>>())
         .collect();
-    assert_eq!(names, ["snare.wav", "hat.wav"]);
+    assert_eq!(
+        names,
+        ["snare.wav", "Hats-closed.wav", "Hats-open.wav", "vox.wav"]
+    );
     app.update(Message::Undo);
-    assert_eq!(zones_of(&app, sampler).len(), 3);
+    assert_eq!(zones_of(&app, sampler).len(), 5);
     app.update(Message::Undo);
-    assert_eq!(zones_of(&app, sampler)[2].choke, None);
+    assert_eq!(zones_of(&app, sampler)[2].choke, Some(1));
     // A bad zone is refused and leaves the project as it was.
     let revision = app.session().revision();
     let backwards = project_model::SampleZone {

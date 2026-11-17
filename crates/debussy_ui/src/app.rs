@@ -1464,9 +1464,8 @@ impl App {
         if self.refuse_while_playing("add samples") {
             return;
         }
-        let imported = match self.services.import_samples(kit) {
-            Ok(imported) if imported.is_empty() => return,
-            Ok(imported) => imported,
+        let import = match self.services.import_samples(kit) {
+            Ok(import) => import,
             Err(message) => {
                 self.status = Some(message);
                 return;
@@ -1478,11 +1477,35 @@ impl App {
             return;
         };
         let mut zones = zones.clone();
-        zones.extend(crate::sampler_zones::new_zones(imported, kit));
-        let result = self
-            .bridge
-            .edit(&mut self.session, |s| s.set_zones(node, zones));
-        self.report(result.map_err(|e| e.to_string()));
+        let before = zones.len();
+        let mut skipped = import.skipped;
+        if kit {
+            let (added, left_out) = crate::kit_map::kit_zones(import.imported);
+            zones.extend(added);
+            skipped.extend(
+                left_out
+                    .into_iter()
+                    .map(|name| format!("{name}: no key left")),
+            );
+        } else {
+            zones.extend(
+                import
+                    .imported
+                    .into_iter()
+                    .map(crate::sampler_zones::sample_zone),
+            );
+        }
+        let added = zones.len() - before;
+        if added > 0 {
+            let result = self
+                .bridge
+                .edit(&mut self.session, |s| s.set_zones(node, zones));
+            if let Err(error) = result {
+                self.status = Some(error.to_string());
+                return;
+            }
+        }
+        self.status = import_summary(kit, added, &skipped);
         self.report_bridge_warnings();
     }
 
@@ -2170,4 +2193,19 @@ impl App {
 /// The view start of `span` frames that puts frame `bound` last in the view, or 0.
 fn last_start(bound: u64, span: u64) -> u64 {
     bound.saturating_add(1).saturating_sub(span)
+}
+
+/// The status line after adding samples: how many a kit added, and what was skipped; nothing
+/// for a single sample added cleanly.
+fn import_summary(kit: bool, added: usize, skipped: &[String]) -> Option<String> {
+    let added = (kit && added > 0).then(|| format!("Added {added} samples."));
+    let skipped = match skipped {
+        [] => None,
+        [only] => Some(format!("Skipped {only}")),
+        [first, rest @ ..] => Some(format!("Skipped {} files; first {first}", rest.len() + 1)),
+    };
+    match (added, skipped) {
+        (Some(a), Some(s)) => Some(format!("{a} {s}")),
+        (a, s) => a.or(s),
+    }
 }

@@ -79,9 +79,16 @@ the lanes name pitches in the key of the first MIDI track feeding the sampler (s
 `docs/architecture/track-pane.md` "Key and pitch names"); a button naming its mode, One-shot or
 Gated, that switches it; a choke pick list, "No choke" or groups 1 to 16; and Remove. A low key
 chosen above the high key raises the high key with it, and the reverse. Each change is one step.
-Below the rows, "Add sample…" asks for one file and adds a gated zone on C3 (48) with root C3;
-"Add kit…" asks for several and adds one-shot zones on consecutive single keys from C2 (36, the General
-MIDI kick), up to the top key. Each adds all its zones as one step after the existing ones, and both are disabled
-while playing. Choosing a different instrument for the track removes the zones with the sampler
+Below the rows, "Add sample…" asks for one file and adds a gated zone on C3 (48) with root C3.
+"Add kit…" asks for a folder and imports every audio file in it and its subfolders, sorted by path,
+except hidden ones and without following links; a folder holding more than 128 is refused. Each
+file becomes a one-shot single-key zone placed by the words of its path within the folder
+(`debussy_ui::kit_map`): one naming a drum takes its General MIDI key, a second crash or ride the
+second crash or ride key, a tom not named floor, low, mid or high the next free tom key; any other
+file, or one whose drum is taken, takes the next free key from 82, and files past 127 are left out.
+When the kit has more than one hi-hat (42, 44, 46), they share choke group 1. A file that cannot be
+imported (too long, unreadable) is skipped; the status line counts the samples a kit added and
+names the first file skipped. Each adds all its zones as one step after the existing ones, and both
+are disabled while playing. Choosing a different instrument for the track removes the zones with the sampler
 ([ADR-0156](../adrs/0156-sampler-zones-are-edited-in-rows-in-the-sampler-s.md)).
 

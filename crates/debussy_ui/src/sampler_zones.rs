@@ -15,34 +15,17 @@ use crate::view::{Face, tool};
 
 /// The key a sample added on its own plays on, and is pitched from: C3.
 pub(crate) const SAMPLE_KEY: u8 = 48;
-/// The key a kit's first sample plays on: 36 (C2), the General MIDI kick; the rest follow on
-/// consecutive keys.
-pub(crate) const KIT_FIRST_KEY: u8 = 36;
 
-/// The zones `imported` files become: with `kit`, one-shot zones on consecutive single keys from
-/// [`KIT_FIRST_KEY`], stopping at the top key; otherwise gated zones on [`SAMPLE_KEY`].
-pub(crate) fn new_zones(imported: Vec<ImportedTrack>, kit: bool) -> Vec<SampleZone> {
-    let keys: Box<dyn Iterator<Item = u8>> = if kit {
-        Box::new(KIT_FIRST_KEY..=MAX_KEY)
-    } else {
-        Box::new(std::iter::repeat(SAMPLE_KEY))
-    };
-    imported
-        .into_iter()
-        .zip(keys)
-        .map(|(file, key)| SampleZone {
-            file: file.source,
-            low: key,
-            high: key,
-            root: key,
-            mode: if kit {
-                ZoneMode::OneShot
-            } else {
-                ZoneMode::Gated
-            },
-            choke: None,
-        })
-        .collect()
+/// The gated zone on [`SAMPLE_KEY`] that a sample added on its own becomes.
+pub(crate) fn sample_zone(file: ImportedTrack) -> SampleZone {
+    SampleZone {
+        file: file.source,
+        low: SAMPLE_KEY,
+        high: SAMPLE_KEY,
+        root: SAMPLE_KEY,
+        mode: ZoneMode::Gated,
+        choke: None,
+    }
 }
 
 /// The key the sampler's notes are spelled in: that of the first MIDI track feeding it, or
@@ -217,26 +200,10 @@ mod tests {
     }
 
     #[test]
-    fn test_new_zones_single_sample_is_gated_on_c3() {
-        let zones = new_zones(vec![imported("piano")], false);
-        assert_eq!(zones.len(), 1);
-        assert_eq!((zones[0].low, zones[0].high, zones[0].root), (48, 48, 48));
-        assert_eq!(zones[0].mode, ZoneMode::Gated);
+    fn test_sample_zone_is_gated_on_c3() {
+        let zone = sample_zone(imported("piano"));
+        assert_eq!((zone.low, zone.high, zone.root), (48, 48, 48));
+        assert_eq!(zone.mode, ZoneMode::Gated);
         assert_eq!(pitch_name(SAMPLE_KEY, &Key::Indefinite), "C3");
-    }
-
-    #[test]
-    fn test_new_zones_kit_is_one_shot_on_consecutive_keys_from_the_gm_kick() {
-        let zones = new_zones(vec![imported("kick"), imported("snare")], true);
-        let keys: Vec<_> = zones.iter().map(|z| (z.low, z.high, z.root)).collect();
-        assert_eq!(keys, [(36, 36, 36), (37, 37, 37)]);
-        assert!(zones.iter().all(|z| z.mode == ZoneMode::OneShot));
-        assert_eq!(pitch_name(KIT_FIRST_KEY, &Key::Indefinite), "C2");
-    }
-
-    #[test]
-    fn test_new_zones_kit_stops_at_the_top_key() {
-        let many = (0..200).map(|n| imported(&format!("s{n}"))).collect();
-        assert_eq!(new_zones(many, true).len(), 92);
     }
 }

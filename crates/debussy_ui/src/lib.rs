@@ -63,6 +63,7 @@ mod gain_display;
 mod grid;
 mod icon;
 mod impulse_display;
+mod kit_map;
 mod launcher;
 mod menu;
 mod midi_edit;
@@ -109,8 +110,8 @@ pub use patch_board::{Board, Hit, NodeBox, PORT_SPACING, Pin, Selection, Wire};
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
     ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,
-    MidiInputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, Services,
-    TakeFiles, TakeStatus, Takes,
+    MidiInputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass,
+    SampleImport, Services, TakeFiles, TakeStatus, Takes,
 };
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;

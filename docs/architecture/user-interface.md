@@ -265,9 +265,9 @@ reported on the status line ([ADR-0079](../adrs/0079-arm-state-is-session-only-a
 
 Import and export use the system's file dialogs through `rfd`, used only in `debussy`. Each
 imported file becomes a track holding one clip of the whole file at the start, as one undo step.
-Import is refused while playing. A sampler's "Add sample…" and "Add kit…" import through the
-same dialogs into its zones instead (`docs/architecture/node-dialogs.md` "Sampler zones"), refusing
-a file longer than 60 s; a zone file the engine cannot read is reported on the status line.
+Import is refused while playing. A sampler's "Add sample…" (one file) and "Add kit…" (a folder) import
+into its zones instead (`docs/architecture/node-dialogs.md` "Sampler zones"), skipping a file longer
+than 60 s; a zone file the engine cannot read is reported on the status line.
 
 Export… opens a modal before any file dialog: a row for the format (WAV, FLAC, AAC, and MP3 only
 when `lame` was found), one for that format's setting (WAV 16-bit, 24-bit or 32-bit float; FLAC
