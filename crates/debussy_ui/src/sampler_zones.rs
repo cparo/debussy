@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 
 use project_model::notation::{GM_DRUMS, pitch_name};
 use project_model::{
-    Endpoint, Key, MAX_CHOKE_GROUP, MAX_KEY, NodeId, Notation, SampleZone, Source, State, ZoneMode,
+    Endpoint, Key, MAX_CHOKE_GROUP, MAX_KEY, MAX_ZONE_TUNE, NodeId, Notation, SampleZone, Source,
+    State, ZoneMode,
 };
 
 use crate::app::Message;
@@ -27,6 +28,7 @@ pub(crate) fn sample_zone(file: ImportedTrack) -> SampleZone {
         root: SAMPLE_KEY,
         mode: ZoneMode::Gated,
         choke: None,
+        tune: 0,
     }
 }
 
@@ -87,6 +89,20 @@ impl std::fmt::Display for Choke {
     }
 }
 
+/// A zone's tune in a pick list: semitones, signed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tune(i8);
+
+impl std::fmt::Display for Tune {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            0 => f.write_str("0 st"),
+            n if n > 0 => write!(f, "+{n} st"),
+            n => write!(f, "\u{2212}{} st", n.unsigned_abs()),
+        }
+    }
+}
+
 /// The name shown for a zone's file.
 fn file_name(source: &Source) -> String {
     match source {
@@ -118,6 +134,7 @@ pub(crate) fn zone_panel<'a>(
     let chokes: Vec<Choke> = std::iter::once(Choke(None))
         .chain((1..=MAX_CHOKE_GROUP).map(|g| Choke(Some(g))))
         .collect();
+    let tunes: Vec<Tune> = (-MAX_ZONE_TUNE..=MAX_ZONE_TUNE).map(Tune).collect();
     let mut rows = column![text("Zones").size(14)].spacing(6);
     if zones.is_empty() {
         rows = rows.push(text("No samples yet: add a sample or a kit.").size(12));
@@ -154,6 +171,15 @@ pub(crate) fn zone_panel<'a>(
             ..zone.clone()
         };
         let base = zone.clone();
+        let tuned = zone.clone();
+        let tune_list = pick_list(tunes.clone(), Some(Tune(zone.tune)), move |t: Tune| {
+            set(SampleZone {
+                tune: t.0,
+                ..tuned.clone()
+            })
+        })
+        .text_size(12)
+        .padding([1, 6]);
         rows = rows.push(
             row![
                 text(file_name(&zone.file)).size(12).width(Length::Fill),
@@ -168,6 +194,7 @@ pub(crate) fn zone_panel<'a>(
                 }),
                 text("root").size(12),
                 key_list(zone.root, |z, k| z.root = k),
+                tune_list,
                 tool(
                     Face::Label(if one_shot { "One-shot" } else { "Gated" }),
                     Some(set(toggled)),
@@ -245,6 +272,13 @@ mod tests {
             mode: project_model::Mode::Major,
         };
         assert_eq!(drum_label(36, &notation), "kick");
+    }
+
+    #[test]
+    fn test_tune_shows_its_sign_and_unit() {
+        assert_eq!(Tune(0).to_string(), "0 st");
+        assert_eq!(Tune(3).to_string(), "+3 st");
+        assert_eq!(Tune(-12).to_string(), "\u{2212}12 st");
     }
 
     #[test]

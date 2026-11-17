@@ -231,7 +231,9 @@ or `{"mode":"indefinite"}`) and
 `docs/architecture/track-pane.md` "Key and pitch names"; version 8 MIDI tracks migrate to C major
 with no names. Version 10 requires the key's `letter` and `accidental`; a version 9 key given as a
 pitch class `root` (0–11) migrates to the spelling of its key signature, flats in F, Bb, Eb, Ab,
-Db and Gb major and D, G, C, F, Bb and Eb minor, sharps otherwise ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)). Since version 11 an instrument node may carry `zones`, each `file` (a mono or stereo source, as for a clip), `low`, `high`, `root`, `mode` (`one_shot` or `gated`) and an optional `choke` (1–16), omitted when empty; version 10 files migrate unchanged ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)). Times are
+Db and Gb major and D, G, C, F, Bb and Eb minor, sharps otherwise ([ADR-0153](../adrs/0153-midi-tracks-carry-a-key-and-pitch-names-lanes.md)). Since version 11 an instrument node may carry `zones`, each `file` (a mono or stereo source, as for a clip), `low`, `high`, `root`, `mode` (`one_shot` or `gated`) and an optional `choke` (1–16), omitted when empty; version 10 files migrate unchanged ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)).
+Since version 12 a zone may carry a `tune` (−24 to 24 semitones), omitted when 0; version 11
+files migrate unchanged ([ADR-0158](../adrs/0158-each-sampler-zone-has-its-own-semitone-tune-saved.md)). Times are
 frames at the project rate, gains dB, and kinds are tagged with a snake-case `kind` field ([ADR-0049](../adrs/0049-saved-projects-use-their-own-format-types-crash.md)).
 
 ## Saving

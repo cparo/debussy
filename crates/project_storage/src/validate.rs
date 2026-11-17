@@ -583,6 +583,7 @@ fn zone_to_saved(zone: &SampleZone) -> Option<SavedZone> {
             ZoneMode::Gated => SavedZoneMode::Gated,
         },
         choke: zone.choke,
+        tune: zone.tune,
     })
 }
 
@@ -605,6 +606,7 @@ fn zone_from_saved(zone: SavedZone) -> Result<SampleZone, String> {
             SavedZoneMode::Gated => ZoneMode::Gated,
         },
         choke: zone.choke,
+        tune: zone.tune,
     })
 }
 

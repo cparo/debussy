@@ -176,40 +176,9 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   sets how far the pitch wheel bends, in semitones, and **Voices** how many notes sound at once;
   a note beyond that takes over the quietest or oldest one. The sustain pedal holds notes.
 
-- **Sampler**, also under **Instruments**, plays your own audio files from notes. Wire it like the
-  synthesizer, then open it to fill its **Zones**; each zone is one file played across a range of
-  keys. Adding samples needs playback stopped.
-  - **Add sample…** takes one file and puts it on C3 (the key one octave below middle C, which is
-    C4). It plays at its own pitch on its **root** key and higher or lower on the keys around it,
-    like a tape played faster or slower. Widen its range with the two key lists, from one key
-    "to" another, so a single recording covers part of the keyboard.
-  - **Add kit…** takes a folder, such as a drum sample pack, and adds every audio file in it and
-    in its subfolders. Files are placed by their names and folder names, on the keys of the
-    General MIDI drum map that drum parts and pads expect: a "kick" or "BD" on C2 (36), "snare" or
-    "SD" on D2 (38), "rim" or "side stick" on 37, "clap" on 39, a closed hi-hat ("hat", "HH") on
-    F#2 (42), a pedal hat on 44, an open hat ("open hat", "OHH") on A#2 (46), toms by "floor",
-    "low", "mid" and "high" (or in order, if unnamed), "crash" on 49, "ride" on 51, "ride bell"
-    on 53, and so on through cowbell, tambourine, shaker and the other percussion. A pack laid out
-    in folders such as `Kicks/`, `Snares/` and `Hats/` works too. A second file for a drum that
-    already has one, or a file no name rule matches, goes on the keys from A#5 (82) up, above the
-    drum map. When the kit has more than one hi-hat, they share choke group 1, so a closed hat
-    cuts off a ringing open one. The status line says how many samples were added. If any file
-    could not be added (longer than 60 seconds, unreadable, or past the last key), a message
-    lists them and why; press OK or Escape to close it. A folder holding more than 128 audio
-    files is refused, since that is all one sampler holds: choose the folder of a single kit
-    rather than a whole library.
-  - Each zone's row shows its file, its **low** and **high** keys, its **root** key, a button that
-    switches it between **Gated** (the note stops, through the **Amp release**, when you let go)
-    and **One-shot** (the whole sample plays, as drums want), its **choke** group, where a note
-    cuts off every other sound in the same group, and **Remove**. Each change can be undone.
-    In a gated zone, keys are named as notes in the key of the MIDI track playing the sampler
-    (C2, F#3…). In a one-shot zone, as a kit makes, they are named as drums (kick, snare,
-    closed-hat, open-hat…), or by the track's own pitch names if you have named them in its
-    **Key…** dialog with the key set to Indefinite.
-  - If two zones share a key, the one higher in the list plays. A sample can be at most 60
-    seconds long. The **Amp envelope**, **Amp velocity**, **Bend range**, **Voices** and
-    **Gain** work as on the synthesizer, and **Tune** shifts every zone up or down by up to an
-    octave.
+- **Sampler**, also under **Instruments**, plays your own audio files from notes: a recorded
+  instrument across the keyboard, or a drum kit from a folder of samples. See
+  [The sampler](sampler.md) for how to set it up.
 
 Effect and instrument settings are saved with the project.
 

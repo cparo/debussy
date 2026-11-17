@@ -145,6 +145,7 @@ fn zone(low: u8, high: u8, root: u8, playback: Playback, samples: Arc<[f32]>) ->
         root,
         playback,
         choke: None,
+        tune: 0,
         left: samples,
         right: None,
     }
@@ -168,6 +169,17 @@ fn test_sampler_repitches_an_octave_up_at_twice_the_rate() -> TestResult {
     let (up, _) = rig.render(9_600, &[(0, off(60)?), (4_800, on(72, 127)?)])?;
     assert!((frequency(&root[480..]) - 480.0).abs() < 1.0);
     assert!((frequency(&up[5_280..]) - 960.0).abs() < 2.0);
+    Ok(())
+}
+
+#[test]
+fn test_sampler_zone_tune_shifts_its_pitch_by_semitones() -> TestResult {
+    // A one-key zone tuned up an octave plays its sample at twice the frequency on its own key.
+    let mut tuned = zone(60, 60, 60, Playback::Gated, sine(480.0, RATE as usize));
+    tuned.tune = 12;
+    let mut rig = rig(vec![tuned], &[])?;
+    let (out, _) = rig.render(9_600, &[(0, on(60, 127)?)])?;
+    assert!((frequency(&out[480..]) - 960.0).abs() < 2.0);
     Ok(())
 }
 

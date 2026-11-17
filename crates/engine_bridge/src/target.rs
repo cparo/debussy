@@ -111,6 +111,7 @@ fn load_zone(zone: &SampleZone, samples: &mut Samples, rate: u32) -> Option<inst
             ZoneMode::Gated => Playback::Gated,
         },
         choke: zone.choke,
+        tune: zone.tune,
         left,
         right,
     })

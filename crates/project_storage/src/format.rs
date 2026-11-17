@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -231,6 +231,14 @@ pub(crate) struct SavedZone {
     /// The choke group, 1–16; absent for none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choke: Option<u8>,
+    /// Since version 12: semitones up or down, −24 to 24; absent for 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tune: i8,
+}
+
+/// Whether a zone's tune is 0, which is left out of the file.
+fn is_zero(tune: &i8) -> bool {
+    *tune == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

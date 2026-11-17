@@ -26,6 +26,7 @@ const MIGRATIONS: &[Migration] = &[
     eight_to_nine,
     nine_to_ten,
     ten_to_eleven,
+    eleven_to_twelve,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -96,6 +97,12 @@ fn six_to_seven(mut value: Value) -> Result<Value, String> {
             );
         }
     }
+    Ok(value)
+}
+
+/// Version 12 added an optional `tune` to each sampler zone (ADR-0158); a version 11 zone is
+/// untuned, which its absence means, so nothing changes.
+fn eleven_to_twelve(value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
@@ -486,12 +493,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":12");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":13");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 12,
-                supported: 11,
+                found: 13,
+                supported: 12,
                 ..
             })
         ));

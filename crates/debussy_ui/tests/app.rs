@@ -3641,3 +3641,25 @@ fn test_an_open_alert_keeps_undo_and_delete_from_the_project() -> Result<(), Box
     assert!(app.alert().is_some());
     Ok(())
 }
+
+#[test]
+fn test_zone_tune_is_an_undo_step() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, _, _), sampler) = app_with_sampler()?;
+    app.update(Message::Dialog(DialogMessage::AddSamples {
+        node: sampler,
+        kit: false,
+    }));
+    let tuned = project_model::SampleZone {
+        tune: -5,
+        ..zones_of(&app, sampler)[0].clone()
+    };
+    app.update(Message::Dialog(DialogMessage::SetZone {
+        node: sampler,
+        index: 0,
+        zone: tuned,
+    }));
+    assert_eq!(zones_of(&app, sampler)[0].tune, -5);
+    app.update(Message::Undo);
+    assert_eq!(zones_of(&app, sampler)[0].tune, 0);
+    Ok(())
+}

@@ -189,6 +189,7 @@ pub(crate) fn kit_zones(files: Vec<ImportedTrack>) -> (Vec<SampleZone>, Vec<Stri
             root: key,
             mode: ZoneMode::OneShot,
             choke: (hats > 1 && HATS.contains(&key)).then_some(HAT_CHOKE),
+            tune: 0,
         })
         .collect();
     (zones, left_out)

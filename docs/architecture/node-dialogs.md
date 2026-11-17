@@ -78,7 +78,8 @@ sampler's order, with its file's name; pick lists for its low key, high key and 
 the first MIDI track feeding the sampler (`docs/architecture/track-pane.md` "Key and pitch names"):
 in a gated zone, by pitch name in the track's key (sharps if no track); in a one-shot zone, by
 drum: the track's own name for the key if its key is Indefinite, else the General MIDI drum name
-(`project_model::notation::GM_DRUMS`), else the pitch name; a button naming its mode, One-shot or
+(`project_model::notation::GM_DRUMS`), else the pitch name; a tune pick list from −24 to +24
+semitones ("0 st" untuned); a button naming its mode, One-shot or
 Gated, that switches it; a choke pick list, "No choke" or groups 1 to 16; and Remove. A low key
 chosen above the high key raises the high key with it, and the reverse. Each change is one step.
 Below the rows, "Add sample…" asks for one file and adds a gated zone on C3 (48) with root C3.
