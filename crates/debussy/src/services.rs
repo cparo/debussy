@@ -1,6 +1,6 @@
 //! [`AppServices`]: `debussy_ui`'s I/O, from the bundle, disk streaming, the waveform caches,
-//! file dialogs, the audio device, the take recorder and the app settings (ADR-0056, ADR-0059,
-//! ADR-0078).
+//! file dialogs, the audio device, the take recorder, the MIDI output sender and the app settings
+//! (ADR-0056, ADR-0059, ADR-0078, ADR-0162).
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -15,8 +15,8 @@ use audio_engine::{NoteSink, Processor, TakeInfo, TakeSink};
 use audio_engine::{Streams, TrackFeed, TrackFeeds};
 use debussy_ui::{
     ClickPreferences, DeviceChoice, ExportKind, ExportSettings, ImportedTrack, MidiInputChoice,
-    MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass, SampleImport, Services,
-    Spectrum, TakeFiles, TakeStatus, Takes, spectrum_bands,
+    MidiOutRoute, MidiOutputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi,
+    RecoveredPass, SampleImport, Services, Spectrum, TakeFiles, TakeStatus, Takes, spectrum_bands,
 };
 use disk_streaming::{
     FrameSource, Recorder, RecorderConfig, Streamer, StreamerConfig, TakeEvent, TimelineSource,
@@ -25,18 +25,20 @@ use disk_streaming::{
 use engine_bridge::{ClickSound, track_renderers};
 use import_export::{Lame, import, import_sample, safe_stem, unique_names};
 use macos_platform::MacCodecs;
-use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
+use midi::{LIVE_QUEUE_CAPACITY, LiveInput, OutProducer};
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
 use project_model::{MAX_ZONES, Session, Source, State, TrackId};
 use project_storage::{
-    ARCHIVE_SUFFIX, AppSettings, Bundle, ClickSound as SavedClickSound, Recording, RecordingStart,
-    Recovery, write_archive,
+    ARCHIVE_SUFFIX, AppSettings, Bundle, ClickSound as SavedClickSound, MAX_MIDI_LATENCY_MS,
+    MAX_MIDI_OUTPUTS, MidiOutSettings, Recording, RecordingStart, Recovery, write_archive,
 };
 use signal_graph::NodeId;
+use signal_graph::NodeId as GraphNodeId;
 use wav_files::WavReader;
 
 use crate::audio::AudioOutput;
 use crate::export_settings;
+use crate::midi_out::{self, MidiOuts};
 use crate::project::{build_waveform_caches_for, export_state, waveform_cache};
 
 /// The bundled sound a remembered click sound names.
@@ -120,7 +122,9 @@ pub struct AppServices {
     /// The host's LAME, found at startup; MP3 export is offered only with it (ADR-0129).
     lame: Option<Lame>,
     /// The MIDI endpoints, if the platform's MIDI service could be reached.
-    midi: Option<Box<dyn MidiDevices>>,
+    midi: Option<Arc<dyn MidiDevices>>,
+    /// The MIDI output sender, started with the first route.
+    midi_outs: Option<MidiOuts>,
     /// Whether the MIDI endpoints have changed since the interface last asked.
     midi_changed: Arc<AtomicBool>,
     /// Each armed MIDI track's open input.
@@ -145,6 +149,7 @@ impl AppServices {
         lame: Option<Lame>,
         midi: Option<Box<dyn MidiDevices>>,
     ) -> Self {
+        let midi: Option<Arc<dyn MidiDevices>> = midi.map(Arc::from);
         let midi_changed = Arc::new(AtomicBool::new(true));
         if let Some(midi) = &midi {
             let changed = Arc::clone(&midi_changed);
@@ -164,9 +169,27 @@ impl AppServices {
             marker: None,
             lame,
             midi,
+            midi_outs: None,
             midi_changed,
             midi_open: BTreeMap::new(),
         }
+    }
+
+    /// Gives the MIDI output sender the device's output delay and each port's latency from the
+    /// settings (`docs/architecture/engine.md` "MIDI output").
+    fn push_midi_offsets(&self) {
+        let Some(outs) = &self.midi_outs else {
+            return;
+        };
+        let rate = u64::from(self.audio.sample_rate().max(1));
+        let output_nanos = self.audio.midi_latency().saturating_mul(1_000_000_000) / rate;
+        let ports = self
+            .settings
+            .midi_outputs
+            .iter()
+            .map(|(port, s)| (port.clone(), midi_out::latency_nanos(s.latency_ms)))
+            .collect();
+        outs.set_offsets(output_nanos, ports);
     }
 }
 
@@ -588,7 +611,9 @@ impl Services for AppServices {
     }
 
     fn set_input(&mut self, input: bool) -> Result<(), String> {
-        self.audio.set_input(input).map_err(|e| format!("{e:#}"))
+        let result = self.audio.set_input(input).map_err(|e| format!("{e:#}"));
+        self.push_midi_offsets();
+        result
     }
 
     fn input_channels(&mut self) -> usize {
@@ -640,6 +665,76 @@ impl Services for AppServices {
 
     fn close_midi_input(&mut self, track: TrackId) {
         self.midi_open.remove(&track);
+    }
+
+    fn midi_outputs(&mut self) -> Vec<MidiOutputChoice> {
+        let Some(midi) = &self.midi else {
+            return Vec::new();
+        };
+        match midi.endpoints() {
+            Ok(endpoints) => endpoints
+                .into_iter()
+                .filter(|e| e.direction == MidiDirection::Output && e.online)
+                .map(|e| MidiOutputChoice {
+                    id: e.id.0,
+                    name: e.name,
+                })
+                .collect(),
+            Err(error) => {
+                eprintln!("debussy: listing MIDI outputs: {error}");
+                Vec::new()
+            }
+        }
+    }
+
+    fn sync_midi_outputs(&mut self, routes: &[MidiOutRoute]) -> Vec<(GraphNodeId, OutProducer)> {
+        if self.midi_outs.is_none() {
+            if routes.is_empty() {
+                return Vec::new();
+            }
+            let Some(midi) = &self.midi else {
+                return Vec::new();
+            };
+            self.midi_outs = Some(MidiOuts::start(Arc::clone(midi)));
+        }
+        self.push_midi_offsets();
+        self.midi_outs
+            .as_mut()
+            .map(|outs| outs.sync(routes))
+            .unwrap_or_default()
+    }
+
+    fn midi_output_lost(&mut self, node: project_model::NodeId) -> bool {
+        self.midi_outs.as_ref().is_some_and(|outs| outs.lost(node))
+    }
+
+    fn midi_output_latency(&mut self, port: &str) -> f32 {
+        self.settings
+            .midi_outputs
+            .get(port)
+            .map_or(0.0, |s| s.latency_ms)
+    }
+
+    fn set_midi_output_latency(&mut self, port: &str, ms: f32) -> Result<(), String> {
+        if !(ms.is_finite() && (0.0..=MAX_MIDI_LATENCY_MS).contains(&ms)) {
+            return Err(format!(
+                "{ms} ms is not a latency from 0 to {MAX_MIDI_LATENCY_MS} ms"
+            ));
+        }
+        if self.settings.midi_outputs.len() >= MAX_MIDI_OUTPUTS
+            && !self.settings.midi_outputs.contains_key(port)
+        {
+            return Err(format!(
+                "the latencies of at most {MAX_MIDI_OUTPUTS} MIDI outputs are remembered"
+            ));
+        }
+        self.settings
+            .midi_outputs
+            .insert(port.to_owned(), MidiOutSettings { latency_ms: ms });
+        self.push_midi_offsets();
+        self.settings
+            .save(&self.settings_path)
+            .map_err(|e| format!("the MIDI output latency could not be remembered: {e}"))
     }
 
     fn start_takes(&mut self, tracks: &[(String, usize)], midi: usize) -> Result<Takes, String> {
@@ -788,6 +883,7 @@ impl Services for AppServices {
         self.audio
             .adopt(processor, preferred.as_deref())
             .map_err(|e| format!("{e:#}"))?;
+        self.push_midi_offsets();
         if let Some(id) = device {
             self.settings.device = Some(id.to_owned());
             self.settings
@@ -799,6 +895,7 @@ impl Services for AppServices {
 
     fn set_device(&mut self, id: &str) -> Result<(), String> {
         self.audio.switch(id).map_err(|e| format!("{e:#}"))?;
+        self.push_midi_offsets();
         self.settings.device = Some(id.to_owned());
         self.settings
             .save(&self.settings_path)

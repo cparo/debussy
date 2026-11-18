@@ -84,3 +84,11 @@ A MIDI track's ≡ menu lists every instrument in the `instruments` registry as
 
 A new MIDI track feeds nothing until an instrument is chosen or wired on the patch board
 ([ADR-0152](../adrs/0152-midi-clips-are-edited-through-range-selection.md)).
+
+After the instruments, the menu lists each MIDI output endpoint present as "MIDI Out: <name>",
+and greyed, the missing endpoint the track feeds. Choosing one applies
+`project_model::Session::set_destination` as one undo step: as for an instrument, but the new
+node is a MIDI output on that endpoint, joining no mixer. A MIDI output node's dialog picks its
+endpoint (one undo step) and sets the endpoint's latency in milliseconds, kept in the app settings
+and not the project; its title is greyed while its endpoint is missing
+([ADR-0162](../adrs/0162-midi-tracks-reach-hardware-synths-through-midi.md)).

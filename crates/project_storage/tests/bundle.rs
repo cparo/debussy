@@ -11,8 +11,8 @@ use modulation::{Curve, Handle, Point};
 use std::sync::Arc;
 
 use project_model::{
-    AudioFile, Clip, Control, Endpoint, NodeKind, Note, Position, Range, Sequence, Session, Source,
-    State, WireHandle, WirePoint, WireShape,
+    AudioFile, Clip, Control, Destination, Endpoint, NodeKind, Note, Position, Range, Sequence,
+    Session, Source, State, WireHandle, WirePoint, WireShape,
 };
 use project_storage::{Bundle, Error as StorageError, FORMAT_VERSION, MAX_FILE_BYTES};
 
@@ -193,6 +193,14 @@ fn random_session(random: &mut Random) -> Result<Session, Box<dyn Error>> {
     })?;
     session.connect(Endpoint::Track(keys), 0, Endpoint::Node(synth), 0)?;
     session.connect(Endpoint::Node(synth), 0, Endpoint::Output, 0)?;
+    let hardware = session.add_midi_track("Hardware")?;
+    session.set_destination(
+        hardware,
+        Destination::MidiOut {
+            port: format!("CoreMIDI:{}", random.below(1_000)),
+            name: "Synth ✓".to_owned(),
+        },
+    )?;
     session.connect(Endpoint::Node(mixer), 0, Endpoint::Node(effect), 0)?;
     let out = session.connect(Endpoint::Node(effect), 0, Endpoint::Output, 0)?;
     let reach = random.below(400) as f32 + 0.5;

@@ -30,7 +30,7 @@ The sounds are three bundled CC0 samples, Block, Click and Stick, in
 `crates/engine_bridge/assets/clicks/`. `engine_bridge` decodes the chosen one, folds it to mono,
 converts it to the project rate at import quality, peak-normalises it to −1 dBFS and trims its
 tail below −60 dBFS. The click on/off switch is session state, like mono listening; the sound and
-level (−24 to +6 dB, default 0) are per-machine settings (see `docs/architecture/project.md`
+level (−24 to +6 dB, default 0) are per-machine settings (see `docs/architecture/settings.md`
 "Application settings") ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
 
 ## Recording alignment

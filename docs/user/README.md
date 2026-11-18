@@ -180,6 +180,15 @@ to open its controls. Changes are heard while you drag; letting go makes one und
   instrument across the keyboard, or a drum kit from a folder of samples. See
   [The sampler](sampler.md) for how to set it up.
 
+- **MIDI Out** plays a MIDI track on a hardware synth (or another app, through the IAC bus).
+  Choose **MIDI Out: <port>** from the track's ≡ menu, or add **MIDI Out** from the **+** menu
+  and wire the track to it. Click the node to pick another port or set the port's **Latency
+  (ms)**: how long your synth takes to sound a note. Notes are sent that much early, so the synth's
+  audio, recorded back on an audio track, lines up with the notes. The latency is remembered on
+  this computer for that port, not in the project. Stop and pause silence the synth. If the port
+  is unplugged its name turns grey and notes are dropped until it is back. Export doesn't include
+  hardware synths: record them back to audio first.
+
 Effect and instrument settings are saved with the project.
 
 ## Exporting

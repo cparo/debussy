@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use audio_analysis::Bucket;
 use audio_buffers::Layout;
 use audio_engine::{NoteSink, Processor, Streams, TakeInfo, TakeSink, TrackFeeds};
-use midi::LiveInput;
+use midi::{LiveInput, OutProducer};
 use project_model::{Session, Source, State, TrackId};
 use signal_graph::NodeId;
 
@@ -63,6 +63,33 @@ impl std::fmt::Display for MidiInputChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
     }
+}
+
+/// A MIDI output endpoint the user can send a track's notes to (ADR-0162).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiOutputChoice {
+    /// The platform's id for its endpoint.
+    pub id: String,
+    /// Its name, for display.
+    pub name: String,
+}
+
+impl std::fmt::Display for MidiOutputChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
+/// A MIDI output node as the running graph has it: its event sink and the endpoint its events
+/// go to (`docs/architecture/engine.md` "MIDI output").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiOutRoute {
+    /// The model's node.
+    pub node: project_model::NodeId,
+    /// Its event sink in the running graph.
+    pub sink: NodeId,
+    /// The endpoint's platform id.
+    pub port: String,
 }
 
 /// A recording pass's takes: each armed audio track's files and sinks, then each armed MIDI
@@ -359,6 +386,29 @@ pub trait Services {
 
     /// Closes track `track`'s MIDI input, if open.
     fn close_midi_input(&mut self, track: TrackId);
+
+    /// The MIDI output endpoints that can be used now.
+    fn midi_outputs(&mut self) -> Vec<MidiOutputChoice>;
+
+    /// Brings the MIDI output senders in step with `routes`, every MIDI output node the running
+    /// graph holds (`docs/architecture/engine.md` "MIDI output"): a node no longer listed is
+    /// silenced and closed, one whose endpoint changed is silenced and moved, and one new or
+    /// with a new event sink gets a queue, returned with its sink for the engine to route.
+    fn sync_midi_outputs(&mut self, routes: &[MidiOutRoute]) -> Vec<(NodeId, OutProducer)>;
+
+    /// Whether MIDI output node `node`'s endpoint is missing or has gone away.
+    fn midi_output_lost(&mut self, node: project_model::NodeId) -> bool;
+
+    /// MIDI output endpoint `port`'s latency, in milliseconds, as remembered on this machine.
+    fn midi_output_latency(&mut self, port: &str) -> f32;
+
+    /// Remembers MIDI output endpoint `port`'s latency, in milliseconds, on this machine; notes
+    /// to it are sent that much earlier.
+    ///
+    /// # Errors
+    ///
+    /// A message for the status line.
+    fn set_midi_output_latency(&mut self, port: &str, ms: f32) -> Result<(), String>;
 
     /// Starts recording one take per armed track: for each of `tracks`, an audio take named
     /// after the track and holding `channels` channels, whose files are created and written;

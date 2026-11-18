@@ -720,6 +720,7 @@ impl App {
                     selection: self.selection,
                     wiring: self.wiring,
                     rewiring: self.rewiring.map(|(id, _)| id),
+                    missing: self.missing_midi_outs(),
                 })
                 .width(Length::Fixed(board_size.width))
                 .height(Length::Fixed(height)),
@@ -842,6 +843,7 @@ impl App {
                 None => Space::new().into(),
             },
             NodeKind::Bus(_) => Space::new().into(),
+            NodeKind::MidiOut { port, name } => self.midi_out_panel(id, port, name),
         };
         // Room on the right for the body's scrollbar, which floats over its content, so it never
         // covers the rightmost controls.
@@ -1245,6 +1247,7 @@ impl App {
                     entries.push(Entry::Separator);
                     entries.push(self.key_entry(id));
                     entries.extend(self.instrument_entries(id));
+                    entries.extend(self.midi_out_entries(id));
                 }
                 entries
             }
@@ -1272,6 +1275,7 @@ impl App {
                     "Feedback delay",
                     Some(Message::AddNode(NewNode::FeedbackDelay)),
                 ),
+                Entry::item("MIDI Out", Some(Message::AddNode(NewNode::MidiOut))),
                 Entry::Separator,
             ]
             .into_iter()

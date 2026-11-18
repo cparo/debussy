@@ -4,12 +4,13 @@
 use std::sync::Arc;
 
 use audio_buffers::{Consumer, Producer};
+use midi::OutProducer;
 use signal_graph::{NodeId, Runner};
 
 use crate::block::{self, Live};
 use crate::capture::{ArmedMidi, ArmedTrack, HeldNotes, Input, MAX_RELEASING, end_takes};
 use crate::click::ClickTrack;
-use crate::engine::{Command, Retired, Shared, TransportState};
+use crate::engine::{Command, MAX_MIDI_OUTS, Retired, Shared, TransportState};
 use crate::error::Error;
 use crate::feed::TrackFeeds;
 use crate::midi::MidiTrack;
@@ -28,6 +29,8 @@ pub struct Processor {
     /// [`MAX_RELEASING`], allocated once.
     releasing: Vec<(NodeId, HeldNotes)>,
     click: Option<ClickTrack>,
+    /// Event sinks routed to MIDI outputs; holds at most [`MAX_MIDI_OUTS`], allocated once.
+    midi_outs: Vec<(NodeId, OutProducer)>,
     input: Input,
     commands: Consumer<Command>,
     retire: Producer<Retired>,
@@ -68,6 +71,7 @@ impl Processor {
             armed_midi: Vec::new(),
             releasing: Vec::with_capacity(MAX_RELEASING),
             click: None,
+            midi_outs: Vec::with_capacity(MAX_MIDI_OUTS),
             input,
             commands,
             retire,
@@ -192,6 +196,7 @@ impl Processor {
             capturing: false,
             capture_frame: 0,
             overflows: 0,
+            midi_outs: &mut self.midi_outs,
         };
         let result = block::run(
             &mut self.runner,
@@ -249,6 +254,7 @@ impl Processor {
             capturing: self.capturing,
             capture_frame: self.capture_frame,
             overflows: 0,
+            midi_outs: &mut self.midi_outs,
         };
         let result = block::run(
             &mut self.runner,
@@ -315,6 +321,22 @@ impl Processor {
                     let old = self.click.replace(click);
                     self.send_back(Retired::Click(old));
                 }
+                Command::RouteMidiOut { sink, producer } => {
+                    if let Some(slot) = self.midi_outs.iter_mut().find(|(s, _)| *s == sink) {
+                        let old = std::mem::replace(&mut slot.1, producer);
+                        self.send_back(Retired::MidiOut(old));
+                    } else if self.midi_outs.len() < self.midi_outs.capacity() {
+                        self.midi_outs.push((sink, producer));
+                    } else {
+                        self.send_back(Retired::MidiOut(producer));
+                    }
+                }
+                Command::UnrouteMidiOut { sink } => {
+                    if let Some(index) = self.midi_outs.iter().position(|(s, _)| *s == sink) {
+                        let (_, old) = self.midi_outs.swap_remove(index);
+                        self.send_back(Retired::MidiOut(old));
+                    }
+                }
                 Command::Arm { audio, mut midi } => {
                     let mut old = std::mem::replace(&mut self.armed, audio);
                     for track in &mut midi {
@@ -372,18 +394,31 @@ impl Processor {
         }
     }
 
-    /// Adds the events the MIDI tracks' buffers refused since the last call to the shared count.
+    /// Adds the events the MIDI tracks' buffers and the MIDI outputs' queues refused since the
+    /// last call to the shared counts.
     fn report_midi_overflows(&mut self) {
         let refused: u64 = self.midi.iter_mut().map(MidiTrack::take_overflows).sum();
         if refused > 0 {
             self.shared.add_midi_overflows(refused);
         }
+        let dropped: u64 = self
+            .midi_outs
+            .iter_mut()
+            .map(|(_, producer)| producer.take_dropped())
+            .sum();
+        if dropped > 0 {
+            self.shared.add_midi_out_dropped(dropped);
+        }
     }
 
     /// Silences the graph: every node's state and delay. Live notes sounding are also sent
-    /// note-offs in the next block, for nodes that keep notes through a reset.
+    /// note-offs in the next block, for nodes that keep notes through a reset, and every MIDI
+    /// output is asked to silence its port (`docs/architecture/engine.md` "MIDI output").
     fn reset_graph(&mut self) {
         self.runner.reset();
+        for (_, producer) in &mut self.midi_outs {
+            producer.silence();
+        }
         for track in &mut self.armed_midi {
             let held = track.take_held();
             if !held.is_empty() && self.releasing.len() < self.releasing.capacity() {

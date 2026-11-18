@@ -232,7 +232,7 @@ when `lame` was found), one for that format's setting (WAV 16-bit, 24-bit or 32-
 changes. Enter presses Export…, and Escape or a press outside the modal cancels. Export… opens a
 save dialog offering only that format, named `Mix.<ext>`, and exports with the modal's settings.
 The modal opens on the last confirmed settings, and at launch on those of the last export
-([application settings](project.md#application-settings)) ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md), [ADR-0130](../adrs/0130-export-asks-for-the-format-and-its-settings-before.md)).
+([application settings](settings.md#application-settings)) ([ADR-0129](../adrs/0129-mp3-export-runs-a-host-installed-lame-as-a.md), [ADR-0130](../adrs/0130-export-asks-for-the-format-and-its-settings-before.md)).
 
 One audio device is chosen for both input and output, from a list re-read each time the device
 dropdown opens. The choice is remembered in the application settings; at launch a remembered device

@@ -203,3 +203,30 @@ fn test_midi_clip_plays_through_the_synth_offline() -> Result<(), Box<dyn Error>
     assert_eq!(left, right);
     Ok(())
 }
+
+#[test]
+fn test_midi_out_node_is_an_event_sink_that_render_ignores() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new_project();
+    let track = session.add_midi_track("keys")?;
+    let node = session.set_destination(
+        track,
+        project_model::Destination::MidiOut {
+            port: "p".to_owned(),
+            name: "P".to_owned(),
+        },
+    )?;
+    let (mut bridge, _runner) = Bridge::new(session.state(), config(), Samples::none())?;
+    let sinks = bridge.event_sinks();
+    assert_eq!(sinks.keys().copied().collect::<Vec<_>>(), [node]);
+    // Another port is the sender's business: the graph keeps the same sink.
+    bridge.edit(&mut session, |s| {
+        s.apply(project_model::Edit::SetMidiPort {
+            node,
+            port: "q".to_owned(),
+            name: "Q".to_owned(),
+        })
+    })?;
+    assert_eq!(bridge.event_sinks(), sinks);
+    assert!(render_graph(session.state(), config(), &mut Samples::none()).is_ok());
+    Ok(())
+}

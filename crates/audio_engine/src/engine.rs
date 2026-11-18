@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use audio_buffers::{Consumer, Producer, queue};
+use midi::OutProducer;
 use signal_graph::{NodeId, Runner};
 
 use crate::capture::{ArmedMidi, ArmedTrack, MAX_INPUTS, TakeInfo};
@@ -19,6 +20,10 @@ use crate::processor::Processor;
 
 /// Commands waiting for the real-time side at once.
 const COMMANDS: usize = 16;
+
+/// The most event sinks routed to MIDI outputs at once (`docs/architecture/engine.md`
+/// "MIDI output").
+pub const MAX_MIDI_OUTS: usize = 64;
 
 /// Where the transport is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +92,8 @@ pub(crate) struct Shared {
     take_latency: AtomicU64,
     /// Events the MIDI tracks' event buffers have refused.
     midi_overflows: AtomicU64,
+    /// Events MIDI outputs' queues have refused.
+    midi_out_dropped: AtomicU64,
 }
 
 impl Shared {
@@ -114,6 +121,10 @@ impl Shared {
         self.midi_overflows.fetch_add(refused, Ordering::Relaxed);
     }
 
+    pub(crate) fn add_midi_out_dropped(&self, dropped: u64) {
+        self.midi_out_dropped.fetch_add(dropped, Ordering::Relaxed);
+    }
+
     pub(crate) fn mono(&self) -> bool {
         self.mono.load(Ordering::Relaxed)
     }
@@ -136,6 +147,7 @@ pub(crate) enum Retired {
     ),
     Click(#[allow(dead_code)] Option<ClickTrack>), // Held only to be dropped.
     Midi(#[allow(dead_code)] Vec<MidiTrack>),      // Held only to be dropped.
+    MidiOut(#[allow(dead_code)] OutProducer),      // Held only to be dropped.
 }
 
 /// A request from the control side to the real-time side.
@@ -152,6 +164,10 @@ pub(crate) enum Command {
     },
     /// Replace the click.
     Click(ClickTrack),
+    /// Send what event sink `sink` carries to `producer`, replacing any queue it had.
+    RouteMidiOut { sink: NodeId, producer: OutProducer },
+    /// Stop sending what event sink `sink` carries anywhere.
+    UnrouteMidiOut { sink: NodeId },
     /// Play from `from` once every feed is primed, recording the armed tracks if `record`
     /// after a count-in of `count_in` frames; the feeds have been moved there.
     Play {
@@ -251,6 +267,34 @@ impl Engine {
         }
         self.collect();
         self.send(Command::Midi(tracks))
+    }
+
+    /// Sends what event sink `sink` carries to `producer` from the next block, each event
+    /// stamped with the host time its frame is due (`docs/architecture/engine.md` "MIDI
+    /// output"), replacing the queue it had. Also while playing. Beyond [`MAX_MIDI_OUTS`]
+    /// sinks, the new route is dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Busy`]; the producer is dropped.
+    pub fn route_midi_out(&mut self, sink: NodeId, producer: OutProducer) -> Result<(), Error> {
+        self.collect();
+        self.send(Command::RouteMidiOut { sink, producer })
+    }
+
+    /// Stops sending what event sink `sink` carries, from the next block.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Busy`].
+    pub fn unroute_midi_out(&mut self, sink: NodeId) -> Result<(), Error> {
+        self.collect();
+        self.send(Command::UnrouteMidiOut { sink })
+    }
+
+    /// How many events MIDI outputs' queues have refused, in all.
+    pub fn midi_out_dropped(&self) -> u64 {
+        self.shared.midi_out_dropped.load(Ordering::Relaxed)
     }
 
     /// How many MIDI events the tracks' event buffers have refused, in all (ADR-0143).

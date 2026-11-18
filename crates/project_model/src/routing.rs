@@ -118,6 +118,27 @@ pub enum NodeKind {
         /// The delay time, as set.
         seconds: f64,
     },
+    /// A MIDI output port (`docs/architecture/engine.md` "MIDI output"): one event input 0 and no
+    /// outputs. What reaches it is sent to the platform MIDI output endpoint `port`.
+    MidiOut {
+        /// The endpoint's platform identifier; at most [`MAX_PORT_BYTES`] bytes.
+        port: String,
+        /// The endpoint's name when chosen, shown while it is missing; at most
+        /// [`MAX_PORT_BYTES`] bytes.
+        name: String,
+    },
+}
+
+/// The longest a MIDI output node's port identifier or name may be, in bytes.
+pub const MAX_PORT_BYTES: usize = 512;
+
+/// Checks a MIDI output node's port identifier and name: each at most [`MAX_PORT_BYTES`].
+pub(crate) fn check_port(port: &str, name: &str) -> Result<(), Error> {
+    if port.len() <= MAX_PORT_BYTES && name.len() <= MAX_PORT_BYTES {
+        Ok(())
+    } else {
+        Err(Error::InvalidValue)
+    }
 }
 
 /// Where a node's top-left corner sits on the patch board, in logical pixels. The interface's
@@ -367,6 +388,7 @@ pub(crate) fn check_node(node: &Node) -> Result<(), Error> {
         }
         NodeKind::Bus(_) => Ok(()),
         NodeKind::FeedbackDelay { seconds, .. } => check_delay(*seconds),
+        NodeKind::MidiOut { port, name } => check_port(port, name),
     }
 }
 
@@ -417,7 +439,7 @@ pub(crate) enum Lookup {
     NoSuchParameter,
     /// An effect or instrument this build does not know: its parameters cannot be checked.
     UnknownKind,
-    /// A bus or feedback delay, which has no parameters.
+    /// A bus, feedback delay or MIDI output, which has no parameters.
     NoParameters,
 }
 
@@ -434,7 +456,9 @@ pub(crate) fn parameter_info(kind: &NodeKind, name: &str) -> Lookup {
             None => return Lookup::UnknownKind,
         },
         NodeKind::Mixer { channels, .. } => audio_effects::mixer_parameter_infos(*channels),
-        NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. } => return Lookup::NoParameters,
+        NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. } | NodeKind::MidiOut { .. } => {
+            return Lookup::NoParameters;
+        }
     };
     match infos.into_iter().find(|info| info.name == name) {
         Some(info) => Lookup::Known {

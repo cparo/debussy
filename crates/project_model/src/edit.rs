@@ -111,6 +111,15 @@ pub enum Edit {
         /// The time, in seconds.
         seconds: f64,
     },
+    /// Points a MIDI output node at another endpoint.
+    SetMidiPort {
+        /// The MIDI output node.
+        node: NodeId,
+        /// The endpoint's platform identifier.
+        port: String,
+        /// The endpoint's name, for display.
+        name: String,
+    },
     /// Adds a connection at `index` in the connection list.
     Connect {
         /// Where it goes; at most the number of connections.
@@ -364,6 +373,22 @@ impl Edit {
                 let old = std::mem::replace(current, seconds);
                 Ok(Edit::SetDelay { node, seconds: old })
             }
+            Edit::SetMidiPort { node, port, name } => {
+                routing::check_port(&port, &name)?;
+                let index = node_index(state, node)?;
+                let NodeKind::MidiOut {
+                    port: current_port,
+                    name: current_name,
+                } = &mut state.nodes[index].kind
+                else {
+                    return Err(Error::WrongNodeKind(node));
+                };
+                Ok(Edit::SetMidiPort {
+                    node,
+                    port: std::mem::replace(current_port, port),
+                    name: std::mem::replace(current_name, name),
+                })
+            }
             Edit::Connect { index, connection } => {
                 check_index(index, state.connections.len() + 1)?;
                 check_connection(state, &connection)?;
@@ -565,7 +590,8 @@ fn check_unconnected(state: &State, endpoint: Endpoint) -> Result<(), Error> {
 
 /// Whether `endpoint` can have an output (`output` true) or input port `port`. Effects' ports are
 /// not known to the model and are checked by `signal_graph`; a mixer has an input per channel and
-/// one output; an instrument has one input and one output, each port 0. A curve has one output and a curve port one input, each port 0. A track, audio or
+/// one output; an instrument has one input and one output, each port 0; a MIDI output has one
+/// input, port 0. A curve has one output and a curve port one input, each port 0. A track, audio or
 /// MIDI, has one output, port 0.
 fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
@@ -582,6 +608,7 @@ fn has_port(state: &State, endpoint: Endpoint, output: bool, port: usize) -> boo
             Some(
                 NodeKind::Instrument { .. } | NodeKind::Bus(_) | NodeKind::FeedbackDelay { .. },
             ) => port == 0,
+            Some(NodeKind::MidiOut { .. }) => !output && port == 0,
             None => false,
         },
     }
@@ -599,13 +626,14 @@ fn port_layout(state: &State, endpoint: Endpoint, output: bool) -> Option<Layout
             }
             Some(NodeKind::Bus(layout) | NodeKind::FeedbackDelay { layout, .. }) => Some(*layout),
             Some(NodeKind::Instrument { .. }) => output.then_some(Layout::Stereo),
-            Some(NodeKind::Effect { .. }) | None => None,
+            Some(NodeKind::Effect { .. } | NodeKind::MidiOut { .. }) | None => None,
         },
         Endpoint::Curve(_) | Endpoint::CurvePort(..) => Some(Layout::Mono),
     }
 }
 
-/// Whether a port carries events: a MIDI track's output, or an instrument's input 0.
+/// Whether a port carries events: a MIDI track's output, or an instrument's or MIDI output's
+/// input 0.
 fn is_event(state: &State, endpoint: Endpoint, output: bool, port: usize) -> bool {
     match endpoint {
         Endpoint::Track(id) => output && state.track(id).is_some_and(|t| t.kind == TrackKind::Midi),
@@ -614,7 +642,7 @@ fn is_event(state: &State, endpoint: Endpoint, output: bool, port: usize) -> boo
                 && port == 0
                 && matches!(
                     state.node(id).map(|node| &node.kind),
-                    Some(NodeKind::Instrument { .. })
+                    Some(NodeKind::Instrument { .. } | NodeKind::MidiOut { .. })
                 )
         }
         _ => false,

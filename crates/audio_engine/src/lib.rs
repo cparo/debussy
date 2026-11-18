@@ -20,6 +20,11 @@
 //! Each MIDI track's clips, flattened onto the timeline as a [`MidiTrack`] and set with
 //! [`Engine::set_midi_tracks`], are played into its event source with frame-accurate events.
 //!
+//! Event sinks routed with [`Engine::route_midi_out`] pass the events reaching them to a
+//! [`midi::OutProducer`] each block, stamped with the host time each is due, for a sender thread
+//! to hand to a MIDI output port; stop and pause queue [`midi::Outgoing::Silence`]. Offline render
+//! ignores them.
+//!
 //! A [`ClickTrack`] set with [`Engine::set_click`] is mixed into the output after the plan
 //! while playing; offline render never includes it.
 //!
@@ -58,7 +63,7 @@ mod timeline;
 
 pub use capture::{ArmedMidi, ArmedTrack, MAX_INPUTS, NoteSink, TakeInfo, TakeSink};
 pub use click::{ClickTrack, OFFBEAT_GAIN};
-pub use engine::{Engine, TransportState};
+pub use engine::{Engine, MAX_MIDI_OUTS, TransportState};
 pub use error::Error;
 pub use feed::{RenderFeed, Streams, TrackFeed, TrackFeeds};
 pub use midi::{ControlPoint, MidiTrack, NoteSpan};

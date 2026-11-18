@@ -41,7 +41,7 @@ pub use recovery::{
 };
 pub use settings::{
     AppSettings, ClickSound, ExportDepth, ExportFormatName, ExportPreferences, MAX_CLICK_LEVEL_DB,
-    MIN_CLICK_LEVEL_DB, SETTINGS_VERSION,
+    MAX_MIDI_LATENCY_MS, MAX_MIDI_OUTPUTS, MIN_CLICK_LEVEL_DB, MidiOutSettings, SETTINGS_VERSION,
 };
 pub use validate::{
     MAX_CLIPS, MAX_CONNECTIONS, MAX_FILE_NAME_BYTES, MAX_MIDI_EVENTS, MAX_MIXER_CHANNELS,

@@ -125,8 +125,8 @@ pub struct Board {
 }
 
 /// A node's input and output ports' layouts. Effects' ports are not known to the model; they
-/// are drawn as one stereo input and output. An instrument's event input is one pin, like a mono
-/// port's.
+/// are drawn as one stereo input and output. An instrument's or MIDI output's event input is one
+/// pin, like a mono port's.
 fn ports(kind: &NodeKind) -> (Vec<Layout>, Vec<Layout>) {
     match kind {
         NodeKind::Mixer { channels, .. } => (vec![Layout::Mono; *channels], vec![Layout::Stereo]),
@@ -135,6 +135,7 @@ fn ports(kind: &NodeKind) -> (Vec<Layout>, Vec<Layout>) {
         }
         NodeKind::Effect { .. } => (vec![Layout::Stereo], vec![Layout::Stereo]),
         NodeKind::Instrument { .. } => (vec![Layout::Mono], vec![Layout::Stereo]),
+        NodeKind::MidiOut { .. } => (vec![Layout::Mono], Vec::new()),
     }
 }
 
@@ -150,6 +151,8 @@ pub fn title(kind: &NodeKind) -> String {
         NodeKind::Instrument { kind, .. } => {
             instruments::display_name(kind).map_or_else(|| kind.clone(), str::to_owned)
         }
+        NodeKind::MidiOut { name, .. } if !name.is_empty() => format!("MIDI Out: {name}"),
+        NodeKind::MidiOut { .. } => "MIDI Out".to_owned(),
     }
 }
 
@@ -279,7 +282,8 @@ pub fn reconnect_target(
     can_connect(&without, from, Pin { side, ..to }).then_some((to.endpoint, to.port, side))
 }
 
-/// Whether `pin` carries events: a MIDI track's output, or an instrument's input 0.
+/// Whether `pin` carries events: a MIDI track's output, or an instrument's or MIDI output's
+/// input 0.
 fn is_event(state: &State, pin: Pin) -> bool {
     match pin.endpoint {
         Endpoint::Track(id) => {
@@ -290,7 +294,7 @@ fn is_event(state: &State, pin: Pin) -> bool {
                 && pin.port == 0
                 && matches!(
                     state.node(id).map(|n| &n.kind),
-                    Some(NodeKind::Instrument { .. })
+                    Some(NodeKind::Instrument { .. } | NodeKind::MidiOut { .. })
                 )
         }
         _ => false,
@@ -658,6 +662,8 @@ pub struct BoardView {
     pub wiring: Option<Pin>,
     /// The connection whose far end is being moved, hidden while it is.
     pub rewiring: Option<ConnectionId>,
+    /// MIDI output nodes whose endpoint is missing or lost, their titles greyed.
+    pub missing: BTreeSet<NodeId>,
 }
 
 /// A drag the board is following.
@@ -953,7 +959,11 @@ impl Program<Message> for BoardView {
             frame.fill_text(Text {
                 content: node.title.clone(),
                 position: Point::new(node.rect.center_x(), node.rect.y + FIRST_PORT),
-                color: t.text,
+                color: if self.missing.contains(&node.id) {
+                    t.text.scale_alpha(0.45)
+                } else {
+                    t.text
+                },
                 size: TITLE_TEXT.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
                 align_y: iced::alignment::Vertical::Center,

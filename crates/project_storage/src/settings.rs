@@ -1,7 +1,8 @@
 //! [`AppSettings`]: the application's own settings, kept per machine outside any project
-//! (`docs/architecture/project.md` "Application settings", ADR-0059). Read as untrusted input,
+//! (`docs/architecture/settings.md` "Application settings", ADR-0059). Read as untrusted input,
 //! like a project file, and written crash-safely.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -11,9 +12,15 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 
 /// The settings format version this build writes. Version 1 files are read too, with the click
-/// preferences at their defaults (ADR-0083), and version 1 and 2 files with the export
-/// preferences at theirs (ADR-0130).
-pub const SETTINGS_VERSION: u32 = 3;
+/// preferences at their defaults (ADR-0083), version 1 and 2 files with the export preferences at
+/// theirs (ADR-0130), and version 1 to 3 files with no MIDI output settings (ADR-0162).
+pub const SETTINGS_VERSION: u32 = 4;
+
+/// The most MIDI output ports whose settings are kept; the rest are dropped on load.
+pub const MAX_MIDI_OUTPUTS: usize = 64;
+
+/// The largest MIDI output latency kept, in milliseconds; a larger or negative one is dropped.
+pub const MAX_MIDI_LATENCY_MS: f32 = 1000.0;
 
 /// The quietest click level, in decibels.
 pub const MIN_CLICK_LEVEL_DB: f32 = -24.0;
@@ -113,6 +120,22 @@ impl ExportPreferences {
     }
 }
 
+/// One MIDI output port's settings (`docs/architecture/engine.md` "MIDI output").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MidiOutSettings {
+    /// How long the port and the instrument on it take to sound a note, in milliseconds: 0 to
+    /// [`MAX_MIDI_LATENCY_MS`]. Notes are sent this much earlier.
+    pub latency_ms: f32,
+}
+
+impl MidiOutSettings {
+    /// Whether a reader can use it: a finite latency within range.
+    fn is_valid(&self) -> bool {
+        self.latency_ms.is_finite() && (0.0..=MAX_MIDI_LATENCY_MS).contains(&self.latency_ms)
+    }
+}
+
 /// The click's sound (`docs/architecture/recording.md` "Click track").
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -137,6 +160,8 @@ pub struct AppSettings {
     pub click_level_db: f32,
     /// The last export's settings.
     pub export: ExportPreferences,
+    /// Each MIDI output port's settings, by endpoint id; at most [`MAX_MIDI_OUTPUTS`].
+    pub midi_outputs: BTreeMap<String, MidiOutSettings>,
 }
 
 impl Default for AppSettings {
@@ -147,6 +172,7 @@ impl Default for AppSettings {
             click_sound: ClickSound::default(),
             click_level_db: 0.0,
             export: ExportPreferences::default(),
+            midi_outputs: BTreeMap::new(),
         }
     }
 }
@@ -166,6 +192,9 @@ struct Saved {
     /// Since version 3.
     #[serde(default)]
     export: Option<ExportPreferences>,
+    /// Since version 4.
+    #[serde(default)]
+    midi_outputs: Option<BTreeMap<String, MidiOutSettings>>,
 }
 
 impl AppSettings {
@@ -187,27 +216,29 @@ impl AppSettings {
         }
         let saved: Saved = serde_json::from_str(&text).ok()?;
         let defaults = AppSettings::default();
-        let (click_sound, click_level_db, export) = match saved.format_version {
-            // Version 1 had no click preferences, and neither 1 nor 2 export preferences.
-            1 if saved.click_sound.is_none()
-                && saved.click_level_db.is_none()
-                && saved.export.is_none() =>
-            {
-                (
-                    defaults.click_sound,
-                    defaults.click_level_db,
-                    defaults.export,
-                )
+        // Version 1 had no click preferences, 1 and 2 no export preferences, and 1 to 3 no MIDI
+        // output settings.
+        let version = saved.format_version;
+        if !(1..=SETTINGS_VERSION).contains(&version)
+            || (version < 4 && saved.midi_outputs.is_some())
+            || (version < 3 && saved.export.is_some())
+        {
+            return None;
+        }
+        let (click_sound, click_level_db) = match version {
+            1 if saved.click_sound.is_none() && saved.click_level_db.is_none() => {
+                (defaults.click_sound, defaults.click_level_db)
             }
-            2 if saved.export.is_none() => {
-                (saved.click_sound?, saved.click_level_db?, defaults.export)
-            }
-            SETTINGS_VERSION => (
-                saved.click_sound?,
-                saved.click_level_db?,
-                saved.export?.sanitized(),
-            ),
-            _ => return None,
+            1 => return None,
+            _ => (saved.click_sound?, saved.click_level_db?),
+        };
+        let export = match version {
+            1 | 2 => defaults.export,
+            _ => saved.export?.sanitized(),
+        };
+        let midi_outputs = match version {
+            1..=3 => BTreeMap::new(),
+            _ => sanitized_midi_outputs(saved.midi_outputs?),
         };
         let level_ok = click_level_db.is_finite()
             && (MIN_CLICK_LEVEL_DB..=MAX_CLICK_LEVEL_DB).contains(&click_level_db);
@@ -223,6 +254,7 @@ impl AppSettings {
                 defaults.click_level_db
             },
             export,
+            midi_outputs,
         })
     }
 
@@ -246,6 +278,7 @@ impl AppSettings {
             click_sound: Some(self.click_sound),
             click_level_db: Some(self.click_level_db),
             export: Some(self.export),
+            midi_outputs: Some(sanitized_midi_outputs(self.midi_outputs.clone())),
         };
         let text = serde_json::to_vec_pretty(&saved).map_err(|source| Error::Json {
             path: path.to_owned(),
@@ -260,6 +293,20 @@ impl AppSettings {
         drop(file);
         fs::rename(&temp, path).map_err(io)
     }
+}
+
+/// `outputs` without the entries a reader cannot use (an empty or overlong id, or an unusable
+/// latency), and without those beyond the first [`MAX_MIDI_OUTPUTS`].
+fn sanitized_midi_outputs(
+    outputs: BTreeMap<String, MidiOutSettings>,
+) -> BTreeMap<String, MidiOutSettings> {
+    outputs
+        .into_iter()
+        .filter(|(id, settings)| {
+            !id.is_empty() && id.len() <= MAX_DEVICE_BYTES && settings.is_valid()
+        })
+        .take(MAX_MIDI_OUTPUTS)
+        .collect()
 }
 
 #[cfg(test)]
@@ -284,6 +331,10 @@ mod tests {
                 mp3_kbps: 256,
                 mono: true,
             },
+            midi_outputs: BTreeMap::from([(
+                "CoreMIDI:42".to_owned(),
+                MidiOutSettings { latency_ms: 4.5 },
+            )]),
         };
         settings.save(&path)?;
         assert_eq!(AppSettings::load(&path), settings);
@@ -308,7 +359,7 @@ mod tests {
         // Unusable export fields fall back one by one.
         std::fs::write(
             &path,
-            r#"{"format_version":3,"click_sound":"click","click_level_db":0.0,"export":{"format":"flac","wav_depth":"int16","flac_depth":"float32","aac_kbps":0,"mp3_kbps":99999,"mono":true}}"#,
+            r#"{"format_version":4,"click_sound":"click","click_level_db":0.0,"export":{"format":"flac","wav_depth":"int16","flac_depth":"float32","aac_kbps":0,"mp3_kbps":99999,"mono":true},"midi_outputs":{}}"#,
         )?;
         let odd = AppSettings::load(&path).export;
         assert_eq!(
@@ -332,7 +383,10 @@ mod tests {
         );
         for bad in [
             "not json",
-            r#"{"format_version":4,"device":"x"}"#,
+            r#"{"format_version":5,"device":"x"}"#,
+            r#"{"format_version":3,"click_sound":"click","click_level_db":0.0,"export":{"format":"wav","wav_depth":"int16","flac_depth":"int16","aac_kbps":1,"mp3_kbps":1,"mono":true},"midi_outputs":{}}"#,
+            r#"{"format_version":4,"click_sound":"click","click_level_db":0.0,"export":{"format":"wav","wav_depth":"int16","flac_depth":"int16","aac_kbps":1,"mp3_kbps":1,"mono":true}}"#,
+            r#"{"format_version":4,"click_sound":"click","click_level_db":0.0,"export":{"format":"wav","wav_depth":"int16","flac_depth":"int16","aac_kbps":1,"mp3_kbps":1,"mono":true},"midi_outputs":{"a":{"latency_ms":1.0,"x":2}}}"#,
             r#"{"format_version":2,"device":"x"}"#,
             r#"{"format_version":3,"click_sound":"click","click_level_db":0.0}"#,
             r#"{"format_version":2,"click_sound":"click","click_level_db":0.0,"export":{}}"#,
@@ -344,6 +398,71 @@ mod tests {
         }
         std::fs::write(&path, " ".repeat(MAX_BYTES as usize + 1))?;
         assert_eq!(AppSettings::load(&path), AppSettings::default());
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_settings_load_migrates_version_three_and_drops_bad_midi_outputs()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = std::env::temp_dir().join(format!("debussy-midi-out-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        std::fs::create_dir_all(&dir)?;
+        let export = r#""export":{"format":"wav","wav_depth":"int16","flac_depth":"int16","aac_kbps":1,"mp3_kbps":1,"mono":true}"#;
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"format_version":3,"click_sound":"stick","click_level_db":0.0,{export}}}"#
+            ),
+        )?;
+        let three = AppSettings::load(&path);
+        assert_eq!(three.click_sound, ClickSound::Stick);
+        assert!(three.midi_outputs.is_empty());
+        let long = "x".repeat(MAX_DEVICE_BYTES + 1);
+        let many: String = (0..MAX_MIDI_OUTPUTS + 5)
+            .map(|i| format!(r#","p{i:03}":{{"latency_ms":1.0}}"#))
+            .collect();
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"format_version":4,"click_sound":"stick","click_level_db":0.0,{export},"midi_outputs":{{"":{{"latency_ms":1.0}},"{long}":{{"latency_ms":1.0}},"a":{{"latency_ms":-1.0}},"b":{{"latency_ms":2000.0}},"c":{{"latency_ms":12.5}}{many}}}}}"#
+            ),
+        )?;
+        let four = AppSettings::load(&path);
+        assert_eq!(four.click_sound, ClickSound::Stick);
+        assert_eq!(four.midi_outputs.len(), MAX_MIDI_OUTPUTS);
+        assert_eq!(
+            four.midi_outputs.get("c"),
+            Some(&MidiOutSettings { latency_ms: 12.5 })
+        );
+        assert!(!four.midi_outputs.contains_key("a"));
+        assert!(!four.midi_outputs.contains_key("b"));
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_settings_save_drops_unusable_midi_outputs() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = std::env::temp_dir().join(format!("debussy-midi-save-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        let mut settings = AppSettings::default();
+        settings
+            .midi_outputs
+            .insert("ok".to_owned(), MidiOutSettings { latency_ms: 3.0 });
+        settings.midi_outputs.insert(
+            "nan".to_owned(),
+            MidiOutSettings {
+                latency_ms: f32::NAN,
+            },
+        );
+        settings.save(&path)?;
+        assert_eq!(
+            AppSettings::load(&path)
+                .midi_outputs
+                .keys()
+                .collect::<Vec<_>>(),
+            ["ok"]
+        );
         let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }

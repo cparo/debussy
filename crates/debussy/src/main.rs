@@ -9,6 +9,7 @@ mod args;
 mod audio;
 mod export_settings;
 mod launcher;
+mod midi_out;
 mod project;
 mod services;
 
