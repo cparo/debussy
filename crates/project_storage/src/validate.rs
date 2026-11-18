@@ -8,9 +8,9 @@ use audio_buffers::Layout;
 use modulation::{Curve, Handle, Point};
 use project_model::{
     Accidental, AudioFile, Clip, ClipId, Connection, ConnectionId, Control, CurveId, CurveLane,
-    Edit, Endpoint, Key, Letter, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Mode, Node, NodeId,
-    NodeKind, Notation, Note, Position, SampleZone, Sequence, Side, Source, State, Tempo, Track,
-    TrackId, TrackKind, WireHandle, WirePoint, WireShape, ZoneMode,
+    Edit, Endpoint, Key, Letter, MAX_BOARD_COORDINATE, MAX_PORT_BYTES, MAX_WIRE_POINTS, Mode, Node,
+    NodeId, NodeKind, Notation, Note, Position, SampleZone, Sequence, Side, Source, State, Tempo,
+    Track, TrackId, TrackKind, WireHandle, WirePoint, WireShape, ZoneMode,
 };
 
 use crate::format::{
@@ -496,6 +496,10 @@ fn kind_to_saved(kind: &NodeKind) -> SavedNodeKind {
             layout: layout_to_saved(*layout),
             seconds: *seconds,
         },
+        NodeKind::MidiOut { port, name } => SavedNodeKind::MidiOut {
+            port: port.clone(),
+            name: name.clone(),
+        },
     }
 }
 
@@ -672,6 +676,13 @@ fn kind_from_saved(kind: SavedNodeKind) -> Result<NodeKind, String> {
                 layout: layout_from_saved(layout),
                 seconds,
             }
+        }
+        SavedNodeKind::MidiOut { port, name } => {
+            ensure(
+                port.len() <= MAX_PORT_BYTES && name.len() <= MAX_PORT_BYTES,
+                || format!("a MIDI output port longer than {MAX_PORT_BYTES} bytes"),
+            )?;
+            NodeKind::MidiOut { port, name }
         }
     })
 }

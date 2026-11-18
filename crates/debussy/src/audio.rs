@@ -158,6 +158,11 @@ impl AudioOutput {
         self.devices.devices().unwrap_or_default()
     }
 
+    /// The project sample rate the engine runs at.
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     /// The id of the device in use.
     pub fn current(&self) -> Option<&str> {
         self.running.as_ref().map(|r| r.device.as_str())

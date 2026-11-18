@@ -69,6 +69,7 @@ mod kit_map;
 mod launcher;
 mod menu;
 mod midi_edit;
+mod midi_out;
 mod mixer_strip;
 mod node_dialog;
 mod node_parameters;
@@ -116,8 +117,8 @@ pub use patch_board::{
 pub use recording::{InputChoice, METER_FLOOR_DB};
 pub use services::{
     ClickPreferences, DeviceChoice, ImportedTrack, MAX_CLICK_LEVEL_DB, MIN_CLICK_LEVEL_DB,
-    MidiInputChoice, MidiTakeFile, PassMarker, Recovered, RecoveredMidi, RecoveredPass,
-    SampleImport, Services, TakeFiles, TakeStatus, Takes,
+    MidiInputChoice, MidiOutRoute, MidiOutputChoice, MidiTakeFile, PassMarker, Recovered,
+    RecoveredMidi, RecoveredPass, SampleImport, Services, TakeFiles, TakeStatus, Takes,
 };
 pub use theme::Tone;
 pub use transport::MAX_SAMPLES_PER_COLUMN;

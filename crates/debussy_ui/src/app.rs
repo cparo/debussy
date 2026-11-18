@@ -5,7 +5,7 @@
 //! Gestures follow ADR-0037 and ADR-0043: while a slider is dragged its value goes straight to
 //! the running graph's parameter; releasing it records one undo step.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
@@ -62,6 +62,8 @@ pub enum NewNode {
     Effect(&'static str),
     /// A built-in instrument of this kind id (`instruments::INSTRUMENTS`), at its defaults.
     Instrument(&'static str),
+    /// A MIDI output on the first endpoint present, or on none.
+    MidiOut,
 }
 
 impl NewNode {
@@ -84,6 +86,10 @@ impl NewNode {
                 kind: kind.to_owned(),
                 parameters: std::collections::BTreeMap::new(),
                 zones: Vec::new(),
+            },
+            NewNode::MidiOut => NodeKind::MidiOut {
+                port: String::new(),
+                name: String::new(),
             },
         }
     }
@@ -220,6 +226,10 @@ pub enum Message {
     /// Give this MIDI track a new instrument of this kind, wired to the project mixer, as one
     /// step.
     SetInstrument(TrackId, &'static str),
+    /// Send this MIDI track's notes to a new MIDI output node on this endpoint, as one step.
+    SetMidiOut(TrackId, crate::services::MidiOutputChoice),
+    /// Point this MIDI output node at this endpoint, as one step.
+    SetMidiPort(NodeId, crate::services::MidiOutputChoice),
     /// Set this MIDI track's key, as one step.
     SetKey(TrackId, project_model::Key),
     /// The name being typed in the key dialog for this pitch of this MIDI track.
@@ -493,6 +503,14 @@ pub struct App {
     pub(crate) meters: BTreeMap<TrackId, Vec<f32>>,
     /// The MIDI inputs present when last read.
     pub(crate) midi_inputs: Vec<crate::services::MidiInputChoice>,
+    /// The MIDI outputs present when last read.
+    pub(crate) midi_outputs: Vec<crate::services::MidiOutputChoice>,
+    /// The MIDI output routes the engine and services were last given.
+    pub(crate) midi_out_routes: Vec<crate::services::MidiOutRoute>,
+    /// MIDI output nodes whose endpoint was lost or missing when last asked.
+    pub(crate) midi_out_lost: BTreeSet<NodeId>,
+    /// Each routed MIDI output endpoint's latency in milliseconds, as last read or set.
+    pub(crate) midi_out_latency: BTreeMap<String, f32>,
     /// The MIDI input the engine has for each armed MIDI track.
     pub(crate) midi_open: BTreeMap<TrackId, OpenMidi>,
     /// Each armed MIDI track's activity light.
@@ -582,6 +600,10 @@ impl App {
             pass: None,
             meters: BTreeMap::new(),
             midi_inputs: Vec::new(),
+            midi_outputs: Vec::new(),
+            midi_out_routes: Vec::new(),
+            midi_out_lost: BTreeSet::new(),
+            midi_out_latency: BTreeMap::new(),
             midi_open: BTreeMap::new(),
             midi_activity: BTreeMap::new(),
             click: Click::new(preferences),
@@ -769,6 +791,7 @@ impl App {
             selection: self.selection,
             wiring: self.wiring,
             rewiring: self.rewiring.map(|(id, _)| id),
+            missing: self.missing_midi_outs(),
         }
     }
 
@@ -919,6 +942,8 @@ impl App {
         }
         // Any change of tempo, by an edit, undo or a restored version, reaches the click.
         self.sync_click();
+        // Any MIDI output node added, removed or re-pointed reaches its sender.
+        self.sync_midi_outs();
         self.autosave();
     }
 
@@ -1112,6 +1137,8 @@ impl App {
             }
             Message::Quantize => self.quantize(),
             Message::SetInstrument(track, kind) => self.set_instrument(track, kind),
+            Message::SetMidiOut(track, choice) => self.set_midi_out(track, &choice),
+            Message::SetMidiPort(node, choice) => self.set_midi_port(node, &choice),
             Message::SetKey(track, key) => self.set_key(track, key),
             Message::KeyNameText(track, pitch, typed) => {
                 // Typing for another pitch records the one before.
@@ -1214,6 +1241,10 @@ impl App {
                 // The device menu lists the devices present now, so one plugged in since shows.
                 if self.menu == Some(Menu::Device) {
                     self.refresh_devices();
+                }
+                // So do a MIDI track's menu and the add-node menu, for MIDI outputs.
+                if matches!(self.menu, Some(Menu::Track(_) | Menu::AddNode)) {
+                    self.midi_outputs = self.services.midi_outputs();
                 }
             }
             // The shell handles these.
@@ -1438,9 +1469,11 @@ impl App {
                 }
             }
             Message::AddNode(choice) => {
-                let result = self
-                    .bridge
-                    .edit(&mut self.session, |s| s.add_node(choice.kind()));
+                let kind = match choice {
+                    NewNode::MidiOut => self.first_midi_out(),
+                    _ => choice.kind(),
+                };
+                let result = self.bridge.edit(&mut self.session, |s| s.add_node(kind));
                 match result {
                     Ok(node) => {
                         self.dialog.close();
@@ -1727,9 +1760,15 @@ impl App {
     }
 
     /// Records `text`, typed in node `node`'s dialog field, as one step: a feedback delay's time,
-    /// or a mixer's channel count clamped into [`App::channel_range`].
+    /// or a mixer's channel count clamped into [`App::channel_range`]. A MIDI output's latency
+    /// goes to the app settings instead, not the project.
     fn commit_node_text(&mut self, node: NodeId, text: &str) {
         let kind = self.session.state().node(node).map(|n| &n.kind);
+        if let Some(NodeKind::MidiOut { port, .. }) = kind {
+            let port = port.clone();
+            self.set_midi_out_latency(&port, text);
+            return;
+        }
         let edit = match kind {
             Some(NodeKind::FeedbackDelay { .. }) => match text.trim().parse::<f64>() {
                 Ok(seconds) => Edit::SetDelay { node, seconds },

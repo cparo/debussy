@@ -5,7 +5,7 @@
 - **Date:** 2026-11-07
 - **Issue:** #64
 - **Architecture:** [Files and devices](../architecture/user-interface.md#files-and-devices)
-  ([Application settings](../architecture/project.md#application-settings))
+  ([Application settings](../architecture/settings.md#application-settings))
 
 ## Context
 

@@ -46,6 +46,9 @@ pub(crate) enum Shape {
     EventSource,
     /// The stereo project output.
     Sink,
+    /// A MIDI output node, with one event input; its port is the sender's to know, not the
+    /// graph's.
+    MidiOut,
     /// A built-in effect by kind id.
     Effect(String),
     /// A built-in instrument by kind id, with a sampler's zones.
@@ -70,7 +73,12 @@ impl Shape {
     pub(crate) fn is_processor(&self) -> bool {
         !matches!(
             self,
-            Shape::Source(_) | Shape::EventSource | Shape::Sink | Shape::Delay(_) | Shape::Curve
+            Shape::Source(_)
+                | Shape::EventSource
+                | Shape::Sink
+                | Shape::MidiOut
+                | Shape::Delay(_)
+                | Shape::Curve
         )
     }
 }
@@ -301,6 +309,7 @@ impl Target {
                 NodeKind::FeedbackDelay { layout, seconds } => {
                     (Shape::Delay(*layout), BTreeMap::new(), Some(*seconds))
                 }
+                NodeKind::MidiOut { .. } => (Shape::MidiOut, BTreeMap::new(), None),
             };
             nodes.insert(
                 key,
@@ -334,7 +343,7 @@ impl Target {
                 // A stand-in for an unknown effect or instrument has no parameters to drive.
                 if matches!(
                     nodes.get(&Key::Node(node)).map(|n| &n.shape),
-                    Some(Shape::Unknown { .. } | Shape::UnknownInstrument) | None
+                    Some(Shape::Unknown { .. } | Shape::UnknownInstrument | Shape::MidiOut) | None
                 ) {
                     return None;
                 }

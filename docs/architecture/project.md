@@ -104,7 +104,7 @@ or into a new project, which copies the audio files it references ([ADR-0012](..
 
 The project's routing is part of its editable state, in the same undo history and named versions as
 its tracks. Each audio track is a source with one output of the track's layout. Every project has one
-stereo output, which cannot be removed. Other nodes are effects, instruments, mixers, buses and feedback delays joined
+stereo output, which cannot be removed. Other nodes are effects, instruments, mixers, buses, feedback delays and MIDI outputs joined
 by connections ([ADR-0043](../adrs/0043-routing-is-undoable-project-state-tracks-are-bare.md)).
 
 A MIDI track's output is one event port; it is not routed when the track is created, and it
@@ -114,6 +114,10 @@ An instrument node is saved as a stable kind id with its non-default parameter v
 name, as an effect is; an unknown kind id is kept and plays as silence. The model knows its ports:
 event input 0, which only a MIDI track's output may reach, and stereo output 0. A side of an event
 port is refused ([ADR-0147](../adrs/0147-instruments-are-their-own-node-kind.md)).
+
+A MIDI output node is saved as its endpoint's platform id and name, each at most 512 bytes. Its
+one port is event input 0; it has no outputs and joins no mixer
+([ADR-0162](../adrs/0162-midi-tracks-reach-hardware-synths-through-midi.md)).
 
 A new track is connected to the output, panned centre, in the same undo step, and removing a track
 removes its connections. An effect node is saved as a stable kind id with its non-default parameter
@@ -277,21 +281,6 @@ audio. Only plain `.wav` file names are deleted ([ADR-0049](../adrs/0049-saved-p
 and every plain `.midilog` MIDI take journal. Files used by a sampler's zones count as used.
 Takes recovered from a recording marker are kept until the interface places them
 ([ADR-0135](../adrs/0135-takes-interrupted-by-a-crash-are-recovered-from-a.md)).
-
-## Application settings
-
-The application keeps per-machine settings, outside any project, in
-`~/Library/Application Support/Debussy/settings.json`: a `format_version` (2) and the chosen audio
-device's id. The file is written crash-safely and read as untrusted input; a missing, newer or
-invalid file gives the defaults ([ADR-0059](../adrs/0059-the-window-imports-exports-and-picks-one-audio.md)).
-Since version 2 it also holds the click's `click_sound` (`block`, `click` or `stick`) and
-`click_level_db` (−24 to +6); a version 1 file keeps its device and takes the Click sound at
-0 dB, and a level out of range reads as 0 dB ([ADR-0083](../adrs/0083-the-click-is-mixed-at-the-output-stage-from.md)).
-Since version 3 (the version written) it also holds the last export's settings, `export`:
-`format` (`wav`, `flac`, `aac` or `mp3`), `wav_depth` and `flac_depth` (`int16`, `int24` or
-`float32`), `aac_kbps`, `mp3_kbps` and `mono`. A version 1 or 2 file takes the default export,
-24-bit stereo WAV; a FLAC depth of `float32`, or a bit rate of 0 or above 1000, reads as its
-default ([ADR-0130](../adrs/0130-export-asks-for-the-format-and-its-settings-before.md)).
 
 ## Stored audio
 

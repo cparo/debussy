@@ -18,6 +18,20 @@ use crate::tempo::Grid;
 use crate::types::{ClipId, CurveId, Source, TrackId, TrackKind};
 use crate::zones::SampleZone;
 
+/// Where a MIDI track's notes go ([`Session::set_destination`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Destination {
+    /// A new built-in instrument of this kind id, at its defaults.
+    Instrument(String),
+    /// A MIDI output node on a platform endpoint.
+    MidiOut {
+        /// The endpoint's platform identifier.
+        port: String,
+        /// The endpoint's name, for display.
+        name: String,
+    },
+}
+
 /// A project open for editing. Every change goes through [`Session::apply`] (or a method built
 /// on it) and is one step of an unlimited undo history, which is never saved.
 #[derive(Debug, Clone, Default)]
@@ -303,18 +317,35 @@ impl Session {
     }
 
     /// Gives MIDI track `track` a new instrument of kind `kind` at its defaults, as one step,
-    /// and returns the instrument's id (`docs/architecture/track-pane.md` "Instrument choice"):
-    ///
-    /// - The track's event output is disconnected. An instrument it fed that nothing else feeds
-    ///   is removed, with its connections.
-    /// - The new instrument is laid out automatically on the patch board, takes the track's
-    ///   events on its event input, and its stereo output joins the project as a stereo track's
-    ///   does ([`Session::add_track`]), reusing the channels a removed instrument held.
+    /// and returns the instrument's id: [`Session::set_destination`] with
+    /// [`Destination::Instrument`].
     ///
     /// # Errors
     ///
-    /// [`Error::UnknownTrack`], or [`Error::KindMismatch`] for an audio track.
+    /// As [`Session::set_destination`].
     pub fn set_instrument(&mut self, track: TrackId, kind: &str) -> Result<NodeId, Error> {
+        self.set_destination(track, Destination::Instrument(kind.to_owned()))
+    }
+
+    /// Gives MIDI track `track` a new destination for its notes, as one step, and returns the
+    /// new node's id (`docs/architecture/track-pane.md` "Instrument choice"):
+    ///
+    /// - The track's event output is disconnected. An instrument or MIDI output it fed that
+    ///   nothing else feeds is removed, with its connections.
+    /// - The new node is laid out automatically on the patch board and takes the track's events
+    ///   on its event input. An instrument's stereo output joins the project as a stereo track's
+    ///   does ([`Session::add_track`]), reusing the channels a removed instrument held; a MIDI
+    ///   output has no audio to join.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownTrack`], [`Error::KindMismatch`] for an audio track, or
+    /// [`Error::InvalidValue`] for a MIDI output port longer than [`crate::MAX_PORT_BYTES`].
+    pub fn set_destination(
+        &mut self,
+        track: TrackId,
+        destination: Destination,
+    ) -> Result<NodeId, Error> {
         let target = self.state.track(track).ok_or(Error::UnknownTrack(track))?;
         if target.kind != TrackKind::Midi {
             return Err(Error::KindMismatch);
@@ -327,16 +358,18 @@ impl Session {
             let Endpoint::Node(node) = connection.to else {
                 continue;
             };
-            let is_instrument = self
-                .state
-                .node(node)
-                .is_some_and(|n| matches!(n.kind, NodeKind::Instrument { .. }));
+            let is_destination = self.state.node(node).is_some_and(|n| {
+                matches!(
+                    n.kind,
+                    NodeKind::Instrument { .. } | NodeKind::MidiOut { .. }
+                )
+            });
             let shared = self
                 .state
                 .connections
                 .iter()
                 .any(|c| c.to == Endpoint::Node(node) && c.from != Endpoint::Track(track));
-            if is_instrument && !shared && !removed.contains(&node) {
+            if is_destination && !shared && !removed.contains(&node) {
                 removed.push(node);
             }
         }
@@ -350,16 +383,20 @@ impl Session {
         let mut edits: Vec<Edit> = leaving.iter().map(|&id| Edit::Disconnect(id)).collect();
         edits.extend(removed.iter().map(|&node| Edit::RemoveNode(node)));
         let id = NodeId(self.take_id());
-        edits.push(Edit::InsertNode {
-            index: self.state.nodes.len() - removed.len(),
-            node: Node::new(
-                id,
+        let (kind, audible) = match destination {
+            Destination::Instrument(kind) => (
                 NodeKind::Instrument {
-                    kind: kind.to_owned(),
+                    kind,
                     parameters: BTreeMap::new(),
                     zones: Vec::new(),
                 },
+                true,
             ),
+            Destination::MidiOut { port, name } => (NodeKind::MidiOut { port, name }, false),
+        };
+        edits.push(Edit::InsertNode {
+            index: self.state.nodes.len() - removed.len(),
+            node: Node::new(id, kind),
         });
         let events = Connection::new(
             self.new_connection_id(),
@@ -372,14 +409,16 @@ impl Session {
             index: self.state.connections.len() - leaving.len(),
             connection: events,
         });
-        // One more connection than `leaving` accounts for is now at the end of the list.
-        let mut joining = self.join_output_edits(Endpoint::Node(id), Layout::Stereo, &leaving);
-        for edit in &mut joining {
-            if let Edit::Connect { index, .. } = edit {
-                *index += 1;
+        if audible {
+            // One more connection than `leaving` accounts for is now at the end of the list.
+            let mut joining = self.join_output_edits(Endpoint::Node(id), Layout::Stereo, &leaving);
+            for edit in &mut joining {
+                if let Edit::Connect { index, .. } = edit {
+                    *index += 1;
+                }
             }
+            edits.extend(joining);
         }
-        edits.extend(joining);
         self.apply(Edit::Batch(edits))?;
         Ok(id)
     }

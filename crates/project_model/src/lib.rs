@@ -10,7 +10,7 @@
 //!
 //! The state also holds the routing (`docs/architecture/project.md` "Routing"): each track is a
 //! source [`Endpoint`], the project has one stereo output, and [`Node`]s (effects named by a
-//! stable id with parameter values by name, buses, feedback delays) are joined by
+//! stable id with parameter values by name, buses, feedback delays, MIDI outputs) are joined by
 //! [`Connection`]s.
 //!
 //! Every change is an [`Edit`] that, when applied, returns the edit reversing it exactly. A
@@ -62,10 +62,10 @@ pub use midi::{Control, Note, Sequence};
 pub use notation::{Accidental, Key, Letter, Mode, Notation};
 pub use range::{Excerpt, Lane, Range};
 pub use routing::{
-    Connection, ConnectionId, Endpoint, JoinSpec, MAX_BOARD_COORDINATE, MAX_WIRE_POINTS, Node,
-    NodeId, NodeKind, Position, Side, WireHandle, WirePoint, WireShape,
+    Connection, ConnectionId, Endpoint, JoinSpec, MAX_BOARD_COORDINATE, MAX_PORT_BYTES,
+    MAX_WIRE_POINTS, Node, NodeId, NodeKind, Position, Side, WireHandle, WirePoint, WireShape,
 };
-pub use session::Session;
+pub use session::{Destination, Session};
 pub use state::{Clip, CurveLane, State, Track};
 pub use tempo::{Beat, Grid, Tempo};
 pub use types::{AudioFile, ClipId, CurveId, Source, TrackId, TrackKind};

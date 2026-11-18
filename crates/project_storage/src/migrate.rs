@@ -27,6 +27,7 @@ const MIGRATIONS: &[Migration] = &[
     nine_to_ten,
     ten_to_eleven,
     eleven_to_twelve,
+    twelve_to_thirteen,
 ];
 
 /// Version 2 added optional `from_side` and `to_side` to connections (ADR-0058); a version 1
@@ -103,6 +104,12 @@ fn six_to_seven(mut value: Value) -> Result<Value, String> {
 /// Version 12 added an optional `tune` to each sampler zone (ADR-0158); a version 11 zone is
 /// untuned, which its absence means, so nothing changes.
 fn eleven_to_twelve(value: Value) -> Result<Value, String> {
+    Ok(value)
+}
+
+/// Version 13 added MIDI output nodes (ADR-0162); no version 12 file can hold one, so nothing
+/// changes.
+fn twelve_to_thirteen(value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
@@ -290,7 +297,9 @@ fn depth(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::{SavedAccidental, SavedKey, SavedLayout, SavedLetter, SavedTrackKind};
+    use crate::format::{
+        SavedAccidental, SavedKey, SavedLayout, SavedLetter, SavedNodeKind, SavedTrackKind,
+    };
     use std::error::Error as StdError;
 
     const V1: &str =
@@ -486,6 +495,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_migrates_version_twelve_unchanged_and_reads_midi_out()
+    -> Result<(), Box<dyn StdError>> {
+        let file = |version: u32, nodes: &str| {
+            format!(
+                r#"{{"format_version":{version},"sample_rate":48000,"tracks":[],"connections":[],
+                "nodes":[{nodes}],"tempo":{{"bpm":90.0,"beats_per_bar":3,"beat_unit":4}},
+                "curves":[],"sequences":[]}}"#
+            )
+        };
+        let bus = r#"{"id":1,"kind":{"kind":"bus","layout":"mono"},"curve_ports":{}}"#;
+        let v12 = parse(Path::new("p"), &file(12, bus))?;
+        assert_eq!(v12.format_version, FORMAT_VERSION);
+        assert_eq!(
+            v12.nodes[0].kind,
+            SavedNodeKind::Bus {
+                layout: SavedLayout::Mono
+            }
+        );
+        let out = r#"{"id":1,"kind":{"kind":"midi_out","port":"CoreMIDI:7","name":"Synth"},"curve_ports":{}}"#;
+        let v13 = parse(Path::new("p"), &file(13, out))?;
+        assert_eq!(
+            v13.nodes[0].kind,
+            SavedNodeKind::MidiOut {
+                port: "CoreMIDI:7".to_owned(),
+                name: "Synth".to_owned()
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_depth_ignores_brackets_in_strings() {
         assert_eq!(depth(r#"{"a":[[1]],"b":"[[[[{{"}"#), 3);
         assert_eq!(depth(r#"["\"[[[" ]"#), 1);
@@ -493,12 +533,12 @@ mod tests {
 
     #[test]
     fn test_parse_refuses_newer_and_deep_files() {
-        let newer = V1.replace("\"format_version\":1", "\"format_version\":13");
+        let newer = V1.replace("\"format_version\":1", "\"format_version\":14");
         assert!(matches!(
             parse(Path::new("p"), &newer),
             Err(Error::NewerFormat {
-                found: 13,
-                supported: 12,
+                found: 14,
+                supported: 13,
                 ..
             })
         ));

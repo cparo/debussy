@@ -100,6 +100,18 @@ fn event_sources(mirror: &Mirror) -> BTreeMap<TrackId, GraphNodeId> {
         .collect()
 }
 
+/// The event sinks of every MIDI output node in `mirror`.
+fn event_sinks(mirror: &Mirror) -> BTreeMap<NodeId, GraphNodeId> {
+    mirror
+        .nodes
+        .iter()
+        .filter_map(|(key, node)| match (key, &node.target.shape) {
+            (Key::Node(id), Shape::MidiOut) => Some((*id, node.id)),
+            _ => None,
+        })
+        .collect()
+}
+
 impl Bridge {
     /// The graph for `state`, committed, and its runner for the real-time side. Sampler zones
     /// are read through `samples`.
@@ -268,6 +280,11 @@ impl Bridge {
     /// Each MIDI track's event source.
     pub fn event_sources(&self) -> BTreeMap<TrackId, GraphNodeId> {
         event_sources(&self.mirror)
+    }
+
+    /// Each MIDI output node's event sink (`docs/architecture/engine.md` "MIDI output").
+    pub fn event_sinks(&self) -> BTreeMap<NodeId, GraphNodeId> {
+        event_sinks(&self.mirror)
     }
 
     /// The running handle of parameter `name` on routing node `node`, for setting live while a

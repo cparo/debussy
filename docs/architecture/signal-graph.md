@@ -137,6 +137,10 @@ stand-in with the same ports ([ADR-0147](../adrs/0147-instruments-are-their-own-
 A sampler instrument also carries its zones, the key map of audio files it plays
 ([ADR-0154](../adrs/0154-sampler-zones-are-saved-on-the-instrument-node-and.md)). The built-in instruments are described in `docs/architecture/instruments.md`.
 
+Notes for an external port reach the graph's edge at a MIDI output node, an event sink with one
+event input; the engine sends what reaches it to its endpoint (`docs/architecture/engine.md`
+"MIDI output") ([ADR-0162](../adrs/0162-midi-tracks-reach-hardware-synths-through-midi.md)).
+
 ## Delay compensation
 
 Each node reports the latency it adds. The engine delays parallel paths so that signals meeting at

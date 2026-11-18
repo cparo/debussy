@@ -1,6 +1,7 @@
 //! The per-block step that playback and offline render share, so both produce the same samples.
 
 use dsp::FOLD_DOWN_GAIN;
+use midi::OutProducer;
 use signal_graph::{NodeId, Runner};
 
 use crate::capture::{ArmedMidi, ArmedTrack, HeldNotes, Input, replaces_clips};
@@ -30,13 +31,18 @@ pub(crate) struct Live<'a> {
     pub(crate) capture_frame: u64,
     /// Live MIDI events the event sources refused in this block; set by [`run`].
     pub(crate) overflows: u64,
+    /// Event sinks routed to MIDI outputs, and their queues.
+    pub(crate) midi_outs: &'a mut [(NodeId, OutProducer)],
 }
+
+/// Nanoseconds in a second.
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// Runs one block of `left.len()` frames: fills each track's source from its feeds (or with
 /// silence unless `playing`), each MIDI track's event source with its events (see
 /// [`MidiTrack::fill`]; an armed MIDI track's clips are muted while recording), puts armed
 /// tracks' input and live MIDI input in their sources and takes (see [`Live`]), runs the plan with the sources at timeline frame `position` (where curves are
-/// read), and writes the output sink to `left` and `right`, folded to mono on both if `mono`.
+/// read), queues what routed event sinks carry for their MIDI outputs, and writes the output sink to `left` and `right`, folded to mono on both if `mono`.
 /// Real-time safe if the feeds and sinks are.
 ///
 /// # Errors
@@ -49,7 +55,7 @@ pub(crate) fn run(
     output: NodeId,
     tracks: &mut [TrackFeeds],
     midi: &mut [MidiTrack],
-    live: Option<&mut Live<'_>>,
+    mut live: Option<&mut Live<'_>>,
     position: i64,
     playing: bool,
     mono: bool,
@@ -104,11 +110,14 @@ pub(crate) fn run(
             }
         }
     }
-    if let Some(live) = live {
+    if let Some(live) = live.as_deref_mut() {
         feed_armed(runner, live, frames);
         feed_midi(runner, live, frames);
     }
     runner.process();
+    if let Some(live) = live {
+        send_midi_outs(runner, live);
+    }
     match runner.sink(output) {
         Some(block) => {
             let first = block.channel(0).unwrap_or(&[]);
@@ -185,6 +194,22 @@ fn feed_midi(runner: &mut Runner, live: &mut Live<'_>, frames: usize) {
         );
     }
     live.overflows += refused;
+}
+
+/// Queues each event leaving a routed event sink for its MIDI output, stamped with the host time
+/// its frame is due: the block's host time plus the frame's offset at the sample rate. A full
+/// queue drops the event; [`OutProducer::take_dropped`] counts it.
+fn send_midi_outs(runner: &Runner, live: &mut Live<'_>) {
+    let rate = u64::from(live.sample_rate.max(1));
+    for (sink, producer) in live.midi_outs.iter_mut() {
+        let Some(events) = runner.event_sink(*sink) else {
+            continue;
+        };
+        for event in events.iter() {
+            let offset = u64::from(event.frame).saturating_mul(NANOS_PER_SECOND) / rate;
+            producer.push(live.host_nanos.saturating_add(offset), event.message);
+        }
+    }
 }
 
 /// Copies `from` into `to`, padding with silence.

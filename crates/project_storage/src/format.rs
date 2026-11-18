@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The format version this build writes. Older versions are migrated on load (`migrate`).
-pub const FORMAT_VERSION: u32 = 12;
+pub const FORMAT_VERSION: u32 = 13;
 
 /// A whole project file: `project.json`, or a named version with `name` and `saved_at` set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -302,6 +302,12 @@ pub(crate) enum SavedNodeKind {
     FeedbackDelay {
         layout: SavedLayout,
         seconds: f64,
+    },
+    /// Since version 13: a MIDI output, by platform endpoint id and the name shown while it is
+    /// missing.
+    MidiOut {
+        port: String,
+        name: String,
     },
 }
 

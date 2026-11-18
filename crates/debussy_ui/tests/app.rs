@@ -17,12 +17,12 @@ use audio_engine::{
 };
 use debussy_ui::{
     App, ClickPreferences, DeviceChoice, DialogFocus, DialogMessage, ExportKind, ExportSettings,
-    ImportedTrack, Menu, Message, MidiInputChoice, MidiTakeFile, MixerFocus, NewNode, PassMarker,
-    Recovered, RecoveredMidi, RecoveredPass, Renaming, SPECTRUM_BANDS, SampleImport, Selection,
-    Services, Spectrum, TakeFiles, TakeStatus, Takes,
+    ImportedTrack, Menu, Message, MidiInputChoice, MidiOutRoute, MidiOutputChoice, MidiTakeFile,
+    MixerFocus, NewNode, PassMarker, Recovered, RecoveredMidi, RecoveredPass, Renaming,
+    SPECTRUM_BANDS, SampleImport, Selection, Services, Spectrum, TakeFiles, TakeStatus, Takes,
 };
 use engine_bridge::{Bridge, Samples};
-use midi::{LIVE_QUEUE_CAPACITY, LiveInput};
+use midi::{LIVE_QUEUE_CAPACITY, LiveInput, OutProducer};
 use platform_interfaces::test_doubles::FakeMidi;
 use platform_interfaces::{MidiDevices, MidiDirection, MidiEndpointId, MidiInput};
 use project_model::{
@@ -78,6 +78,12 @@ struct Calls {
     recovered: Option<Recovered>,
     /// The MIDI endpoints each opened, in order.
     midi_opened: Vec<String>,
+    /// The MIDI output routes each sync was given.
+    midi_out_syncs: Vec<Vec<MidiOutRoute>>,
+    /// MIDI output nodes reported lost.
+    midi_out_lost: Vec<NodeId>,
+    /// Each MIDI output endpoint's remembered latency.
+    midi_out_latency: BTreeMap<String, f32>,
     /// The MIDI endpoints, shared with the fake services.
     midi: FakeMidi,
     /// The click preferences remembered.
@@ -417,6 +423,56 @@ impl Services for Fake {
 
     fn close_midi_input(&mut self, track: TrackId) {
         self.midi_open.remove(&track);
+    }
+
+    fn midi_outputs(&mut self) -> Vec<MidiOutputChoice> {
+        self.midi
+            .endpoints()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.direction == MidiDirection::Output && e.online)
+            .map(|e| MidiOutputChoice {
+                id: e.id.0,
+                name: e.name,
+            })
+            .collect()
+    }
+
+    fn sync_midi_outputs(&mut self, routes: &[MidiOutRoute]) -> Vec<(GraphNodeId, OutProducer)> {
+        let mut calls = self.calls.borrow_mut();
+        let new = routes
+            .iter()
+            .filter(|r| {
+                !calls
+                    .midi_out_syncs
+                    .last()
+                    .is_some_and(|last| last.iter().any(|l| l.node == r.node && l.sink == r.sink))
+            })
+            .filter_map(|r| Some((r.sink, midi::out_channel(16).ok()?.0)))
+            .collect();
+        calls.midi_out_syncs.push(routes.to_vec());
+        new
+    }
+
+    fn midi_output_lost(&mut self, node: NodeId) -> bool {
+        self.calls.borrow().midi_out_lost.contains(&node)
+    }
+
+    fn midi_output_latency(&mut self, port: &str) -> f32 {
+        self.calls
+            .borrow()
+            .midi_out_latency
+            .get(port)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    fn set_midi_output_latency(&mut self, port: &str, ms: f32) -> Result<(), String> {
+        self.calls
+            .borrow_mut()
+            .midi_out_latency
+            .insert(port.to_owned(), ms);
+        Ok(())
     }
 
     fn take_messages(&mut self, take: usize) -> Vec<(u64, [u8; 3])> {
@@ -4064,5 +4120,58 @@ fn test_a_join_making_a_cycle_is_refused_and_the_node_stays() -> Result<(), Box<
     drag_node_on_board(&mut app, a, near, false)?;
     assert!(app.status().is_some(), "the cycle is reported");
     assert_eq!(app.session().state(), &before);
+    Ok(())
+}
+
+#[test]
+fn test_midi_out_menu_routes_the_track_and_undo_unroutes_it() -> Result<(), Box<dyn Error>> {
+    let ((mut app, _processor, calls, _), track) = app_with_midi()?;
+    calls
+        .borrow()
+        .midi
+        .add_endpoint("out", "Synth", MidiDirection::Output);
+    app.update(Message::OpenMenu(Menu::Track(track)));
+    app.update(Message::SetMidiOut(
+        track,
+        MidiOutputChoice {
+            id: "out".to_owned(),
+            name: "Synth".to_owned(),
+        },
+    ));
+    assert_eq!(app.status(), None);
+    let state = app.session().state();
+    let node = state
+        .connections_of(Endpoint::Track(track))
+        .find_map(|c| c.to.node())
+        .ok_or("the track feeds nothing")?;
+    assert!(matches!(
+        state.node(node).map(|n| &n.kind),
+        Some(NodeKind::MidiOut { port, name }) if port == "out" && name == "Synth"
+    ));
+    let routed = calls
+        .borrow()
+        .midi_out_syncs
+        .last()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        routed
+            .iter()
+            .map(|r| (r.node, r.port.as_str()))
+            .collect::<Vec<_>>(),
+        [(node, "out")]
+    );
+    // The latency goes to the app settings, not the project.
+    let revision = app.session().revision();
+    app.update(Message::Select(Some(Selection::Node(node))));
+    app.update(Message::NodeText(node, "4.5".to_owned()));
+    app.update(Message::CommitNodeText);
+    assert_eq!(calls.borrow().midi_out_latency.get("out"), Some(&4.5));
+    assert_eq!(app.session().revision(), revision);
+    app.update(Message::NodeText(node, "-3".to_owned()));
+    app.update(Message::CommitNodeText);
+    assert_eq!(calls.borrow().midi_out_latency.get("out"), Some(&4.5));
+    app.update(Message::Undo);
+    assert_eq!(calls.borrow().midi_out_syncs.last().map(Vec::len), Some(0));
     Ok(())
 }

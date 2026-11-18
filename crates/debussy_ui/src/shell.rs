@@ -592,6 +592,24 @@ mod tests {
             Err("no MIDI here".into())
         }
         fn close_midi_input(&mut self, _: project_model::TrackId) {}
+        fn midi_outputs(&mut self) -> Vec<crate::MidiOutputChoice> {
+            Vec::new()
+        }
+        fn sync_midi_outputs(
+            &mut self,
+            _: &[crate::MidiOutRoute],
+        ) -> Vec<(NodeId, midi::OutProducer)> {
+            Vec::new()
+        }
+        fn midi_output_lost(&mut self, _: project_model::NodeId) -> bool {
+            false
+        }
+        fn midi_output_latency(&mut self, _: &str) -> f32 {
+            0.0
+        }
+        fn set_midi_output_latency(&mut self, _: &str, _: f32) -> Result<(), String> {
+            Ok(())
+        }
         fn start_takes(&mut self, _: &[(String, usize)], _: usize) -> Result<crate::Takes, String> {
             Err("no recording here".into())
         }

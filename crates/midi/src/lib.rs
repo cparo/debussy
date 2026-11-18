@@ -12,6 +12,8 @@
 //!   buffer of them with a fixed capacity.
 //! - `live`: [`TimedMessage`] and the lock-free [`LiveProducer`]/[`LiveInput`] pair that carries
 //!   live input to the audio thread and stamps it with frames (ADR-0146).
+//! - `outgoing`: [`Outgoing`] and the lock-free [`OutProducer`]/[`OutConsumer`] pair that
+//!   carries events leaving the graph to a MIDI output's sender (ADR-0162).
 //! - `journal`: the byte format of a MIDI take's crash journal, `take-N.midilog` (ADR-0151).
 
 #![forbid(unsafe_code)]
@@ -20,6 +22,7 @@ mod buffer;
 mod journal;
 mod live;
 mod message;
+mod outgoing;
 
 /// The real-time guard's allocator, for the unit tests that run code inside the guard.
 #[cfg(test)]
@@ -33,3 +36,4 @@ pub use journal::{
 };
 pub use live::{LIVE_QUEUE_CAPACITY, LiveInput, LiveProducer, TimedMessage, channel};
 pub use message::{Kind, Message};
+pub use outgoing::{OUT_QUEUE_CAPACITY, OutConsumer, OutProducer, Outgoing, out_channel};

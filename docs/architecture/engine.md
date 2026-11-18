@@ -109,6 +109,24 @@ track on the same event source keeps its input and its sounding notes. Messages 
 refuses are counted with the clip players'
 ([ADR-0150](../adrs/0150-midi-tracks-are-recorded-and-monitored-through-a.md)).
 
+## MIDI output
+
+Each MIDI output node's event sink is routed to a bounded lock-free queue, drained by one sender
+thread that owns every open MIDI output. Each block, the audio thread queues every event leaving a
+routed sink with the host time its frame is due: the callback's host time plus
+`frame × 10⁹ / sample rate`. A full queue drops and counts the event. The sender sends each at
+`due + output delay − port latency`, and never before now, where the output delay is the device's
+output latency plus one device block and the port latency is the endpoint's setting
+(`docs/architecture/settings.md` "Application settings").
+
+Stop and pause queue a silence into every MIDI output; the sender sends sustain off (CC 64 = 0)
+then All Notes Off (CC 123) on each of the 16 channels, just after the latest time it has
+scheduled on that output. Removing a MIDI output's route, changing its endpoint and quitting send
+that silence at once and again after the latest scheduled time, then close the output. A send the
+platform refuses because the endpoint went away marks the output lost and drops what reaches it;
+the first send that succeeds after that, or a retry every 500 ms, sends the silence first. Offline
+render ignores MIDI outputs ([ADR-0162](../adrs/0162-midi-tracks-reach-hardware-synths-through-midi.md)).
+
 ## Transport
 
 Play starts from the playhead. Pause holds the playhead; stop returns it to where playback last
