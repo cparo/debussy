@@ -28,8 +28,38 @@ pub struct EffectKind {
     pub curve: Option<CurveFn>,
 }
 
-/// Every built-in effect kind, in the order a menu lists them.
+/// Every built-in effect kind, in the order a menu lists them: alphabetical by name.
 pub const EFFECTS: &[EffectKind] = &[
+    EffectKind {
+        id: "amplifier",
+        name: "Amplifier",
+        build: build_amplifier,
+        curve: Some(amplifier::curve),
+    },
+    EffectKind {
+        id: "chorus",
+        name: "Chorus",
+        build: build_chorus,
+        curve: Some(chorus::curve),
+    },
+    EffectKind {
+        id: "delay",
+        name: "Delay",
+        build: build_delay,
+        curve: Some(delay::impulse_curve),
+    },
+    EffectKind {
+        id: "dynamics",
+        name: "Dynamics",
+        build: build_dynamics,
+        curve: Some(dynamics::curve),
+    },
+    EffectKind {
+        id: "flanger",
+        name: "Flanger",
+        build: build_flanger,
+        curve: Some(flanger::curve),
+    },
     EffectKind {
         id: "high-pass",
         name: "High-pass filter",
@@ -49,40 +79,10 @@ pub const EFFECTS: &[EffectKind] = &[
         curve: Some(parametric::curve),
     },
     EffectKind {
-        id: "dynamics",
-        name: "Dynamics",
-        build: build_dynamics,
-        curve: Some(dynamics::curve),
-    },
-    EffectKind {
-        id: "amplifier",
-        name: "Amplifier",
-        build: build_amplifier,
-        curve: Some(amplifier::curve),
-    },
-    EffectKind {
-        id: "delay",
-        name: "Delay",
-        build: build_delay,
-        curve: Some(delay::impulse_curve),
-    },
-    EffectKind {
         id: "reverb",
         name: "Reverb",
         build: build_reverb,
         curve: Some(reverb::impulse_curve),
-    },
-    EffectKind {
-        id: "chorus",
-        name: "Chorus",
-        build: build_chorus,
-        curve: Some(chorus::curve),
-    },
-    EffectKind {
-        id: "flanger",
-        name: "Flanger",
-        build: build_flanger,
-        curve: Some(flanger::curve),
     },
 ];
 
@@ -305,6 +305,12 @@ pub fn parameter_infos(kind: &str) -> Option<Vec<ParameterInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_effects_are_listed_alphabetically() {
+        let names: Vec<String> = EFFECTS.iter().map(|k| k.name.to_lowercase()).collect();
+        assert!(names.is_sorted(), "{names:?}");
+    }
 
     #[test]
     fn test_every_listed_kind_is_built_and_named() {

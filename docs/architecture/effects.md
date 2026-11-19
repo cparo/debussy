@@ -10,21 +10,25 @@ state.
 
 | Kind id | Name shown | Section |
 |---|---|---|
+| `amplifier` | Amplifier | "Amplifier" |
+| `chorus` | Chorus | `docs/architecture/modulation.md` "Chorus" |
+| `delay` | Delay | `docs/architecture/delay-and-reverb.md` "Delay" |
+| `dynamics` | Dynamics | "Dynamics" |
+| `flanger` | Flanger | `docs/architecture/modulation.md` "Flanger" |
 | `high-pass` | High-pass filter | "High-pass and low-pass filters" |
 | `low-pass` | Low-pass filter | "High-pass and low-pass filters" |
 | `parametric-eq` | Parametric EQ | "Parametric equaliser" |
-| `dynamics` | Dynamics | "Dynamics" |
-| `amplifier` | Amplifier | "Amplifier" |
-| `delay` | Delay | `docs/architecture/delay-and-reverb.md` "Delay" |
 | `reverb` | Reverb | `docs/architecture/delay-and-reverb.md` "Reverb" |
-| `chorus` | Chorus | `docs/architecture/modulation.md` "Chorus" |
-| `flanger` | Flanger | `docs/architecture/modulation.md` "Flanger" |
 
 A kind id this build does not know plays as silence and keeps its saved values.
 
 Each kind is one `EffectKind` row in `audio_effects::EFFECTS`: its kind id, its name, the function
 that builds it, and its curve function (see "Effect curves")
 ([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)).
+
+`EFFECTS` and `instruments::INSTRUMENTS` are sorted by name shown, ignoring case, and every menu
+lists kinds in that order
+([ADR-0163](../adrs/0163-menus-list-effect-and-instrument-kinds.md)).
 
 ## Effect presets
 
