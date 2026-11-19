@@ -7,8 +7,8 @@ project [README](README.md).
 
 Recurring workflows are skills in `.claude/skills/`, each a short procedure over the guides and the
 `cargo xtask` helpers beneath it: `new-adr` (record a design decision), `flag-risk` (stop and
-raise a concern for human review), and `patent-research` (gather patent evidence before building an
-algorithm in-house). Use them rather than doing these steps by hand.
+raise a concern for human review), `patent-research` (gather patent evidence before building an
+algorithm in-house), and `user-docs` (write or edit the user guide in `docs/user/`). Use them rather than doing these steps by hand.
 
 ## When to Stop and Ask a Human
 
