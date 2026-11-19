@@ -104,92 +104,9 @@ is, after the count-in.
 
 ## Routing and effects
 
-The board on the right shows how tracks reach the output. Click **+** at its top right to add a
-mixer, bus, feedback delay, effect or instrument, drag from an output to an input to connect, and click a node
-to open its controls. Changes are heard while you drag; letting go makes one undo step.
-
-- **High-pass filter** removes what is below its **Cutoff** (default 80 Hz), such as rumble;
-  **Low-pass filter** removes what is above it (default 12 kHz), such as hiss. **Order** sets how
-  steeply: each step adds 6 dB per octave, from 1 (gentle) to 8 (48 dB per octave). Order can only
-  be changed while stopped or paused.
-- **Parametric EQ** has four bands, each off until you turn it **On**. Pick its **Type**: **bell**
-  boosts or cuts around its **Frequency**, **low shelf** and **high shelf** everything below or
-  above it, and **notch** removes a narrow range. **Gain** is the boost or cut in dB (±24), and
-  **Q** sets the width: higher is narrower. An optional **High-pass** before the bands and
-  **Low-pass** after them work like the filters above; each is off until you turn it on.
-- **Dynamics** is a compressor, expander, gate or limiter: pick one from **Preset** in its
-  controls to set everything at once (one undo step), then adjust. **Preset** shows **Custom** once
-  you change a setting. Above the **Threshold**, **Ratio above** turns the level down (∞ holds it at
-  the threshold); below it, **Ratio below** turns it further down, by no more than **Range**.
-  **Knee** softens the bend. Turn the **Ceiling** on to keep the output under a level; it is a soft
-  limit and can pass it by a fraction of a dB. **Attack**, **Release** and **Hold** set how fast
-  the effect reacts, **Detector** follows peaks or the average (RMS), and **Makeup** adds gain
-  back. **Lookahead** lets it react before a peak arrives, delaying the sound by that much; it can
-  only be changed while stopped or paused.
-- **Amplifier** adds distortion. **Drive** pushes the sound into the **Shape**: **warm** rounds the
-  peaks off gently, **crunched** a little harder, and **harsh** clips them flat. **Bias** makes the
-  distortion lopsided, which adds a richer, tube-like tone. **Makeup** sets the output level. The
-  picture shows how input becomes output, with red lines at full scale. **Oversampling** (2× or 4×)
-  reduces harsh, out-of-tune overtones at high drive, at the cost of more CPU and a short delay; it
-  can only be changed while stopped or paused.
-- **Delay** repeats the sound. Set the **Time** in milliseconds, or turn on **Sync** to pick a
-  **Note** length (with a **Feel** of straight, dotted or triplet) that follows the project tempo
-  instead; only the controls for the choice you made are shown.
-  **Feedback** sets how much of each repeat comes back again. In **ping-pong** mode the repeats
-  bounce between left and right; **Offset** delays the right side a little more or less than the
-  left. Turn on the **Low-pass** to make each repeat darker than the last, and **Saturation** to
-  let loud repeats distort gently instead of growing. **Mix** sets how loud the repeats are
-  against the original. Presets: Slapback, Ping-pong and Dub echo.
-- **Reverb** adds a sense of space. **Algorithm** picks **room**, dense and natural, or
-  **plate**, smooth and bright; it can only be changed while stopped or paused, and the change
-  starts the new one silent. **Pre-delay** holds the reverb back a moment after the sound.
-  **Decay** is how long the reverb takes to die away, and **Damping** makes high frequencies die
-  sooner: lower it for a darker, softer space. **Mix** sets how loud the reverb is against the
-  original.
-- **Chorus** thickens the sound with copies of it whose pitch wavers slowly. **Rate** sets how
-  fast they waver, or turn on **Sync** to pick a **Note** length and **Feel** that follow the
-  project tempo. **Shape** is how the wavering moves: **sine** smoothly, **triangle** evenly.
-  **Delay** is how far behind the copies sit and **Depth** how far they swing; **Voices** sets how
-  many copies (1 to 4). **Spread** moves the left and right copies apart, from none (mono) to
-  180°, for a wider sound. **Mix** sets how loud the copies are against the original. Presets:
-  Subtle and Wide.
-- **Flanger** gives a sweeping, jet-like whoosh. It has the same **Rate**, **Sync**, **Shape**
-  and **Spread** controls as the chorus. **Delay** is a very short time behind the original and
-  **Depth** how far the sweep swings around it. **Feedback** makes the sweep ring: positive
-  values sound hollow and bright, negative ones more metallic. **Mix** sets how loud the swept
-  copy is against the original. Presets: Jet and Metallic.
-- The **Delay** and **Reverb** pictures show what you would hear after a single click: its
-  level over time, left channel on top and right below, from full level down to −96 dB. The
-  spike at the start is the original sound; the delay's repeats are spikes after it and the
-  reverb's tail is a falling slope. The time across fits the settings.
-
-- **Synthesizer**, under **Instruments** in the **+** menu, turns notes into sound. Wire a MIDI
-  track's output to its input (the only input a MIDI track can reach) and its output to a mixer or
-  the outputs. Each voice mixes two oscillators (**Wave**: saw, pulse or triangle; **Octave**,
-  **Detune**, **Pulse width** for the pulse wave, and **Level**), then a **Filter** that removes
-  what is above its **Cutoff**; **Resonance** makes it ring at the cutoff. The **Filter
-  envelope** moves the cutoff by **Envelope amount** octaves each time a note starts, and the
-  **Amp envelope** shapes each note's loudness: **Attack** (rise), **Decay** (fall to the
-  **Sustain** level while the key is held) and **Release** (fade after the key is let go). Harder
-  playing is louder by **Amp velocity** and brighter by the filter's **Velocity amount**. The
-  **LFO** wobbles the pitch, cutoff or loudness at its **Rate** by its **Depth**. **Bend range**
-  sets how far the pitch wheel bends, in semitones, and **Voices** how many notes sound at once;
-  a note beyond that takes over the quietest or oldest one. The sustain pedal holds notes.
-
-- **Sampler**, also under **Instruments**, plays your own audio files from notes: a recorded
-  instrument across the keyboard, or a drum kit from a folder of samples. See
-  [The sampler](sampler.md) for how to set it up.
-
-- **MIDI Out** plays a MIDI track on a hardware synth (or another app, through the IAC bus).
-  Choose **MIDI Out: <port>** from the track's ≡ menu, or add **MIDI Out** from the **+** menu
-  and wire the track to it. Click the node to pick another port or set the port's **Latency
-  (ms)**: how long your synth takes to sound a note. Notes are sent that much early, so the synth's
-  audio, recorded back on an audio track, lines up with the notes. The latency is remembered on
-  this computer for that port, not in the project. Stop and pause silence the synth. If the port
-  is unplugged its name turns grey and notes are dropped until it is back. Export doesn't include
-  hardware synths: record them back to audio first.
-
-Effect and instrument settings are saved with the project.
+The board on the right shows how tracks reach the output: add mixers, buses, effects and
+instruments, wire them together and open their controls there. See
+[Routing and effects](effects.md) for each effect's and instrument's controls.
 
 ## Exporting
 
