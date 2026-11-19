@@ -31,7 +31,9 @@ built.
      each.
 4. **Keep notes out of cells.** Something that applies across rows (presets, what the picture
    shows) goes in a short paragraph or list after the table. Mark a stopped-only control with
-   `*` after its name in the Control cell; the page says once, near its top, what `*` means.
+   `*` after its name in the Control cell, and explain the mark once as a footnote at the
+   bottom of the page, after a `---` rule (`\* Can only be changed while stopped or paused.`),
+   as print would; never earlier in the page.
 5. **Describe a shared control once** (chorus and flanger share Rate, Sync, Shape and Spread) and
    link to it from the others, giving only the defaults that differ.
 6. **Keep the voice.** Plain second person, short sentences, **bold** for every UI label exactly

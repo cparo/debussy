@@ -5,8 +5,6 @@ mixer, bus, feedback delay, effect or instrument, drag from an output to an inpu
 click a node to open its controls. Changes are heard while you drag; letting go makes one undo step.
 Effect and instrument settings are saved with the project.
 
-Controls marked * can only be changed while stopped or paused.
-
 ## High-pass and low-pass filters
 
 **High-pass filter** removes what is below its cutoff, such as rumble; **Low-pass filter** removes
@@ -209,3 +207,7 @@ Plays a MIDI track on a hardware synth (or another app, through the IAC bus).
 
 Stop and pause silence the synth. Export doesn't include hardware synths: record them back to audio
 first.
+
+---
+
+\* Can only be changed while stopped or paused.
