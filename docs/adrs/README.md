@@ -186,4 +186,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0160](0160-a-wire-s-input-end-is-dragged-to-another-input-to.md) | A wire's input end is dragged to another input to move the connection | Accepted | [Patch board](../architecture/patch-board.md#patch-board) |
 | [ADR-0161](0161-butting-nodes-joins-their-aligned-ports.md) | Butting nodes joins their aligned ports | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 | [ADR-0162](0162-midi-tracks-reach-hardware-synths-through-midi.md) | MIDI tracks reach hardware synths through MIDI output nodes, sent ahead by a per-port latency | Accepted | [MIDI output](../architecture/engine.md#midi-output) |
+| [ADR-0163](0163-menus-list-effect-and-instrument-kinds.md) | Menus list effect and instrument kinds alphabetically by name | Accepted | [Effect kinds](../architecture/effects.md#effect-kinds) |
 

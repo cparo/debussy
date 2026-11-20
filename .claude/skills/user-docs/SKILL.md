@@ -17,7 +17,10 @@ built.
    stopped or paused; `shown_while` means it appears only for another control's value.
 2. **Give each component a heading** (effect, instrument, dialog) when it has two or more
    controls, then one or two sentences of prose: what it does and when to reach for it. Name its
-   presets there.
+   presets there. Sibling headings for like items (effects, instruments, dialogs) go in
+   alphabetical order, as the app's menus list them; group unlike items under their own parent
+   heading (**Effects**, **Instruments**) rather than interleaving them. Sections that follow a
+   workflow (setting up, then using) keep that order.
 3. **Choose the layout by the controls' shape.**
    - **Table** when every control has the same facts: a range, a default and an effect. Columns
      are always **Control | Range | Default | What it does**. The unit goes with the number

@@ -20,17 +20,17 @@ pub struct InstrumentKind {
     pub build: fn() -> Option<Box<dyn Node>>,
 }
 
-/// Every built-in instrument kind, in the order a menu lists them.
+/// Every built-in instrument kind, in the order a menu lists them: alphabetical by name.
 pub const INSTRUMENTS: &[InstrumentKind] = &[
-    InstrumentKind {
-        id: "synth",
-        name: "Synthesizer",
-        build: build_synth,
-    },
     InstrumentKind {
         id: "sampler",
         name: "Sampler",
         build: build_empty_sampler,
+    },
+    InstrumentKind {
+        id: "synth",
+        name: "Synthesizer",
+        build: build_synth,
     },
 ];
 
@@ -76,6 +76,12 @@ mod tests {
     use signal_graph::PortType;
 
     use super::*;
+
+    #[test]
+    fn test_instruments_are_listed_alphabetically() {
+        let names: Vec<String> = INSTRUMENTS.iter().map(|k| k.name.to_lowercase()).collect();
+        assert!(names.is_sorted(), "{names:?}");
+    }
 
     #[test]
     fn test_instrument_unknown_kind_is_none() {
