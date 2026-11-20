@@ -1561,7 +1561,7 @@ fn test_every_moved_wire_end_can_be_dragged_back() -> Result<(), Box<dyn Error>>
     let (curve, _) = only_curve(&app)?;
     app.update(Message::StepMixerChannels(mixer, 1));
     app.update(Message::StepMixerChannels(mixer, 1));
-    app.update(Message::AddNode(debussy_ui::NewNode::Bus));
+    app.update(Message::AddNode(debussy_ui::NewNode::FeedbackDelay));
     app.update(Message::Select(Some(Selection::Node(mixer))));
     app.update(Message::Dialog(DialogMessage::TogglePort(GAIN.to_owned())));
     app.update(Message::Dialog(DialogMessage::TogglePort(
@@ -1719,14 +1719,14 @@ fn test_one_side_of_a_filter_pair_drags_to_a_mixer_and_back() -> Result<(), Box<
 #[test]
 fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
-    app.update(Message::AddNode(debussy_ui::NewNode::Bus));
-    let bus = app.session().state().nodes.last().ok_or("no node")?.id;
-    assert_eq!(app.selection(), Some(debussy_ui::Selection::Node(bus)));
+    app.update(Message::AddNode(debussy_ui::NewNode::FeedbackDelay));
+    let delay = app.session().state().nodes.last().ok_or("no node")?.id;
+    assert_eq!(app.selection(), Some(debussy_ui::Selection::Node(delay)));
     let _ = app.view();
     // A drag shows live and records one step on drop.
     for x in [10.0, 50.0, 90.0] {
         app.update(Message::DragNode(
-            bus,
+            delay,
             project_model::Position { x, y: 30.0 },
             false,
         ));
@@ -1735,36 +1735,36 @@ fn test_nodes_are_added_moved_and_deleted_as_steps() -> Result<(), Box<dyn Error
     let shown = board
         .nodes
         .iter()
-        .find(|n| n.id == bus)
+        .find(|n| n.id == delay)
         .ok_or("not shown")?;
     assert_eq!(shown.rect.x, 90.0);
     assert_eq!(
-        app.session().state().node(bus).and_then(|n| n.position),
+        app.session().state().node(delay).and_then(|n| n.position),
         None
     );
     app.update(Message::Drop);
     assert_eq!(
-        app.session().state().node(bus).and_then(|n| n.position),
+        app.session().state().node(delay).and_then(|n| n.position),
         Some(project_model::Position { x: 90.0, y: 30.0 })
     );
     app.update(Message::DragOutput(200.0));
     app.update(Message::Drop);
     assert_eq!(app.session().state().output_y, Some(200.0));
     // Delete is ignored while typing.
-    app.update(Message::NodeText(bus, "1".into()));
+    app.update(Message::NodeText(delay, "1".into()));
     app.update(Message::DeleteSelection);
-    assert!(app.session().state().node(bus).is_some());
+    assert!(app.session().state().node(delay).is_some());
     // Delete leaves a selected node alone: its dialog's confirmation deletes it.
-    app.update(Message::Select(Some(debussy_ui::Selection::Node(bus))));
+    app.update(Message::Select(Some(debussy_ui::Selection::Node(delay))));
     app.update(Message::DeleteSelection);
-    assert!(app.session().state().node(bus).is_some());
-    app.update(Message::DeleteNode(bus));
-    assert!(app.session().state().node(bus).is_none());
+    assert!(app.session().state().node(delay).is_some());
+    app.update(Message::DeleteNode(delay));
+    assert!(app.session().state().node(delay).is_none());
     // Undo the delete, the output move, the node move and the add.
     for _ in 0..4 {
         app.update(Message::Undo);
     }
-    assert!(app.session().state().node(bus).is_none());
+    assert!(app.session().state().node(delay).is_none());
     assert_eq!(app.session().state().output_y, None);
     Ok(())
 }

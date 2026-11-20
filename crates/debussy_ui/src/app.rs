@@ -54,8 +54,6 @@ const DRAG_COLUMNS: u64 = 4;
 pub enum NewNode {
     /// A two-channel mixer.
     Mixer,
-    /// A stereo bus.
-    Bus,
     /// A stereo feedback delay of a quarter second.
     FeedbackDelay,
     /// A built-in effect of this kind id (`audio_effects::EFFECTS`), at its defaults.
@@ -73,7 +71,6 @@ impl NewNode {
                 channels: 2,
                 parameters: std::collections::BTreeMap::new(),
             },
-            NewNode::Bus => NodeKind::Bus(Layout::Stereo),
             NewNode::FeedbackDelay => NodeKind::FeedbackDelay {
                 layout: Layout::Stereo,
                 seconds: 0.25,

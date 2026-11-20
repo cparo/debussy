@@ -1,7 +1,7 @@
 # Routing and effects
 
 The board on the right shows how tracks reach the output. Click **+** at its top right to add a
-mixer, bus, feedback delay, effect or instrument, drag from an output to an input to connect, and
+mixer, feedback delay, effect or instrument, drag from an output to an input to connect, and
 click a node to open its controls. Changes are heard while you drag; letting go makes one undo step.
 Effect and instrument settings are saved with the project.
 

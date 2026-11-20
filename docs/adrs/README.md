@@ -187,4 +187,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0161](0161-butting-nodes-joins-their-aligned-ports.md) | Butting nodes joins their aligned ports | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 | [ADR-0162](0162-midi-tracks-reach-hardware-synths-through-midi.md) | MIDI tracks reach hardware synths through MIDI output nodes, sent ahead by a per-port latency | Accepted | [MIDI output](../architecture/engine.md#midi-output) |
 | [ADR-0163](0163-menus-list-effect-and-instrument-kinds.md) | Menus list effect and instrument kinds alphabetically by name | Accepted | [Effect kinds](../architecture/effects.md#effect-kinds) |
+| [ADR-0164](0164-the-board-s-menu-no-longer-adds-a-bus.md) | The board's + menu no longer adds a bus | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 
