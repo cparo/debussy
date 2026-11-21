@@ -1270,7 +1270,6 @@ impl App {
             Menu::Device => self.device_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),
-                Entry::item("Bus", Some(Message::AddNode(NewNode::Bus))),
                 Entry::item(
                     "Feedback delay",
                     Some(Message::AddNode(NewNode::FeedbackDelay)),

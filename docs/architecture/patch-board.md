@@ -71,8 +71,9 @@ Editing ([ADR-0061](../adrs/0061-node-positions-and-the-outputs-height-are-saved
   selected wire, except while text is being typed; a node is deleted only through its dialog
   ([ADR-0108](../adrs/0108-a-node-dialog-s-delete-button-is-in-its-tab-cycle.md)). A click on empty board clears the selection and
   closes the dialog.
-- The "+" at the board's top right adds a two-channel mixer, a stereo bus, a stereo feedback
-  delay, or, below a separator, each built-in effect at its defaults, by the name shown in
-  `docs/architecture/effects.md` "Effect kinds". A node's title is that name.
+- The "+" at the board's top right adds a two-channel mixer, a stereo feedback delay, or, below a
+  separator, each built-in effect at its defaults, by the name shown in
+  `docs/architecture/effects.md` "Effect kinds". A node's title is that name. It does not add a
+  bus ([ADR-0164](../adrs/0164-the-board-s-menu-no-longer-adds-a-bus.md)).
 
 ([ADR-0060](../adrs/0060-the-window-is-laid-out-as-top-bar-track-pane.md))
