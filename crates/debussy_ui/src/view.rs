@@ -1270,20 +1270,15 @@ impl App {
             Menu::Device => self.device_menu(),
             Menu::AddNode => vec![
                 Entry::item("Mixer", Some(Message::AddNode(NewNode::Mixer))),
-                Entry::item(
-                    "Feedback delay",
-                    Some(Message::AddNode(NewNode::FeedbackDelay)),
-                ),
                 Entry::item("MIDI Out", Some(Message::AddNode(NewNode::MidiOut))),
                 Entry::Separator,
             ]
             .into_iter()
-            .chain(audio_effects::EFFECTS.iter().map(|effect| {
-                Entry::item(
-                    effect.name,
-                    Some(Message::AddNode(NewNode::Effect(effect.id))),
-                )
-            }))
+            .chain(
+                effect_entries()
+                    .into_iter()
+                    .map(|(name, node)| Entry::item(name, Some(Message::AddNode(node)))),
+            )
             .chain(
                 (!instruments::INSTRUMENTS.is_empty())
                     .then_some(Entry::Separator)
@@ -1301,6 +1296,18 @@ impl App {
     }
 }
 
+/// The "+" menu's effects group: each built-in effect and the feedback delay, by name ignoring
+/// case (ADR-0163).
+fn effect_entries() -> Vec<(&'static str, NewNode)> {
+    let mut entries: Vec<(&'static str, NewNode)> = audio_effects::EFFECTS
+        .iter()
+        .map(|effect| (effect.name, NewNode::Effect(effect.id)))
+        .chain(std::iter::once(("Feedback", NewNode::FeedbackDelay)))
+        .collect();
+    entries.sort_by_key(|(name, _)| name.to_lowercase());
+    entries
+}
+
 /// The part of frames `from..to` in the view of `span` frames from `start`, as fractions of the
 /// lane's width; `None` if none of it is visible.
 fn band(from: u64, to: u64, start: u64, span: u64) -> Option<(f32, f32)> {
@@ -1315,6 +1322,18 @@ fn band(from: u64, to: u64, start: u64, span: u64) -> Option<(f32, f32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_effect_entries_sorted_with_feedback() {
+        let entries = effect_entries();
+        let names: Vec<String> = entries
+            .iter()
+            .map(|(name, _)| name.to_lowercase())
+            .collect();
+        assert!(names.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(entries.contains(&("Feedback", NewNode::FeedbackDelay)));
+        assert_eq!(entries.len(), audio_effects::EFFECTS.len() + 1);
+    }
 
     #[test]
     fn test_band_clips_to_the_view() {
