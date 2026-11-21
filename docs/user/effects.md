@@ -1,7 +1,7 @@
 # Routing and effects
 
 The board on the right shows how tracks reach the output. Click **+** at its top right to add a
-mixer, feedback delay, effect or instrument, drag from an output to an input to connect, and
+mixer, effect or instrument, drag from an output to an input to connect, and
 click a node to open its controls. Changes are heard while you drag; letting go makes one undo step.
 Effect and instrument settings are saved with the project.
 
@@ -84,6 +84,24 @@ you change a setting.
 | **Detector** | peak, RMS | peak | Follows peaks or the average level. |
 | **Lookahead*** | 0 – 10 ms | 0 ms | Reacts before a peak arrives, delaying the sound by as much. |
 | **Makeup** | −24 – +24 dB | 0 dB | Adds gain back. |
+
+### Feedback
+
+Lets a wire loop back. A wire from a node back into an earlier node in the chain makes a loop,
+and the board refuses a loop unless it passes through a **Feedback** node. It passes the sound
+through unchanged, just later, so each trip around the loop arrives **Time** later than the one
+before.
+
+- **Time (seconds)** — typed in, 0.001 – 10 s (default 0.25 s). Shorter values are raised to
+  1 ms. Changing it clears whatever is still travelling around the loop. Very short times make
+  the computer work harder.
+
+It has no level control, so put a **Mixer** in the loop and turn its channel down to keep the
+repeats from growing. It carries audio only: MIDI cannot loop.
+
+For repeating echoes, wire a track into a **Mixer** and the **Mixer** to the output, then wire
+the **Mixer** into a **Feedback** node and the **Feedback** node back into the **Mixer**'s second
+channel. That channel's level sets how quickly the echoes fade.
 
 ### Flanger
 

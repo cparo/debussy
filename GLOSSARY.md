@@ -79,7 +79,8 @@ _Avoid_: group, submix
 A tap that sends a copy of a track's signal to a bus, alongside its main path.
 
 **Feedback delay**:
-The delay a user sets wherever the routing loops back on itself. Every loop needs one.
+The delay a user sets wherever the routing loops back on itself. Every loop needs one. The app
+shows it as **Feedback**.
 
 **Stereo mix**:
 The project's output. The **mono mix** is derived from it.

@@ -144,7 +144,7 @@ pub fn title(kind: &NodeKind) -> String {
     match kind {
         NodeKind::Mixer { .. } => "Mixer".to_owned(),
         NodeKind::Bus(_) => "Bus".to_owned(),
-        NodeKind::FeedbackDelay { .. } => "Feedback delay".to_owned(),
+        NodeKind::FeedbackDelay { .. } => "Feedback".to_owned(),
         NodeKind::Effect { kind, .. } => {
             audio_effects::display_name(kind).map_or_else(|| kind.clone(), str::to_owned)
         }
