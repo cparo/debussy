@@ -203,3 +203,6 @@ fade does not jump.
 "Effect nodes"). Its `Shaper` curve (see "Effect curves") is the static curve
 `makeup·(f(drive·x + bias) − f(bias))`. There are no presets
 ([ADR-0102](../adrs/0102-the-amplifier-is-a-memoryless-waveshaper-with-pre.md)).
+
+The amplifier has no tone controls; tone is shaped by `parametric-eq` nodes placed before or after it
+on the patch board ([ADR-0166](../adrs/0166-the-amplifier-has-no-tone-stack-tone-is-shaped.md)).

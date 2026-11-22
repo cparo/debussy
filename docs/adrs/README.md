@@ -189,4 +189,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0163](0163-menus-list-effect-and-instrument-kinds.md) | Menus list effect and instrument kinds alphabetically by name | Accepted | [Effect kinds](../architecture/effects.md#effect-kinds) |
 | [ADR-0164](0164-the-board-s-menu-no-longer-adds-a-bus.md) | The board's + menu no longer adds a bus | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 | [ADR-0165](0165-the-feedback-delay-is-shown-as-feedback-among-the.md) | The feedback delay is shown as Feedback, among the effects | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
+| [ADR-0166](0166-the-amplifier-has-no-tone-stack-tone-is-shaped.md) | The amplifier has no tone stack; tone is shaped with EQ nodes on the patch board | Accepted | [Amplifier](../architecture/effects.md#amplifier) |
 
