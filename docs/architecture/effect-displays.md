@@ -41,7 +41,7 @@ undefined values go.
 
 ## Equaliser displays
 
-A `Response` curve, which `high-pass`, `low-pass` and `parametric-eq` give, is drawn by
+A `Response` curve, which `parametric-eq` gives, is drawn by
 `crates/debussy_ui/src/response_display.rs`. It plots the exact magnitude response their parameter
 values ask for at the project's sample rate (`docs/architecture/effects.md` "Frequency
 response"):

@@ -8,7 +8,6 @@ use crate::chorus::{self, Chorus};
 use crate::curve::CurveFn;
 use crate::delay::{self, Delay};
 use crate::dynamics::{self, Dynamics};
-use crate::filters::{self, Butterworth, Response};
 use crate::flanger::{self, Flanger};
 use crate::parametric::{self, ParametricEq};
 use crate::reverb::{self, Reverb};
@@ -16,9 +15,9 @@ use crate::reverb::{self, Reverb};
 /// A built-in effect kind.
 #[derive(Debug, Clone, Copy)]
 pub struct EffectKind {
-    /// The stable id saved projects name it by, such as `"high-pass"`.
+    /// The stable id saved projects name it by, such as `"parametric-eq"`.
     pub id: &'static str,
-    /// The name shown for it, such as `"High-pass filter"`.
+    /// The name shown for it, such as `"Equalizer"`.
     pub name: &'static str,
     /// Builds a new effect of this kind at its defaults, ready to add to a graph; `None` if it
     /// cannot be made. Allocates.
@@ -55,28 +54,16 @@ pub const EFFECTS: &[EffectKind] = &[
         curve: Some(dynamics::curve),
     },
     EffectKind {
+        id: "parametric-eq",
+        name: "Equalizer",
+        build: build_parametric_eq,
+        curve: Some(parametric::curve),
+    },
+    EffectKind {
         id: "flanger",
         name: "Flanger",
         build: build_flanger,
         curve: Some(flanger::curve),
-    },
-    EffectKind {
-        id: "high-pass",
-        name: "High-pass filter",
-        build: build_high_pass,
-        curve: Some(filters::high_pass_curve),
-    },
-    EffectKind {
-        id: "low-pass",
-        name: "Low-pass filter",
-        build: build_low_pass,
-        curve: Some(filters::low_pass_curve),
-    },
-    EffectKind {
-        id: "parametric-eq",
-        name: "Parametric EQ",
-        build: build_parametric_eq,
-        curve: Some(parametric::curve),
     },
     EffectKind {
         id: "reverb",
@@ -240,17 +227,7 @@ pub fn preset(name: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|p| p.name == name)
 }
 
-/// A new high-pass filter.
-fn build_high_pass() -> Option<Box<dyn Node>> {
-    Some(Box::new(Butterworth::new(Response::HighPass).ok()?))
-}
-
-/// A new low-pass filter.
-fn build_low_pass() -> Option<Box<dyn Node>> {
-    Some(Box::new(Butterworth::new(Response::LowPass).ok()?))
-}
-
-/// A new parametric equaliser.
+/// A new equaliser.
 fn build_parametric_eq() -> Option<Box<dyn Node>> {
     Some(Box::new(ParametricEq::new().ok()?))
 }
@@ -357,7 +334,7 @@ mod tests {
         assert_eq!(presets("delay").count(), 3);
         assert_eq!(presets("chorus").count(), 2);
         assert_eq!(presets("flanger").count(), 2);
-        assert_eq!(presets("low-pass").count(), 0);
+        assert_eq!(presets("parametric-eq").count(), 0);
         let gate = preset("Gate").ok_or("no gate")?;
         assert_eq!((gate.get("range"), gate.get("knee")), (Some(80.0), None));
         Ok(())

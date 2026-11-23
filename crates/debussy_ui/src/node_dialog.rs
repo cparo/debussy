@@ -930,40 +930,40 @@ mod tests {
 
     #[test]
     fn test_update_stopped_only_changes_refused_while_playing() -> TestResult {
-        let mut f = Fixture::effect("high-pass")?;
+        let mut f = Fixture::effect("parametric-eq")?;
         let node = f.node;
         f.playing = true;
         let refused = [Command::Status(
-            "Pause or stop playback to change the order.".to_owned(),
+            "Pause or stop playback to change the high-pass order.".to_owned(),
         )];
         let slide = DialogMessage::Slide {
             node,
-            name: "order".to_owned(),
+            name: "high-pass order".to_owned(),
             value: 4.0,
         };
         assert_eq!(f.send(slide), refused);
         assert_eq!(f.dialog.live(), None);
         let set = DialogMessage::SetParameter {
             node,
-            name: "order".to_owned(),
+            name: "high-pass order".to_owned(),
             value: 4.0,
         };
         assert_eq!(f.send(set.clone()), refused);
         // The cutoff may move while playing.
         let cutoff = DialogMessage::SetParameter {
             node,
-            name: "cutoff".to_owned(),
+            name: "high-pass cutoff".to_owned(),
             value: 120.0,
         };
-        assert_eq!(f.send(cutoff), [edit(node, "cutoff", 120.0)]);
+        assert_eq!(f.send(cutoff), [edit(node, "high-pass cutoff", 120.0)]);
         f.playing = false;
-        assert_eq!(f.send(set), [edit(node, "order", 4.0)]);
+        assert_eq!(f.send(set), [edit(node, "high-pass order", 4.0)]);
         Ok(())
     }
 
     #[test]
     fn test_update_preset_is_one_batch_and_another_kinds_is_ignored() -> TestResult {
-        let mut f = Fixture::effect("low-pass")?;
+        let mut f = Fixture::effect("parametric-eq")?;
         let node = f.node;
         let compressor = DialogMessage::ApplyPreset {
             node,

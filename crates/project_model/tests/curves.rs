@@ -107,16 +107,16 @@ fn test_assign_curve_port_takes_the_lowest_free_number() -> TestResult {
 fn test_assign_curve_port_refuses_parameters_that_cannot_be_automated() -> TestResult {
     let mut session = Session::new();
     let node = mixer(&mut session, 1)?;
-    let filter = effect(&mut session, "high-pass")?;
+    let filter = effect(&mut session, "parametric-eq")?;
     let unknown = effect(&mut session, "eq")?;
     let bus = session.add_node(NodeKind::Bus(audio_buffers::Layout::Mono))?;
     let refused = [
-        (node, "channel 1 mode"), // a choice
-        (node, "channel 2 gain"), // no such channel
-        (filter, "order"),        // stopped-only and whole numbers
-        (filter, "no such"),      // no such parameter
-        (unknown, "frequency"),   // an effect this build does not know
-        (bus, "gain"),            // a node with no parameters
+        (node, "channel 1 mode"),    // a choice
+        (node, "channel 2 gain"),    // no such channel
+        (filter, "high-pass order"), // stopped-only and whole numbers
+        (filter, "no such"),         // no such parameter
+        (unknown, "frequency"),      // an effect this build does not know
+        (bus, "gain"),               // a node with no parameters
     ];
     for (target, name) in refused {
         assert_eq!(
@@ -126,7 +126,7 @@ fn test_assign_curve_port_refuses_parameters_that_cannot_be_automated() -> TestR
         );
     }
     // A logarithmic parameter may be automated.
-    assert_eq!(session.assign_curve_port(filter, "cutoff")?, 1);
+    assert_eq!(session.assign_curve_port(filter, "high-pass cutoff")?, 1);
     let port = Edit::AssignCurvePort {
         node,
         parameter: "channel 1 gain".into(),

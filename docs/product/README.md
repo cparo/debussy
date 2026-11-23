@@ -49,7 +49,7 @@ To better support "tracking" of individual parts for a project, we'll want to pr
 The value of this application can be enhanced by introducing the following core set of effects
 filters:
 
-* high-pass, low-pass, and fully-parametric equalizers
+* a fully-parametric equalizer with high-pass and low-pass stages
 * compressor/limiter/gate
 * amplifier simulation (gain and tone modification)
 * delay/reverb

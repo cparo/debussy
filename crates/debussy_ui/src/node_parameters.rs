@@ -531,9 +531,9 @@ mod tests {
     #[test]
     fn test_preset_edits_ignore_another_kinds_preset() -> TestResult {
         let (_, compressor, _) = dynamics()?;
-        let infos = audio_effects::parameter_infos("low-pass").ok_or("no low-pass")?;
+        let infos = audio_effects::parameter_infos("parametric-eq").ok_or("no equaliser")?;
         let stored = BTreeMap::new();
-        let view = NodeParameters::new(NODE, Some("low-pass"), &infos, &stored, None, false);
+        let view = NodeParameters::new(NODE, Some("parametric-eq"), &infos, &stored, None, false);
         assert_eq!(view.preset_edits(compressor)?, Vec::new());
         let mixer = NodeParameters::new(NODE, None, &infos, &stored, None, false);
         assert_eq!(mixer.preset_edits(compressor)?, Vec::new());

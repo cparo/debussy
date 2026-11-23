@@ -6,10 +6,10 @@
 //! - `mixer`: [`Mixer`], channels of gain, pan and mute/solo summed to stereo
 //!   (`docs/architecture/signal-graph.md` "Mixer"), and [`mixer_parameter_infos`], a mixer's
 //!   parameters declared without building one.
-//! - `filters`: [`Butterworth`], the high-pass and low-pass filters
-//!   (`docs/architecture/effects.md` "High-pass and low-pass filters").
-//! - `parametric`: [`ParametricEq`], the 4-band equaliser with optional high-pass and low-pass
-//!   stages (`docs/architecture/effects.md` "Parametric equaliser").
+//! - `filters`: the Butterworth cascade behind the equaliser's pass stages and the amplifier's
+//!   DC filter, and [`Response`], the side of the cutoff it passes.
+//! - `parametric`: [`ParametricEq`], the equaliser: four parametric bands framed by optional
+//!   high-pass and low-pass stages (`docs/architecture/effects.md` "Equalizer").
 //! - `dynamics`: [`Dynamics`], the compressor, expander, gate and limiter, and
 //!   [`TransferCurve`], its curve (`docs/architecture/effects.md` "Dynamics").
 //! - `amplifier`: [`Amplifier`], a pre-amp, waveshaper and DC filter with optional
@@ -64,7 +64,7 @@ pub use curve::{Curve, CurveFn, curve};
 pub use delay::{Delay, MAX_DELAY_MS, MAX_OFFSET_MS};
 pub use dynamics::{Dynamics, MAX_LOOKAHEAD_MS, MAX_RATIO, TransferCurve};
 pub use error::Error;
-pub use filters::{Butterworth, MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
+pub use filters::{MAX_CUTOFF, MAX_ORDER, MIN_CUTOFF, Response};
 pub use gain_spectrogram::{
     MAX_COLUMNS as SPECTROGRAM_MAX_COLUMNS, SPAN as SPECTROGRAM_SPAN, SpectrogramCurve,
 };

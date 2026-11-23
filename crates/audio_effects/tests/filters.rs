@@ -1,5 +1,5 @@
-//! The high-pass, low-pass and parametric equaliser run in a processing graph, every block inside
-//! the real-time guard: what they pass and reject, and that moving their controls does not click.
+//! The equaliser runs in a processing graph, every block inside the real-time guard: what its
+//! bands and pass stages pass and reject, and that moving their controls does not click.
 
 use std::error::Error as StdError;
 use std::f32::consts::TAU;
@@ -156,38 +156,19 @@ fn assert_no_click(
     Ok(())
 }
 
-#[test]
-fn test_high_pass_passes_highs_and_rejects_lows() -> TestResult {
-    let mut rig = Rig::new("high-pass")?;
-    rig.set("cutoff", 1_000.0)?;
-    rig.set("order", 4.0)?;
-    rig.render(5_000.0, 4_800)?;
-    assert!(level_db(&rig.render(5_000.0, 4_800)?).abs() < 0.1);
-    rig.render(250.0, 9_600)?;
-    // Two octaves below a 4-pole cutoff: about 48 dB down.
-    let low = level_db(&rig.render(250.0, 9_600)?);
-    assert!((-50.0..-45.0).contains(&low), "{low}");
-    Ok(())
+/// An equaliser with only its `side` pass stage on, and that stage's parameter names.
+fn pass_stage(side: Response) -> Result<(Rig, impl Fn(PassControl) -> String), Box<dyn StdError>> {
+    let rig = Rig::new("parametric-eq")?;
+    let name = move |control| pass_parameter_name(side, control);
+    rig.set(&name(PassControl::Enabled), 1.0)?;
+    Ok((rig, name))
 }
 
 #[test]
-fn test_low_pass_passes_lows_and_rejects_highs() -> TestResult {
-    let mut rig = Rig::new("low-pass")?;
-    rig.set("cutoff", 1_000.0)?;
-    rig.render(200.0, 9_600)?;
-    assert!(level_db(&rig.render(200.0, 9_600)?).abs() < 0.1);
-    rig.render(4_000.0, 4_800)?;
-    // Two octaves above a 2-pole cutoff: about 24 dB down.
-    let high = level_db(&rig.render(4_000.0, 4_800)?);
-    assert!((-26.0..-22.0).contains(&high), "{high}");
-    Ok(())
-}
-
-#[test]
-fn test_order_change_applies_while_stopped() -> TestResult {
-    let mut rig = Rig::new("low-pass")?;
-    rig.set("cutoff", 1_000.0)?;
-    rig.set("order", 8.0)?;
+fn test_pass_stage_order_change_applies_while_stopped() -> TestResult {
+    let (mut rig, name) = pass_stage(Response::LowPass)?;
+    rig.set(&name(PassControl::Cutoff), 1_000.0)?;
+    rig.set(&name(PassControl::Order), 8.0)?;
     rig.render(2_000.0, 9_600)?;
     // An octave above an 8-pole cutoff: about 48 dB down.
     let high = level_db(&rig.render(2_000.0, 4_800)?);
@@ -196,22 +177,32 @@ fn test_order_change_applies_while_stopped() -> TestResult {
 }
 
 #[test]
-fn test_cutoff_sweep_does_not_click() -> TestResult {
-    let mut rig = Rig::new("high-pass")?;
-    rig.set("order", 8.0)?;
-    assert_no_click(&mut rig, 1_000.0, |rig| rig.set("cutoff", 900.0))?;
-    assert_no_click(&mut rig, 1_000.0, |rig| rig.set("cutoff", 20.0))?;
-    let mut rig = Rig::new("low-pass")?;
-    assert_no_click(&mut rig, 1_000.0, |rig| rig.set("cutoff", 1_200.0))
+fn test_pass_stage_cutoff_sweep_does_not_click() -> TestResult {
+    let (mut rig, name) = pass_stage(Response::HighPass)?;
+    rig.set(&name(PassControl::Order), 8.0)?;
+    assert_no_click(&mut rig, 1_000.0, |rig| {
+        rig.set(&name(PassControl::Cutoff), 900.0)
+    })?;
+    assert_no_click(&mut rig, 1_000.0, |rig| {
+        rig.set(&name(PassControl::Cutoff), 20.0)
+    })?;
+    let (mut rig, name) = pass_stage(Response::LowPass)?;
+    assert_no_click(&mut rig, 1_000.0, |rig| {
+        rig.set(&name(PassControl::Cutoff), 1_200.0)
+    })
 }
 
 #[test]
 fn test_click_check_catches_an_instant_order_change() -> TestResult {
     // The order changes only while stopped, so it switches at once, from rest; while playing
     // that would click, and the check must see it.
-    let mut rig = Rig::new("high-pass")?;
-    rig.set("cutoff", 900.0)?;
-    assert!(assert_no_click(&mut rig, 1_000.0, |rig| rig.set("order", 8.0)).is_err());
+    let (mut rig, name) = pass_stage(Response::HighPass)?;
+    rig.set(&name(PassControl::Cutoff), 900.0)?;
+    assert!(
+        assert_no_click(&mut rig, 1_000.0, |rig| rig
+            .set(&name(PassControl::Order), 8.0))
+        .is_err()
+    );
     Ok(())
 }
 
@@ -304,11 +295,5 @@ fn test_replacing_a_node_keeps_its_values() -> TestResult {
         .replace_node(rig.node, effect("parametric-eq").ok_or("unknown kind")?)?;
     rig.graph.commit()?;
     assert_eq!(rig.get(&gain)?, -6.5);
-    let mut rig = Rig::new("high-pass")?;
-    rig.set("cutoff", 440.0)?;
-    rig.graph
-        .replace_node(rig.node, effect("high-pass").ok_or("unknown kind")?)?;
-    rig.graph.commit()?;
-    assert_eq!(rig.get("cutoff")?, 440.0);
     Ok(())
 }
