@@ -1,5 +1,5 @@
-//! The 4-band parametric equaliser with optional high-pass and low-pass stages
-//! (`docs/architecture/effects.md` "Parametric equaliser").
+//! The equaliser: four parametric bands framed by optional high-pass and low-pass stages
+//! (`docs/architecture/effects.md` "Equalizer").
 
 use audio_buffers::Layout;
 use dsp::{Svf, SvfCoefficients};
@@ -456,7 +456,7 @@ impl BandState {
 /// sample while they move. Turning a band on or off, or changing its type, morphs its
 /// coefficients over `signal_graph::RAMP_SECONDS`; turning a pass stage on or off crossfades it
 /// with its input over the same time. A band or stage that is off is skipped. A pass stage's
-/// order, like [`crate::Butterworth`]'s, takes effect at once, from rest.
+/// order takes effect at once, from rest.
 pub struct ParametricEq {
     high_pass: PassStage,
     bands: Vec<Band>,
@@ -752,6 +752,37 @@ mod tests {
             .magnitude_db(12_000.0)
             .ok_or("above Nyquist")?;
         assert!((at + 3.0103).abs() < 0.01, "{at}");
+        Ok(())
+    }
+
+    #[test]
+    fn test_curve_pass_stage_is_3db_down_at_the_cutoff_and_slopes_by_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (side, cutoff, far) in [
+            (Response::LowPass, 200.0, 1_600.0),
+            (Response::HighPass, 2_000.0, 250.0),
+        ] {
+            for order in 1..=8 {
+                let name = |control| pass_parameter_name(side, control);
+                #[allow(clippy::cast_precision_loss)] // a small order
+                let changes = [
+                    (name(PassControl::Enabled), 1.0),
+                    (name(PassControl::Cutoff), cutoff),
+                    (name(PassControl::Order), order as f32),
+                ];
+                let response = response(&borrowed(&changes))?;
+                let at = response.magnitude_db(cutoff).ok_or("above Nyquist")?;
+                assert!((at + 3.0103).abs() < 0.01, "{side:?} {order}: {at}");
+                // Three octaves from the cutoff, an octave's fall is close to 6 dB per pole.
+                let a = response.magnitude_db(far).ok_or("above Nyquist")?;
+                let b = response
+                    .magnitude_db(if far > cutoff { far * 2.0 } else { far / 2.0 })
+                    .ok_or("above Nyquist")?;
+                #[allow(clippy::cast_precision_loss)]
+                let expected = 6.02 * order as f32;
+                assert!(((a - b) / expected - 1.0).abs() < 0.12, "{side:?} {order}");
+            }
+        }
         Ok(())
     }
 

@@ -85,6 +85,27 @@ you change a setting.
 | **Lookahead*** | 0 – 10 ms | 0 ms | Reacts before a peak arrives, delaying the sound by as much. |
 | **Makeup** | −24 – +24 dB | 0 dB | Adds gain back. |
 
+### Equalizer
+
+Shapes the tone with four bands, and can cut rumble or hiss with a filter at each end.
+
+- **Band 1** to **Band 4** — each is **Disabled** until you click it to **Enabled**.
+
+  | Control | Range | Default | What it does |
+  |---|---|---|---|
+  | **Type** | bell, low shelf, high shelf, notch | bell | **Bell** boosts or cuts around the frequency, the shelves everything below or above it, and **notch** removes a narrow range. |
+  | **Frequency** | 20 Hz – 20 kHz | 100 Hz, 500 Hz, 2 kHz, 8 kHz | Where the band works. |
+  | **Gain** | −24 – +24 dB | 0 dB | The boost or cut. |
+  | **Q** | 0.1 – 18 | 0.71 | The width: higher is narrower. |
+
+- **High-pass**, before the bands, removes what is below its cutoff, such as rumble; **Low-pass**,
+  after them, removes what is above it, such as hiss. Each is **Disabled** until you turn it on.
+
+  | Control | Range | Default | What it does |
+  |---|---|---|---|
+  | **Cutoff** | 20 Hz – 20 kHz | 80 Hz (high-pass), 12 kHz (low-pass) | Where the filter starts cutting. |
+  | **Order*** | 1 – 8 | 2 | How steeply: each step adds 6 dB per octave, so 8 is 48 dB per octave. |
+
 ### Feedback
 
 Lets a wire loop back. A wire from a node back into an earlier node in the chain makes a loop,
@@ -115,33 +136,6 @@ Note 2/1, Shape triangle.
 | **Depth** | 0 – 100 % | 70 % | How far the sweep swings around the delay. |
 | **Feedback** | −95 – +95 % | 50 % | Makes the sweep ring: positive values sound hollow and bright, negative ones more metallic. |
 | **Mix** | 0 – 100 % | 50 % | How loud the swept copy is against the original. |
-
-### High-pass and low-pass filters
-
-**High-pass filter** removes what is below its cutoff, such as rumble; **Low-pass filter** removes
-what is above it, such as hiss.
-
-| Control | Range | Default | What it does |
-|---|---|---|---|
-| **Cutoff** | 20 Hz – 20 kHz | 80 Hz (high-pass), 12 kHz (low-pass) | Where the filter starts cutting. |
-| **Order*** | 1 – 8 | 2 | How steeply: each step adds 6 dB per octave, so 8 is 48 dB per octave. |
-
-### Parametric EQ
-
-Shapes the tone with four bands and an optional filter at each end.
-
-- **Band 1** to **Band 4** — each is **Disabled** until you click it to **Enabled**.
-
-  | Control | Range | Default | What it does |
-  |---|---|---|---|
-  | **Type** | bell, low shelf, high shelf, notch | bell | **Bell** boosts or cuts around the frequency, the shelves everything below or above it, and **notch** removes a narrow range. |
-  | **Frequency** | 20 Hz – 20 kHz | 100 Hz, 500 Hz, 2 kHz, 8 kHz | Where the band works. |
-  | **Gain** | −24 – +24 dB | 0 dB | The boost or cut. |
-  | **Q** | 0.1 – 18 | 0.71 | The width: higher is narrower. |
-
-- **High-pass**, before the bands, and **Low-pass**, after them — each **Disabled** until you turn
-  it on, then a **Cutoff** and **Order*** like the
-  [high-pass and low-pass filters](#high-pass-and-low-pass-filters).
 
 ### Reverb
 

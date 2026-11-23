@@ -1,13 +1,8 @@
-//! The Butterworth high-pass and low-pass filters (`docs/architecture/effects.md` "High-pass and
-//! low-pass filters").
+//! The Butterworth high-pass and low-pass cascade behind the equaliser's pass stages
+//! (`docs/architecture/effects.md` "Equalizer") and the amplifier's DC filter.
 
-use audio_buffers::Layout;
 use dsp::{OnePole, OnePoleCoefficients, Svf, SvfCoefficients, butterworth_q, prewarp};
-use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, Reading, Scale};
-
-use crate::curve::Curve;
-use crate::error::Error;
-use crate::response::{FrequencyResponse, butterworth_stages};
+use signal_graph::{ParameterInfo, Ramp, Reading, Scale};
 
 /// The lowest cutoff, in Hz.
 pub const MIN_CUTOFF: f32 = 20.0;
@@ -24,12 +19,12 @@ const DEFAULT_ORDER: f32 = 2.0;
 /// The two-pole sections of the highest order.
 const SECTIONS: usize = MAX_ORDER / 2;
 
-/// Which side of the cutoff a [`Butterworth`] passes.
+/// Which side of the cutoff a Butterworth cascade passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Response {
-    /// Passes what is above the cutoff. Kind id `"high-pass"`; default cutoff 80 Hz.
+    /// Passes what is above the cutoff; default cutoff 80 Hz.
     HighPass,
-    /// Passes what is below the cutoff. Kind id `"low-pass"`; default cutoff 12 kHz.
+    /// Passes what is below the cutoff; default cutoff 12 kHz.
     LowPass,
 }
 
@@ -51,8 +46,9 @@ struct Channel {
 }
 
 /// A prepared stereo Butterworth cascade: the ramped cutoff, the order, the coefficients for them
-/// and each channel's state. Shared by [`Butterworth`] and the parametric equaliser's high-pass
-/// and low-pass stages. Never allocates.
+/// and each channel's state: maximally flat, falling 6 dB per octave per pole beyond the cutoff,
+/// where it is 3 dB down. Shared by the equaliser's high-pass and low-pass stages and the
+/// amplifier's DC filter. Never allocates.
 pub(crate) struct Cascade {
     sample_rate: f32,
     /// The cutoff in log2(Hz), as ramped.
@@ -81,54 +77,6 @@ pub(crate) fn order_info(name: impl Into<String>) -> ParameterInfo {
     ParameterInfo::new(name, 1.0, max, DEFAULT_ORDER)
         .with_scale(Scale::Integer)
         .stopped_only()
-}
-
-/// A Butterworth filter: maximally flat, with no ripple, falling 6 dB per octave per pole beyond
-/// its cutoff, where it is 3 dB down. One stereo input and one stereo output.
-///
-/// Its parameters are `cutoff` (Hz, logarithmic, ramped in log frequency) and `order` (1 to
-/// [`MAX_ORDER`] poles). The order can change only while playback is stopped, so a change takes
-/// effect at once, from rest.
-pub struct Butterworth {
-    response: Response,
-    cutoff: Parameter,
-    order: Parameter,
-    running: Option<Cascade>,
-}
-
-impl Butterworth {
-    /// A filter passing `response`'s side of its default cutoff, of order 2. Allocates.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Parameter`] if a parameter cannot be made, which does not happen for the fixed
-    /// ranges here.
-    pub fn new(response: Response) -> Result<Self, Error> {
-        Ok(Butterworth {
-            response,
-            cutoff: Parameter::new(cutoff_info("cutoff", response))?,
-            order: Parameter::new(order_info("order"))?,
-            running: None,
-        })
-    }
-}
-
-/// The curve of a filter passing `response`'s side whose parameters stand at `values`, in the
-/// order [`Butterworth`] declares them (cutoff, order).
-fn curve(response: Response, values: &[f32], sample_rate: u32) -> Option<Curve> {
-    let &[cutoff, order] = <&[f32; 2]>::try_from(values).ok()?;
-    let stages = butterworth_stages(response, cutoff, order, sample_rate);
-    Some(Curve::Response(FrequencyResponse::new(sample_rate, stages)))
-}
-
-/// The curve of a `high-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
-pub(crate) fn high_pass_curve(values: &[f32], sample_rate: u32, _whole_note: f64) -> Option<Curve> {
-    curve(Response::HighPass, values, sample_rate)
-}
-
-/// The curve of a `low-pass` effect whose parameters stand at `values` (see [`crate::CurveFn`]).
-pub(crate) fn low_pass_curve(values: &[f32], sample_rate: u32, _whole_note: f64) -> Option<Curve> {
-    curve(Response::LowPass, values, sample_rate)
 }
 
 /// The coefficients of an `order`-pole Butterworth filter passing `response`'s side of `cutoff`
@@ -236,53 +184,6 @@ impl Cascade {
     }
 }
 
-impl Node for Butterworth {
-    fn inputs(&self) -> Vec<Port> {
-        vec![Port::audio("in", Layout::Stereo)]
-    }
-
-    fn outputs(&self) -> Vec<Port> {
-        vec![Port::audio("out", Layout::Stereo)]
-    }
-
-    fn parameters(&self) -> Vec<Parameter> {
-        vec![self.cutoff.clone(), self.order.clone()]
-    }
-
-    fn prepare(&mut self, sample_rate: u32, _max_frames: usize) {
-        self.running = Some(Cascade::new(
-            self.response,
-            self.cutoff.get(),
-            self.order.get(),
-            sample_rate,
-        ));
-    }
-
-    fn reset(&mut self) {
-        if let Some(running) = self.running.as_mut() {
-            running.reset();
-        }
-    }
-
-    fn process(&mut self, inputs: &Inputs<'_>, outputs: &mut Outputs<'_>) {
-        let response = self.response;
-        let Some(running) = self.running.as_mut() else {
-            return;
-        };
-        let Some((left, right)) = outputs.stereo_mut(0) else {
-            return;
-        };
-        running.set(response, self.cutoff.read(), self.order.get());
-        let (in_left, in_right) = (inputs.channel(0, 0), inputs.channel(0, 1));
-        let sample = |input: Option<&[f32]>, i: usize| input.and_then(|c| c.get(i)).copied();
-        for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-            running.tick(response);
-            *l = running.process(0, sample(in_left, i).unwrap_or(0.0));
-            *r = running.process(1, sample(in_right, i).unwrap_or(0.0));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,73 +197,13 @@ mod tests {
     }
 
     #[test]
-    fn test_curve_is_3db_down_at_the_cutoff_and_slopes_by_order()
-    -> Result<(), Box<dyn std::error::Error>> {
-        for (kind, cutoff, far) in [("low-pass", 200.0, 1_600.0), ("high-pass", 2_000.0, 250.0)] {
-            for order in 1..=8 {
-                #[allow(clippy::cast_precision_loss)] // a small order
-                let values = [cutoff, order as f32];
-                let Some(Curve::Response(response)) = crate::curve(kind, &values, 48_000, 96_000.0)
-                else {
-                    return Err("no response".into());
-                };
-                let at = response.magnitude_db(cutoff).ok_or("above Nyquist")?;
-                assert!((at + 3.0103).abs() < 0.01, "{kind} {order}: {at}");
-                // Three octaves from the cutoff, an octave's fall is close to 6 dB per pole.
-                let a = response.magnitude_db(far).ok_or("above Nyquist")?;
-                let b = response
-                    .magnitude_db(if far > cutoff { far * 2.0 } else { far / 2.0 })
-                    .ok_or("above Nyquist")?;
-                #[allow(clippy::cast_precision_loss)]
-                let expected = 6.02 * order as f32;
-                assert!(((a - b) / expected - 1.0).abs() < 0.12, "{kind} {order}");
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_new_declares_ports_and_parameters() -> Result<(), Error> {
-        for (response, cutoff) in [(Response::HighPass, 80.0), (Response::LowPass, 12_000.0)] {
-            let filter = Butterworth::new(response)?;
-            assert_eq!(filter.inputs(), vec![Port::audio("in", Layout::Stereo)]);
-            assert_eq!(filter.outputs(), vec![Port::audio("out", Layout::Stereo)]);
-            let infos: Vec<ParameterInfo> = filter
-                .parameters()
-                .iter()
-                .map(|p| p.info().clone())
-                .collect();
-            assert_eq!(infos[0].name, "cutoff");
-            assert_eq!(
-                (infos[0].min, infos[0].max, infos[0].default),
-                (20.0, 20_000.0, cutoff)
-            );
-            assert_eq!(infos[0].scale, Scale::Logarithmic);
-            assert_eq!(infos[0].unit, "Hz");
-            assert!(!infos[0].stopped_only);
-            assert_eq!(infos[1].name, "order");
-            assert_eq!(
-                (infos[1].min, infos[1].max, infos[1].default),
-                (1.0, 8.0, 2.0)
-            );
-            assert_eq!(infos[1].scale, Scale::Integer);
-            assert!(infos[1].stopped_only);
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_design_uses_one_pole_only_for_odd_orders() -> Result<(), Box<dyn std::error::Error>> {
-        let mut filter = Butterworth::new(Response::LowPass)?;
-        filter.order.set(1.0);
-        filter.prepare(48_000, 64);
-        let running = filter.running.as_mut().ok_or("not prepared")?;
+    fn test_process_uses_one_pole_only_for_odd_orders() {
         // Order 1 is the one-pole alone: its DC gain is 1 and it has no sections in use.
+        let mut cascade = Cascade::new(Response::LowPass, 1_000.0, 1.0, 48_000);
         let mut sum = 0.0;
         for _ in 0..48_000 {
-            sum = running.process(0, 1.0);
+            sum = cascade.process(0, 1.0);
         }
         assert!((sum - 1.0).abs() < 1e-4);
-        Ok(())
     }
 }

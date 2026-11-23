@@ -74,7 +74,7 @@ mod tests {
     /// The variant each kind's curve is expected to be, by kind id; `None` for a kind with none.
     fn expected(kind: &str) -> Option<&'static str> {
         match kind {
-            "high-pass" | "low-pass" | "parametric-eq" => Some("response"),
+            "parametric-eq" => Some("response"),
             "dynamics" => Some("transfer"),
             "amplifier" => Some("shaper"),
             "delay" | "reverb" => Some("impulse"),

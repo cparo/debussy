@@ -232,10 +232,11 @@ mod tests {
         audio_effects::curve(kind, &values_with(kind, changes)?, sample_rate, 96_000.0)
     }
 
-    /// The view of a high-pass at `cutoff` Hz.
+    /// The view of an equaliser with its high-pass on at `cutoff` Hz.
     fn view(cutoff: f32, tone: Tone, sample_rate: u32) -> Option<DisplayView> {
+        let changes = [("high-pass enabled", 1.0), ("high-pass cutoff", cutoff)];
         Some(DisplayView {
-            curve: curve_of("high-pass", &[("cutoff", cutoff)], sample_rate)?,
+            curve: curve_of("parametric-eq", &changes, sample_rate)?,
             tone,
             scale: 2.0,
         })
@@ -277,10 +278,14 @@ mod tests {
     }
 
     #[test]
-    fn test_display_area_builds_with_and_without_a_curve() {
+    fn test_display_area_builds_with_and_without_a_curve() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let eq = "parametric-eq";
+        let values = values_with(eq, &[]).ok_or("unknown kind")?;
         let _blank = display_area("unknown", &[0.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _wrong_length = display_area("high-pass", &[80.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _drawn = display_area("high-pass", &[80.0, 2.0], Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _wrong_length = display_area(eq, &[80.0], Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _drawn = display_area(eq, &values, Tone::Dark, 48_000, 96_000.0, 2.0);
+        Ok(())
     }
 
     #[test]

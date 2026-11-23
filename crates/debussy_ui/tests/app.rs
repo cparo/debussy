@@ -767,10 +767,10 @@ fn test_preset_sets_every_parameter_as_one_step() -> Result<(), Box<dyn Error>> 
 #[test]
 fn test_preset_of_another_kind_is_ignored() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
-    let low_pass = add_effect(&mut app, "low-pass")?;
+    let eq = add_effect(&mut app, "parametric-eq")?;
     let revision = app.session().revision();
     app.update(Message::Dialog(DialogMessage::ApplyPreset {
-        node: low_pass,
+        node: eq,
         preset: "Compressor",
     }));
     assert_eq!(app.session().revision(), revision);
@@ -816,11 +816,11 @@ fn test_effect_parameters_show_defaults_and_record_changes() -> Result<(), Box<d
 #[test]
 fn test_filter_order_changes_only_while_stopped() -> Result<(), Box<dyn Error>> {
     let (mut app, mut processor, _, _) = app()?;
-    let filter = add_effect(&mut app, "high-pass")?;
+    let filter = add_effect(&mut app, "parametric-eq")?;
     let order = |value| {
         Message::Dialog(DialogMessage::SetParameter {
             node: filter,
-            name: "order".to_owned(),
+            name: "high-pass order".to_owned(),
             value,
         })
     };
@@ -828,19 +828,19 @@ fn test_filter_order_changes_only_while_stopped() -> Result<(), Box<dyn Error>> 
     block(&mut processor)?;
     app.update(order(4.0));
     assert!(app.status().is_some());
-    assert_eq!(app.parameter_value(filter, "order"), 2.0);
+    assert_eq!(app.parameter_value(filter, "high-pass order"), 2.0);
     // The cutoff may move while playing.
     app.update(Message::Dialog(DialogMessage::Slide {
         node: filter,
-        name: "cutoff".to_owned(),
+        name: "high-pass cutoff".to_owned(),
         value: 120.0,
     }));
-    assert_eq!(app.parameter_value(filter, "cutoff"), 120.0);
+    assert_eq!(app.parameter_value(filter, "high-pass cutoff"), 120.0);
     app.update(Message::Dialog(DialogMessage::Release));
     app.update(Message::Pause);
     block(&mut processor)?;
     app.update(order(4.0));
-    assert_eq!(app.parameter_value(filter, "order"), 4.0);
+    assert_eq!(app.parameter_value(filter, "high-pass order"), 4.0);
     Ok(())
 }
 
@@ -1673,8 +1673,8 @@ fn drag_on_board(
 fn test_one_side_of_a_filter_pair_drags_to_a_mixer_and_back() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, mixer) = app()?;
     app.update(Message::StepMixerChannels(mixer, 1));
-    let a = add_effect(&mut app, "low-pass")?;
-    let b = add_effect(&mut app, "low-pass")?;
+    let a = add_effect(&mut app, "parametric-eq")?;
+    let b = add_effect(&mut app, "parametric-eq")?;
     app.update(Message::Select(None));
     let pins = |app: &App, node, output| -> Vec<debussy_ui::Pin> {
         app.board(iced::Size::new(800.0, 600.0))
@@ -4018,8 +4018,8 @@ fn joined(app: &App, from: NodeId, to: NodeId) -> Vec<project_model::Connection>
 
 /// Two effects, A placed at (300, 300) and B dragged against its right edge, a little off.
 fn butted_pair(app: &mut App) -> Result<(NodeId, NodeId), Box<dyn Error>> {
-    let a = add_effect(app, "low-pass")?;
-    let b = add_effect(app, "low-pass")?;
+    let a = add_effect(app, "parametric-eq")?;
+    let b = add_effect(app, "parametric-eq")?;
     app.update(Message::Select(None));
     drag_node_on_board(app, a, iced::Point::new(300.0, 300.0), false)?;
     let near = iced::Point::new(300.0 + debussy_ui::NODE_WIDTH + 4.0, 303.0);
@@ -4030,8 +4030,8 @@ fn butted_pair(app: &mut App) -> Result<(NodeId, NodeId), Box<dyn Error>> {
 #[test]
 fn test_dragging_an_effect_against_another_snaps_and_joins_them() -> Result<(), Box<dyn Error>> {
     let (mut app, _processor, _, _) = app()?;
-    let a = add_effect(&mut app, "low-pass")?;
-    let b = add_effect(&mut app, "low-pass")?;
+    let a = add_effect(&mut app, "parametric-eq")?;
+    let b = add_effect(&mut app, "parametric-eq")?;
     app.update(Message::Select(None));
     let a_at = node_rect(&app, a)?.position();
     let near = a_at + iced::Vector::new(debussy_ui::NODE_WIDTH + 5.0, -4.0);

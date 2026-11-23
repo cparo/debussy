@@ -4,7 +4,7 @@
 - **Decided by:** Chris Paro
 - **Date:** 2026-11-10
 - **Issue:** —
-- **Architecture:** [Parametric equaliser](../architecture/effects.md#parametric-equaliser)
+- **Architecture:** [Equalizer](../architecture/effects.md#equalizer)
 
 ## Context
 
