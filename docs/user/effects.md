@@ -183,7 +183,8 @@ notes.
   | Control | Range | Default | What it does |
   |---|---|---|---|
   | **Cutoff** | 20 Hz – 20 kHz | 2 kHz | Where it starts cutting. |
-  | **Resonance** | 0.5 – 12 | 0.71 | Makes it ring at the cutoff. |
+  | **Resonance** | 0.5 – 12 | 0.71 | Makes it ring at the cutoff. Greyed out at **6 dB**, which cannot ring. |
+  | **Order*** | 6 dB, 12 dB, 18 dB, 24 dB | 12 dB | How steeply it cuts, per octave above the cutoff: higher is darker and more pronounced. |
   | **Envelope amount** | ±5 oct | 2 oct | How far the filter envelope moves the cutoff when a note starts. |
   | **Velocity amount** | 0 – 4 oct | 0 oct | How much brighter harder playing is. |
 

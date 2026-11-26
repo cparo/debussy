@@ -191,4 +191,6 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0165](0165-the-feedback-delay-is-shown-as-feedback-among-the.md) | The feedback delay is shown as Feedback, among the effects | Accepted | [Patch Board](../architecture/patch-board.md#patch-board) |
 | [ADR-0166](0166-the-amplifier-has-no-tone-stack-tone-is-shaped.md) | The amplifier has no tone stack; tone is shaped with EQ nodes on the patch board | Accepted | [Amplifier](../architecture/effects.md#amplifier) |
 | [ADR-0167](0167-high-pass-and-low-pass-are-stages-of-the-equalizer.md) | High-pass and low-pass are stages of the Equalizer, not effects of their own | Accepted | [Equalizer](../architecture/effects.md#equalizer) |
+| [ADR-0168](0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md) | The synth's low-pass has a stopped-only order of 6, 12, 18 or 24 dB per octave | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
+| [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 

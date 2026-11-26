@@ -1,8 +1,8 @@
 //! [`Synth`]: the built-in polyphonic subtractive synthesizer (`docs/architecture/instruments.md`
 //! "Synthesizer", ADR-0148).
 //!
-//! Each voice sums two MinBLEP oscillators, removes their DC, and runs them through a resonant
-//! state-variable low-pass and an amplitude envelope; a second envelope, velocity and the shared
+//! Each voice sums two MinBLEP oscillators, removes their DC, and runs them through a low-pass of
+//! 6 to 24 dB per octave (ADR-0168) and an amplitude envelope; a second envelope, velocity and the shared
 //! LFO move the cutoff. Voices are summed to mono and written to both output channels.
 
 use audio_buffers::Layout;
@@ -57,6 +57,28 @@ enum Destination {
     Cutoff,
     Amplitude,
 }
+/// The low-pass's slope, in the order of the `filter order` parameter's choices (ADR-0168).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Order {
+    /// One one-pole low-pass, 6 dB per octave; no resonance.
+    Six,
+    /// One state-variable low-pass, 12 dB per octave.
+    Twelve,
+    /// A state-variable low-pass, then a one-pole low-pass: 18 dB per octave.
+    Eighteen,
+    /// Two state-variable low-passes in series, at one cutoff and Q: 24 dB per octave.
+    TwentyFour,
+}
+const ORDERS: [(&str, Order); 4] = [
+    ("6 dB", Order::Six),
+    ("12 dB", Order::Twelve),
+    ("18 dB", Order::Eighteen),
+    ("24 dB", Order::TwentyFour),
+];
+/// The `filter order` parameter's default: `12 dB`, the one SVF the synth had before it had a
+/// choice, so older projects sound unchanged.
+const DEFAULT_ORDER: f32 = 1.0;
+
 const DESTINATIONS: [(&str, Destination); 3] = [
     ("pitch", Destination::Pitch),
     ("cutoff", Destination::Cutoff),
@@ -119,6 +141,7 @@ struct Parameters {
     osc: [OscillatorParameters; 2],
     cutoff: Parameter,
     resonance: Parameter,
+    order: Parameter,
     filter_amount: Parameter,
     filter_velocity: Parameter,
     filter_env: EnvelopeParameters,
@@ -151,7 +174,15 @@ impl Parameters {
                     .with_unit("Hz")
                     .with_scale(Scale::Logarithmic),
             )?,
-            resonance: Parameter::new(filter("resonance", 0.5, 12.0, 0.707))?,
+            // The one-pole of the 6 dB order has no resonance.
+            resonance: Parameter::new(
+                filter("resonance", 0.5, 12.0, 0.707).enabled_while("filter order", &[1, 2, 3]),
+            )?,
+            order: Parameter::new(
+                filter("filter order", 0.0, 3.0, DEFAULT_ORDER)
+                    .with_scale(Scale::Choice(names(&ORDERS)))
+                    .stopped_only(),
+            )?,
             filter_amount: Parameter::new(
                 filter("envelope amount", -5.0, 5.0, 2.0).with_unit("oct"),
             )?,
@@ -200,6 +231,7 @@ impl Parameters {
         all.extend([
             self.cutoff.clone(),
             self.resonance.clone(),
+            self.order.clone(),
             self.filter_amount.clone(),
             self.filter_velocity.clone(),
         ]);
@@ -289,6 +321,7 @@ struct Frame {
     level: [f32; 2],
     cutoff: f32,
     resonance: f32,
+    order: Order,
     filter_amount: f32,
     filter_velocity: f32,
     /// Octaves added to every cutoff by the LFO.
@@ -297,12 +330,14 @@ struct Frame {
     tremolo: f32,
 }
 
-/// The synth's part of a voice: its oscillators, filter and filter envelope.
+/// The synth's part of a voice: its oscillators, filter stages and filter envelope.
 #[derive(Debug, Clone)]
 struct Tone {
     osc: [Oscillator; 2],
     dc: OnePole,
-    svf: Svf,
+    /// The low-pass stages; which run depends on the [`Order`].
+    svf: [Svf; 2],
+    one_pole: OnePole,
     filter_env: Adsr,
 }
 
@@ -311,8 +346,36 @@ impl Tone {
         Tone {
             osc: [Oscillator::new(), Oscillator::new()],
             dc: OnePole::new(),
-            svf: Svf::new(),
+            svf: [Svf::new(), Svf::new()],
+            one_pole: OnePole::new(),
             filter_env: Adsr::new(),
+        }
+    }
+
+    /// Zeroes every filter stage, for a change of order (ADR-0168).
+    fn reset_filter(&mut self) {
+        for svf in &mut self.svf {
+            svf.reset();
+        }
+        self.one_pole.reset();
+    }
+
+    /// `input` through the low-pass of order `order` at `cutoff` Hz and Q `resonance`.
+    fn filter(&mut self, input: f32, order: Order, cutoff: f32, resonance: f32, rate: f32) -> f32 {
+        let svf = || SvfCoefficients::low_pass(cutoff, resonance, rate);
+        let one_pole = || OnePoleCoefficients::low_pass(cutoff, rate);
+        match order {
+            Order::Six => self.one_pole.process(input, &one_pole()),
+            Order::Twelve => self.svf[0].process(input, &svf()),
+            Order::Eighteen => {
+                let x = self.svf[0].process(input, &svf());
+                self.one_pole.process(x, &one_pole())
+            }
+            Order::TwentyFour => {
+                let c = svf();
+                let x = self.svf[0].process(input, &c);
+                self.svf[1].process(x, &c)
+            }
         }
     }
 }
@@ -333,7 +396,7 @@ impl Sound for Tone {
             osc.reset();
         }
         self.dc.reset();
-        self.svf.reset();
+        self.reset_filter();
         self.filter_env.reset();
     }
 }
@@ -358,8 +421,7 @@ fn render(voice: &mut Voice<Tone>, f: &Frame, table: &MinBlep, dc: &OnePoleCoeff
         + f.lfo_cutoff)
         .exp2()
         .clamp(CUTOFF_RANGE.0, f.max_cutoff);
-    let coefficients = SvfCoefficients::low_pass(cutoff, f.resonance, f.sample_rate);
-    let sample = tone.svf.process(sample, &coefficients);
+    let sample = tone.filter(sample, f.order, cutoff, f.resonance, f.sample_rate);
     sample * amp * f.tremolo
 }
 
@@ -373,6 +435,8 @@ struct Running {
     dc: OnePoleCoefficients,
     /// The pitch-bend position, −1 to 1.
     bend: f32,
+    /// The filter order the voices' stages were last run at.
+    order: Order,
 }
 
 /// The built-in polyphonic subtractive synthesizer, kind id `"synth"`: event input 0 (notes, on
@@ -427,6 +491,7 @@ impl Node for Synth {
             ramps: Ramps::new(&self.parameters, sample_rate),
             dc: OnePoleCoefficients::high_pass(DC_BLOCK_HZ, rate),
             bend: 0.0,
+            order: ORDERS[choice(self.parameters.order.get(), ORDERS.len())].1,
         });
     }
 
@@ -470,6 +535,14 @@ impl Node for Synth {
         let octave = [p.osc[0].octave.get().round(), p.osc[1].octave.get().round()];
         let bend_range = p.bend_range.get();
         let limit = choice(p.voices.get(), MAX_VOICES + 1).max(1);
+        // Stopped-only: a new order takes effect at once, from rest (ADR-0168).
+        let order = ORDERS[choice(p.order.get(), ORDERS.len())].1;
+        if order != running.order {
+            running.order = order;
+            for voice in running.pool.voices.iter_mut() {
+                voice.sound.reset_filter();
+            }
+        }
 
         let frames = left.len();
         let mut events = inputs.events(0).peekable();
@@ -515,6 +588,7 @@ impl Node for Synth {
                 level: [r.level[0].next_value(), r.level[1].next_value()],
                 cutoff: r.cutoff.next_value(),
                 resonance: r.resonance.next_value(),
+                order,
                 filter_amount: r.filter_amount.next_value(),
                 filter_velocity: r.filter_velocity.next_value(),
                 lfo_cutoff: match destination {
@@ -566,7 +640,92 @@ mod tests {
             let stepped = matches!(info.scale, Scale::Choice(_) | Scale::Integer);
             assert_eq!(info.is_automatable(), !stepped, "{}", info.name);
         }
-        assert_eq!(infos.len(), 30);
+        assert_eq!(infos.len(), 31);
+        Ok(())
+    }
+
+    /// The gain of `tone`'s low-pass of order `order` (cutoff 200 Hz, Q 0.707, 48 kHz) at
+    /// `hz`, from the RMS of a settled sine.
+    fn gain_at(order: Order, hz: f32) -> f32 {
+        let mut tone = Tone::new();
+        let rate = 48_000.0;
+        let sine = |n: usize| {
+            #[allow(clippy::cast_precision_loss)] // n < 2^24
+            let t = n as f32 / rate;
+            (std::f32::consts::TAU * hz * t).sin()
+        };
+        let (mut input, mut output) = (0.0, 0.0);
+        for n in 0..48_000 {
+            let y = tone.filter(sine(n), order, 200.0, 0.707, rate);
+            if n >= 24_000 {
+                input += sine(n) * sine(n);
+                output += y * y;
+            }
+        }
+        (output / input).sqrt()
+    }
+
+    #[test]
+    fn test_filter_each_order_falls_at_its_slope() {
+        for (n, (name, order)) in ORDERS.iter().enumerate() {
+            // An octave well above the cutoff, below where `f32` rounding sets a floor near
+            // −90 dB, and far below Nyquist.
+            let fall = 20.0 * (gain_at(*order, 800.0) / gain_at(*order, 1_600.0)).log10();
+            #[allow(clippy::cast_precision_loss)] // n < 4
+            let slope = 6.0 * (n + 1) as f32;
+            assert!((fall - slope).abs() < 0.6, "{name}: {fall} dB per octave");
+        }
+    }
+
+    #[test]
+    fn test_filter_twelve_is_the_single_svf() {
+        let (mut tone, mut svf) = (Tone::new(), Svf::new());
+        let c = SvfCoefficients::low_pass(500.0, 4.0, 48_000.0);
+        for n in 0..256 {
+            let x = if n % 37 == 0 { 1.0 } else { -0.25 };
+            let y = tone.filter(x, Order::Twelve, 500.0, 4.0, 48_000.0);
+            assert_eq!(y.to_bits(), svf.process(x, &c).to_bits());
+        }
+    }
+
+    #[test]
+    fn test_reset_filter_zeroes_every_stage() {
+        let mut tone = Tone::new();
+        for order in [Order::TwentyFour, Order::Eighteen] {
+            for _ in 0..64 {
+                tone.filter(1.0, order, 1_000.0, 2.0, 48_000.0);
+            }
+        }
+        tone.reset_filter();
+        assert_eq!(
+            tone.filter(0.0, Order::TwentyFour, 1_000.0, 2.0, 48_000.0),
+            0.0
+        );
+        assert_eq!(
+            tone.filter(0.0, Order::Eighteen, 1_000.0, 2.0, 48_000.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn test_filter_order_defaults_to_twelve_stopped_only_and_greys_resonance() -> Result<(), Error>
+    {
+        let p = Parameters::new()?;
+        let order = p.order.info();
+        assert_eq!(ORDERS[choice(order.default, ORDERS.len())].1, Order::Twelve);
+        assert!(order.stopped_only);
+        assert_eq!(
+            order.scale,
+            Scale::Choice(vec![
+                "6 dB".into(),
+                "12 dB".into(),
+                "18 dB".into(),
+                "24 dB".into()
+            ])
+        );
+        let resonance = p.resonance.info();
+        assert!(!resonance.is_enabled(|_| 0.0));
+        assert!((1..4).all(|i| resonance.is_enabled(|_| i as f32)));
         Ok(())
     }
 
