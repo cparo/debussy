@@ -4,7 +4,7 @@
 //! "Node dialogs").
 
 use iced::widget::{
-    Space, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
+    Space, Text, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Pixels};
 use signal_graph::{ParameterInfo, Scale};
@@ -17,7 +17,7 @@ use crate::icon::Icon;
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
 use crate::theme::{self, Tone};
-use crate::view::toggle_button;
+use crate::view::{TOGGLE_PADDING, TOOL_TEXT, toggle_button};
 
 /// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
 /// horizontal scrollbar, in logical pixels.
@@ -249,19 +249,18 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
             s.into()
         }
     };
+    // `iced`'s pick lists and buttons have no disabled state: a disabled one is shown as its
+    // value in greyed text. A frozen control shows "Stop to change" (ADR-0088).
     if disabled && !is_slider(&info.scale) {
-        // `iced`'s pick lists and buttons have no disabled state: shown as greyed text.
-        return column![
-            text(label(info)).size(12),
-            text(value_text(info, value))
-                .size(12)
-                .style(text::secondary),
-        ]
-        .spacing(4)
-        .width(Length::Fixed(CONTROL_WIDTH))
-        .into();
+        let value = text(value_text(info, value))
+            .size(11)
+            .style(text::secondary);
+        return stand_in(info, value);
     }
-    if !frozen && info.scale == Scale::Toggle {
+    if frozen {
+        return stand_in(info, text("Stop to change").size(11));
+    }
+    if info.scale == Scale::Toggle {
         let on = value >= 0.5;
         return container(toggle_button(
             toggle_label(info, on),
@@ -273,11 +272,6 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
         .into();
     }
     let input: Element<'a, Message> = match &info.scale {
-        // Shown, not offered, until playback stops (ADR-0088).
-        _ if frozen => container(text("Stop to change").size(11))
-            .height(control_height(&info.scale))
-            .align_y(Alignment::Center)
-            .into(),
         Scale::Linear => styled(
             slider(min..=max, value, slide)
                 .step(info.step.unwrap_or((max - min) / 1000.0))
@@ -307,10 +301,10 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
             .width(Length::Fill)
             .into()
         }
-        // A toggle is a button unless frozen.
+        // A toggle is a button, returned above.
         Scale::Toggle => Space::new().into(),
     };
-    let input = if !frozen && is_slider(&info.scale) {
+    let input = if is_slider(&info.scale) {
         tooltip(
             input,
             container(text(format_value(info, value)).size(12))
@@ -352,10 +346,37 @@ fn value_text(info: &ParameterInfo, value: f32) -> String {
     }
 }
 
+/// `body` in place of parameter `info`'s control, taking the control's room so nothing below it
+/// moves: under the parameter's name at the control's height, or, for a toggle, whose button
+/// carries its name, both within the button's height.
+fn stand_in<'a>(info: &ParameterInfo, body: Text<'a>) -> Element<'a, Message> {
+    let name = text(label(info)).size(12);
+    let height = control_height(&info.scale);
+    let content: Element<'a, Message> = if info.scale == Scale::Toggle {
+        container(column![name, body].spacing(2))
+            .height(height)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        column![
+            name,
+            container(body).height(height).align_y(Alignment::Center)
+        ]
+        .spacing(4)
+        .into()
+    };
+    container(content)
+        .width(Length::Fixed(CONTROL_WIDTH))
+        .into()
+}
+
 /// The height of the control a parameter of `scale` shows: a pick list's for a choice, a
-/// slider's otherwise; text drawn in its place keeps this height, so nothing below it moves.
+/// toggle button's for a toggle, a slider's otherwise.
 fn control_height(scale: &Scale) -> f32 {
     match scale {
+        Scale::Toggle => {
+            text::LineHeight::default().to_absolute(Pixels(TOOL_TEXT)).0 + 2.0 * TOGGLE_PADDING[0]
+        }
         Scale::Choice(_) => {
             text::LineHeight::default()
                 .to_absolute(Pixels(PICK_LIST_TEXT))
@@ -438,6 +459,16 @@ fn step_places(step: f32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_control_height_holds_a_toggles_stand_in() {
+        let line = |size: f32| text::LineHeight::default().to_absolute(Pixels(size)).0;
+        // A toggle's stand-in: its name (12) over the body (11), 2 apart.
+        assert!(line(12.0) + 2.0 + line(11.0) <= control_height(&Scale::Toggle));
+        // Elsewhere the body (11) sits in the control's own height.
+        assert!(line(11.0) <= control_height(&Scale::Linear));
+        assert!(control_height(&Scale::Choice(Vec::new())) > control_height(&Scale::Linear));
+    }
 
     #[test]
     fn test_label_strips_the_group_and_capitalises() {

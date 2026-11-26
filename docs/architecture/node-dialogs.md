@@ -21,14 +21,15 @@ from 1000 up as kilohertz. A toggle is one button, lit while on and unlit while 
 separate label; it shows the name of its current state if the parameter names its states, else
 the parameter's name; in a group's strip, its unlit background is the
 pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
-control while playing, at the height of a pick list for a choice and of a slider otherwise
+control while playing, at the height of a pick list for a choice and of a slider otherwise; a
+toggle shows its name and that text within its button's height
 ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 A parameter shown only while a toggle is in a given state is left out otherwise: not drawn,
 skipped by Tab, and unchanged by keys
 ([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)).
 A parameter enabled only while a stopped-only stepped parameter of its node holds given values
 is disabled otherwise: greyed out (a slider in the curve-driven style, a pick list or toggle as
-greyed text of its value), still drawn and in Tab order, and unchanged by drags, presses and keys;
+greyed text of its value in the control's room, as for "Stop to change"), still drawn and in Tab order, and unchanged by drags, presses and keys;
 `signal_graph::check_conditions` refuses any other kind of deciding parameter
 ([ADR-0169](../adrs/0169-a-parameter-s-control-can-be-disabled-by-the-value.md)).
 Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
