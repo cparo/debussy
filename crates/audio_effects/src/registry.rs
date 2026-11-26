@@ -295,6 +295,13 @@ mod tests {
             assert!(effect(kind.id).is_some(), "{}", kind.id);
             assert_eq!(display_name(kind.id), Some(kind.name));
             assert!(parameter_infos(kind.id).is_some_and(|p| !p.is_empty()));
+            let infos = parameter_infos(kind.id).unwrap_or_default();
+            assert_eq!(
+                signal_graph::check_conditions(&infos),
+                Ok(()),
+                "{}",
+                kind.id
+            );
         }
         assert!(effect("eq").is_none());
         assert_eq!(display_name("eq"), None);

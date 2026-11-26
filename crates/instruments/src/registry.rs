@@ -110,6 +110,8 @@ mod tests {
             assert_eq!(node.inputs()[0].kind, PortType::Event, "{}", kind.id);
             assert_eq!(node.outputs()[0].kind, PortType::Audio, "{}", kind.id);
             assert_eq!(node.outputs()[0].layout, Layout::Stereo, "{}", kind.id);
+            let infos = parameter_infos(kind.id).unwrap_or_default();
+            signal_graph::check_conditions(&infos).map_err(|e| format!("{}: {e}", kind.id))?;
         }
         Ok(())
     }

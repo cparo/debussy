@@ -25,6 +25,11 @@ control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-value
 A parameter shown only while a toggle is in a given state is left out otherwise: not drawn,
 skipped by Tab, and unchanged by keys
 ([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)).
+A parameter enabled only while a stopped-only stepped parameter of its node holds given values
+is disabled otherwise: greyed out (a slider in the curve-driven style, a pick list or toggle as
+greyed text of its value), still drawn and in Tab order, and unchanged by drags, presses and keys;
+`signal_graph::check_conditions` refuses any other kind of deciding parameter
+([ADR-0169](../adrs/0169-a-parameter-s-control-can-be-disabled-by-the-value.md)).
 Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
 keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
 1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a

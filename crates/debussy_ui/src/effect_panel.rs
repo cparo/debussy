@@ -217,7 +217,8 @@ fn control<'a>(
 
 /// The input for parameter `info` of `parameters`. A toggle is one button named for the
 /// parameter, lit while on; any other is labelled with its name, and a slider shows its value as
-/// a tooltip. A slider a curve drives is greyed out and follows it.
+/// a tooltip. A slider a curve drives is greyed out and follows it; a disabled control
+/// ([`NodeParameters::is_enabled`]) is greyed out and takes no edits.
 fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Element<'a, Message> {
     let id = parameters.node();
     let value = parameters.value(&info.name);
@@ -238,13 +239,26 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
     };
     let frozen = parameters.is_frozen(info);
     let driven = parameters.is_driven(&info.name);
+    let disabled = !parameters.is_enabled(info);
     let styled = |s: iced::widget::Slider<'a, f32, Message>| -> Element<'a, Message> {
-        if driven {
+        if driven || disabled {
             s.style(theme::slider_driven).into()
         } else {
             s.into()
         }
     };
+    if disabled && !is_slider(&info.scale) {
+        // `iced`'s pick lists and buttons have no disabled state: shown as greyed text.
+        return column![
+            text(label(info)).size(12),
+            text(value_text(info, value))
+                .size(12)
+                .style(text::secondary),
+        ]
+        .spacing(4)
+        .width(Length::Fixed(CONTROL_WIDTH))
+        .into();
+    }
     if !frozen && info.scale == Scale::Toggle {
         let on = value >= 0.5;
         return container(toggle_button(
@@ -316,6 +330,20 @@ fn toggle_label(info: &ParameterInfo, on: bool) -> String {
         Some((on_label, _)) if on => on_label.clone(),
         Some((_, off_label)) => off_label.clone(),
         None => label(info),
+    }
+}
+
+/// Parameter `info`'s value `value` as text: a choice's option, a toggle's state, or the number
+/// with its unit ([`format_value`]).
+fn value_text(info: &ParameterInfo, value: f32) -> String {
+    match &info.scale {
+        Scale::Choice(options) => {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small index
+            let index = value.round().max(0.0) as usize;
+            options.get(index).cloned().unwrap_or_default()
+        }
+        Scale::Toggle => toggle_label(info, value >= 0.5),
+        _ => format_value(info, value),
     }
 }
 
