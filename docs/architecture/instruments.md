@@ -14,14 +14,22 @@ mono, the same signal on both channels.
   their notes.
 - **Signal flow per voice.** Two oscillators (`dsp::Oscillator`, saw, pulse or triangle,
   band-limited by `dsp::MinBlep`), each at the note plus its octave and detune and scaled by its
-  level, are summed; a 5 Hz one-pole high-pass removes their DC; a resonant state-variable
-  low-pass filters them; the amplitude envelope (`modulation::Adsr`) scales the result.
+  level, are summed; a 5 Hz one-pole high-pass removes their DC; a low-pass of the chosen order
+  filters them (see **Filter order**); the amplitude envelope (`modulation::Adsr`) scales the result.
 - **Pitch.** 12-tone equal temperament from A4 = 440 Hz (`dsp::note_to_hz`). Pitch bend moves
   every voice by the bend position (−1 to 1, from the 14-bit value centred on 8192) times
   `bend range` semitones, ramped.
 - **Cutoff.** In log2 Hz per sample: the `cutoff` parameter, plus `envelope amount` octaves times
   the filter envelope (0 to 1), plus `velocity amount` octaves times the note's velocity (0 to 1),
   plus the LFO; clamped to 20 Hz and to the lower of 20 kHz and 0.49 of the sample rate.
+- **Filter order.** `filter order` (poles, 1 to 4, default 2; shown as **Rolloff**, 6 to
+  24 dB/octave, [ADR-0170](../adrs/0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md)) picks the
+  low-pass stages: 6 dB a one-pole (`dsp::OnePole`); 12 dB a state-variable filter (`dsp::Svf`);
+  18 dB a state-variable filter then a one-pole; 24 dB two state-variable filters in series. Every
+  stage takes the same cutoff, and every state-variable stage the same Q, `resonance`, which is
+  disabled at 6 dB. The order is stopped-only; a new order takes effect at the next block with
+  every voice's filter stages reset to zero, with no crossfade
+  ([ADR-0168](../adrs/0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md)).
 - **Envelopes.** Exponential one-pole segments; each gate-on attacks from the current level. The
   amplitude envelope peaks at `1 − amp velocity · (1 − velocity)`; the filter envelope at 1.
 - **LFO.** One `modulation::Lfo` shared by all voices, its phase reset by `reset`. At full
@@ -34,13 +42,13 @@ mono, the same signal on both channels.
   down at 64 and above) is down, in which case the voice releases when the pedal lifts. Other
   messages are ignored.
 - **Parameters.** Read once per block; continuous ones are ramped (the cutoff in log2 Hz). The
-  choices (`osc N wave`, `lfo shape`, `lfo destination`) and whole numbers (`osc N octave`,
+  choices (`osc N wave`, `lfo shape`, `lfo destination`) and whole numbers (`osc N octave`, `filter order`,
   `voices`) are stepped and take effect at the next block; every other parameter is automatable.
 
   | Group | Parameters |
   |---|---|
   | oscillator 1, 2 | wave, octave (±3), detune (±100 cents), pulse width (5–95%), level (0–1) |
-  | filter | cutoff (20 Hz–20 kHz), resonance (Q 0.5–12), envelope amount (±5 oct), velocity amount (0–4 oct) |
+  | filter | filter order (1–4 poles, shown as 6–24 dB/octave), cutoff (20 Hz–20 kHz), resonance (Q 0.5–12), envelope amount (±5 oct), velocity amount (0–4 oct) |
   | filter envelope, amp envelope | attack, decay, release (1 ms–10 s), sustain (0–1); amp velocity (0–1) |
   | lfo | rate (0.01–20 Hz), shape, destination (pitch, cutoff, amplitude), depth (0–1) |
   | (none) | bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |

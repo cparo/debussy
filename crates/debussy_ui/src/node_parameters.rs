@@ -222,6 +222,18 @@ impl<'a> NodeParameters<'a> {
         self.infos.iter().map(|i| self.value(&i.name)).collect()
     }
 
+    /// Whether parameter `info`'s control is enabled now
+    /// ([`ParameterInfo::enabled_while`]); a disabled one is greyed out and takes no edits.
+    pub(crate) fn is_enabled(&self, info: &ParameterInfo) -> bool {
+        info.is_enabled(|name| self.value(name))
+    }
+
+    /// Whether a change to parameter `name` is ignored now: its control is disabled
+    /// ([`NodeParameters::is_enabled`]).
+    pub(crate) fn is_disabled(&self, name: &str) -> bool {
+        self.info(name).is_some_and(|i| !self.is_enabled(i))
+    }
+
     /// Whether parameter `info` is shown but not offered: stopped-only while playing (ADR-0088).
     pub(crate) fn is_frozen(&self, info: &ParameterInfo) -> bool {
         info.stopped_only && self.playing
@@ -283,9 +295,13 @@ impl<'a> NodeParameters<'a> {
     }
 
     /// The parameter name and value `delta` arrow presses give parameter `infos[index]`
-    /// ([`stepped`]); `None` past the end, for a toggle, or for a parameter not shown.
+    /// ([`stepped`]); `None` past the end, for a toggle, or for a parameter not shown or
+    /// disabled.
     pub(crate) fn stepped(&self, index: usize, delta: i32) -> Option<(String, f32)> {
-        let info = self.infos.get(index).filter(|i| self.is_shown(i))?;
+        let info = self
+            .infos
+            .get(index)
+            .filter(|i| self.is_shown(i) && self.is_enabled(i))?;
         let value = stepped(info, self.value(&info.name), delta)?;
         Some((info.name.clone(), value))
     }
@@ -297,12 +313,12 @@ impl<'a> NodeParameters<'a> {
     }
 
     /// The parameter name and value a press gives parameter `infos[index]`: a toggle flipped;
-    /// `None` past the end, for any other scale, or for a parameter not shown.
+    /// `None` past the end, for any other scale, or for a parameter not shown or disabled.
     pub(crate) fn pressed(&self, index: usize) -> Option<(String, f32)> {
         let info = self
             .infos
             .get(index)
-            .filter(|i| i.scale == Scale::Toggle && self.is_shown(i))?;
+            .filter(|i| i.scale == Scale::Toggle && self.is_shown(i) && self.is_enabled(i))?;
         let on = self.value(&info.name) >= 0.5;
         Some((info.name.clone(), if on { 0.0 } else { 1.0 }))
     }
@@ -487,6 +503,23 @@ mod tests {
         assert!(!playing.refuses("gain") && !playing.refuses("missing"));
         let stopped = NodeParameters::new(NODE, None, &infos, &stored, None, false);
         assert!(!stopped.refuses("order") && !stopped.is_frozen(&infos[2]));
+    }
+
+    #[test]
+    fn test_disabled_control_takes_no_steps_or_presses() {
+        let mut infos = infos();
+        infos[0] = infos[0].clone().enabled_while("order", &[2]);
+        infos[1] = infos[1].clone().enabled_while("order", &[2]);
+        let at_two = BTreeMap::new();
+        let view = NodeParameters::new(NODE, None, &infos, &at_two, None, false);
+        assert!(view.is_enabled(&infos[0]) && !view.is_disabled("gain"));
+        assert!(view.stepped(0, 1).is_some() && view.pressed(1).is_some());
+        let at_one = stored(&[("order", 1.0)]);
+        let view = NodeParameters::new(NODE, None, &infos, &at_one, None, false);
+        assert!(!view.is_enabled(&infos[0]) && view.is_disabled("gain"));
+        assert_eq!(view.stepped(0, 1), None);
+        assert_eq!(view.pressed(1), None);
+        assert!(!view.is_disabled("order") && !view.is_disabled("missing"));
     }
 
     fn dynamics() -> Result<(Vec<ParameterInfo>, &'static Preset, &'static Preset), String> {

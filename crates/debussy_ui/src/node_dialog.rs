@@ -235,8 +235,9 @@ impl NodeDialog {
                 if let Some(refusal) = self.refusal(cx, node, &name) {
                     return vec![refusal];
                 }
-                // A slider a curve drives follows the curve and takes no drags.
-                if self.is_driven(cx, node, &name) {
+                // A slider a curve drives follows the curve and takes no drags; nor does a
+                // disabled one.
+                if self.is_driven(cx, node, &name) || self.is_disabled(cx, node, &name) {
                     return Vec::new();
                 }
                 self.live = Some(Live {
@@ -486,6 +487,13 @@ impl NodeDialog {
         self.parameters(cx, node).is_some_and(|p| p.is_driven(name))
     }
 
+    /// Whether node `node`'s parameter `name` has a disabled control
+    /// ([`NodeParameters::is_disabled`]).
+    fn is_disabled(&self, cx: &Context<'_>, node: NodeId, name: &str) -> bool {
+        self.parameters(cx, node)
+            .is_some_and(|p| p.is_disabled(name))
+    }
+
     /// The open node's parameters, if it is a built-in effect this build knows.
     fn effect<'a>(&'a self, cx: &Context<'a>) -> Option<NodeParameters<'a>> {
         self.parameters(cx, cx.open?).filter(|p| p.kind().is_some())
@@ -508,7 +516,7 @@ impl NodeDialog {
         name: String,
         value: f32,
     ) -> Vec<Command> {
-        if self.is_driven(cx, node, &name) {
+        if self.is_driven(cx, node, &name) || self.is_disabled(cx, node, &name) {
             return Vec::new();
         }
         let command = self

@@ -305,6 +305,20 @@ fn test_every_parameter_at_its_limits_plays_finite_bounded_audio() -> TestResult
 }
 
 #[test]
+fn test_filter_order_change_takes_effect_from_rest() -> TestResult {
+    let mut rig = Rig::new(PLAIN)?;
+    let order = rig.parameter("filter order")?;
+    // Stopped-only: the UI changes it only while stopped, but a held note may still sound.
+    for value in [4.0, 1.0, 3.0, 2.0] {
+        order.set(value);
+        let out = rig.render(2_048, &[(0, on(60, 100)?)])?;
+        assert!(out.iter().all(|s| s.is_finite()), "order {value}");
+        assert!(rms(&out[1_024..]) > 0.01, "order {value}: silent");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_parameters_change_while_playing_without_a_jump() -> TestResult {
     let mut rig = Rig::new(&[("gain", -6.0)])?;
     rig.render(4_096, &[(0, on(60, 100)?)])?;

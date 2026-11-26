@@ -14,6 +14,9 @@ use std::f32::consts::PI;
 /// lowered to it, keeping the prewarped `tan` finite.
 pub const MAX_FREQUENCY_RATIO: f32 = 0.49;
 
+/// The slope each pole adds to a low-pass or high-pass beyond its cutoff, in dB per octave.
+pub const DB_PER_POLE: f32 = 6.0;
+
 /// The lowest frequency a designer uses, as a fraction of the sample rate, keeping `g` above 0.
 const MIN_FREQUENCY_RATIO: f32 = 1e-6;
 

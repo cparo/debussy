@@ -73,6 +73,19 @@ pub struct ParameterInfo {
     /// parameter's control to be shown; `None` to show it always. A hidden parameter keeps its
     /// value and still takes effect if the node reads it. Display only: not saved.
     pub shown_while: Option<(String, bool)>,
+    /// The stopped-only stepped parameter, by name, and the values it must hold (option indices
+    /// for a [`Scale::Choice`], 0 or 1 for a [`Scale::Toggle`]) for this parameter's control to
+    /// be enabled; `None` to enable it always. A disabled control is shown greyed out and takes
+    /// no edits; it keeps its value. [`check_conditions`] keeps the deciding parameter
+    /// stopped-only, so a control is never disabled while playing. Display only: not saved.
+    pub enabled_while: Option<(String, Vec<u32>)>,
+    /// The label shown for the control in place of the one made from the name, such as
+    /// `"Rolloff"` for `"low-pass order"`; `None` for that one. Display only: not saved.
+    pub label: Option<String>,
+    /// The factor the value is shown multiplied by, with [`unit`](Self::unit), such as 6 to show
+    /// a filter order as dB per octave; `None` to show the value itself. Display only: the value
+    /// held and saved is unscaled.
+    pub display_factor: Option<f32>,
 }
 
 impl ParameterInfo {
@@ -93,6 +106,9 @@ impl ParameterInfo {
             max_label: None,
             step: None,
             shown_while: None,
+            enabled_while: None,
+            label: None,
+            display_factor: None,
         }
     }
 
@@ -170,6 +186,44 @@ impl ParameterInfo {
         }
     }
 
+    /// This, its control enabled only while stopped-only parameter `by` holds one of `values`
+    /// (see [`enabled_while`](Self::enabled_while)).
+    #[must_use]
+    pub fn enabled_while(self, by: impl Into<String>, values: &[u32]) -> Self {
+        ParameterInfo {
+            enabled_while: Some((by.into(), values.to_vec())),
+            ..self
+        }
+    }
+
+    /// Whether this parameter's control is enabled, given `value_of`, the value of a parameter
+    /// by name ([`enabled_while`](Self::enabled_while)).
+    pub fn is_enabled(&self, value_of: impl Fn(&str) -> f32) -> bool {
+        self.enabled_while.as_ref().is_none_or(|(by, values)| {
+            let value = f64::from(value_of(by));
+            values.iter().any(|&v| (f64::from(v) - value).abs() < 0.5)
+        })
+    }
+
+    /// This, its control labelled `label` (see [`label`](Self::label)).
+    #[must_use]
+    pub fn with_label(self, label: impl Into<String>) -> Self {
+        ParameterInfo {
+            label: Some(label.into()),
+            ..self
+        }
+    }
+
+    /// This, its value shown multiplied by `factor` (see
+    /// [`display_factor`](Self::display_factor)).
+    #[must_use]
+    pub fn with_display_factor(self, factor: f32) -> Self {
+        ParameterInfo {
+            display_factor: Some(factor),
+            ..self
+        }
+    }
+
     /// This, in group `group`.
     #[must_use]
     pub fn with_group(self, group: impl Into<String>) -> Self {
@@ -199,6 +253,40 @@ impl ParameterInfo {
     pub fn is_automatable(&self) -> bool {
         !self.stopped_only && !self.scale.is_stepped()
     }
+}
+
+/// Checks the conditions between one node's parameters, `Err` naming the first that is broken:
+/// a [`shown_while`](ParameterInfo::shown_while) must name a toggle of the node, and an
+/// [`enabled_while`](ParameterInfo::enabled_while) a stopped-only stepped parameter of the node
+/// other than itself, with values in its range.
+pub fn check_conditions(infos: &[ParameterInfo]) -> Result<(), String> {
+    let find = |name: &str| infos.iter().find(|i| i.name == name);
+    for info in infos {
+        if let Some((toggle, _)) = &info.shown_while
+            && !find(toggle).is_some_and(|t| t.scale == Scale::Toggle)
+        {
+            return Err(format!("{}: shown while {toggle}, not a toggle", info.name));
+        }
+        if let Some((by, values)) = &info.enabled_while {
+            let decider = find(by)
+                .filter(|d| d.name != info.name && d.stopped_only && d.scale.is_stepped())
+                .ok_or_else(|| {
+                    format!(
+                        "{}: enabled while {by}, not a stopped-only choice",
+                        info.name
+                    )
+                })?;
+            let in_range =
+                |v: u32| (f64::from(decider.min)..=f64::from(decider.max)).contains(&f64::from(v));
+            if let Some(v) = values.iter().find(|&&v| !in_range(v)) {
+                return Err(format!(
+                    "{}: enabled while {by} is {v}, out of range",
+                    info.name
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The parameter value a normalised curve value `value` stands for: 0 is the minimum and 1 the
@@ -771,6 +859,63 @@ mod tests {
         parameter.release();
         assert_eq!(parameter.read(), Reading::fixed(1.0));
         Ok(())
+    }
+
+    /// A node's parameters: a stopped-only choice `order` of three options, a toggle `on`, and
+    /// `q`, enabled while `order` is 1 or 2.
+    fn conditional() -> Vec<ParameterInfo> {
+        let options = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        vec![
+            ParameterInfo::new("order", 0.0, 2.0, 1.0)
+                .with_scale(Scale::Choice(options))
+                .stopped_only(),
+            ParameterInfo::new("on", 0.0, 1.0, 0.0).with_scale(Scale::Toggle),
+            ParameterInfo::new("q", 0.5, 12.0, 0.7).enabled_while("order", &[1, 2]),
+        ]
+    }
+
+    #[test]
+    fn test_is_enabled_follows_the_deciding_value() {
+        let infos = conditional();
+        assert!(infos[2].is_enabled(|_| 1.0));
+        assert!(infos[2].is_enabled(|_| 2.0));
+        assert!(!infos[2].is_enabled(|_| 0.0));
+        assert!(!infos[2].is_enabled(|_| f32::NAN));
+        assert!(infos[0].is_enabled(|_| 0.0), "no condition: always enabled");
+    }
+
+    #[test]
+    fn test_check_conditions_accepts_well_formed_conditions() {
+        let mut infos = conditional();
+        infos.push(ParameterInfo::new("x", 0.0, 1.0, 0.0).shown_while("on", true));
+        assert_eq!(check_conditions(&infos), Ok(()));
+    }
+
+    #[test]
+    fn test_check_conditions_refuses_a_decider_not_stopped_only() {
+        let mut infos = conditional();
+        infos[0].stopped_only = false;
+        assert!(check_conditions(&infos).is_err());
+        let mut infos = conditional();
+        infos[2] = infos[2].clone().enabled_while("on", &[1]);
+        assert!(
+            check_conditions(&infos).is_err(),
+            "a toggle that is not stopped-only"
+        );
+        infos[2] = infos[2].clone().enabled_while("missing", &[1]);
+        assert!(check_conditions(&infos).is_err());
+        infos[2] = infos[2].clone().enabled_while("q", &[1]);
+        assert!(check_conditions(&infos).is_err(), "itself");
+    }
+
+    #[test]
+    fn test_check_conditions_refuses_values_out_of_range_and_bad_shown_while() {
+        let mut infos = conditional();
+        infos[2] = infos[2].clone().enabled_while("order", &[1, 3]);
+        assert!(check_conditions(&infos).is_err());
+        let mut infos = conditional();
+        infos.push(ParameterInfo::new("x", 0.0, 1.0, 0.0).shown_while("order", true));
+        assert!(check_conditions(&infos).is_err());
     }
 
     #[test]

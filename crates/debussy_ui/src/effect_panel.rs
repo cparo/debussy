@@ -4,9 +4,9 @@
 //! "Node dialogs").
 
 use iced::widget::{
-    Space, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
+    Space, Text, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
 };
-use iced::{Alignment, Element, Fill, Length};
+use iced::{Alignment, Element, Fill, Length, Pixels};
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
@@ -17,7 +17,7 @@ use crate::icon::Icon;
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
 use crate::theme::{self, Tone};
-use crate::view::toggle_button;
+use crate::view::{TOGGLE_PADDING, TOOL_TEXT, toggle_button};
 
 /// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
 /// horizontal scrollbar, in logical pixels.
@@ -25,6 +25,8 @@ pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
+/// The text size of a choice parameter's pick list.
+const PICK_LIST_TEXT: f32 = 12.0;
 
 /// A curve port button's side, in logical pixels.
 const PORT_BUTTON: f32 = 20.0;
@@ -217,7 +219,8 @@ fn control<'a>(
 
 /// The input for parameter `info` of `parameters`. A toggle is one button named for the
 /// parameter, lit while on; any other is labelled with its name, and a slider shows its value as
-/// a tooltip. A slider a curve drives is greyed out and follows it.
+/// a tooltip. A slider a curve drives is greyed out and follows it; a disabled control
+/// ([`NodeParameters::is_enabled`]) is greyed out and takes no edits.
 fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Element<'a, Message> {
     let id = parameters.node();
     let value = parameters.value(&info.name);
@@ -238,14 +241,26 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
     };
     let frozen = parameters.is_frozen(info);
     let driven = parameters.is_driven(&info.name);
+    let disabled = !parameters.is_enabled(info);
     let styled = |s: iced::widget::Slider<'a, f32, Message>| -> Element<'a, Message> {
-        if driven {
+        if driven || disabled {
             s.style(theme::slider_driven).into()
         } else {
             s.into()
         }
     };
-    if !frozen && info.scale == Scale::Toggle {
+    // `iced`'s pick lists and buttons have no disabled state: a disabled one is shown as its
+    // value in greyed text. A frozen control shows "Stop to change" (ADR-0088).
+    if disabled && !is_slider(&info.scale) {
+        let value = text(value_text(info, value))
+            .size(11)
+            .style(text::secondary);
+        return stand_in(info, value);
+    }
+    if frozen {
+        return stand_in(info, text("Stop to change").size(11));
+    }
+    if info.scale == Scale::Toggle {
         let on = value >= 0.5;
         return container(toggle_button(
             toggle_label(info, on),
@@ -257,8 +272,6 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
         .into();
     }
     let input: Element<'a, Message> = match &info.scale {
-        // Shown, not offered, until playback stops (ADR-0088).
-        _ if frozen => text("Stop to change").size(11).into(),
         Scale::Linear => styled(
             slider(min..=max, value, slide)
                 .step(info.step.unwrap_or((max - min) / 1000.0))
@@ -284,14 +297,14 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
                 #[allow(clippy::cast_precision_loss)] // a handful of options
                 set(index as f32)
             })
-            .text_size(12)
+            .text_size(PICK_LIST_TEXT)
             .width(Length::Fill)
             .into()
         }
-        // A toggle is a button unless frozen.
+        // A toggle is a button, returned above.
         Scale::Toggle => Space::new().into(),
     };
-    let input = if !frozen && is_slider(&info.scale) {
+    let input = if is_slider(&info.scale) {
         tooltip(
             input,
             container(text(format_value(info, value)).size(12))
@@ -319,6 +332,61 @@ fn toggle_label(info: &ParameterInfo, on: bool) -> String {
     }
 }
 
+/// Parameter `info`'s value `value` as text: a choice's option, a toggle's state, or the number
+/// with its unit ([`format_value`]).
+fn value_text(info: &ParameterInfo, value: f32) -> String {
+    match &info.scale {
+        Scale::Choice(options) => {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // a small index
+            let index = value.round().max(0.0) as usize;
+            options.get(index).cloned().unwrap_or_default()
+        }
+        Scale::Toggle => toggle_label(info, value >= 0.5),
+        _ => format_value(info, value),
+    }
+}
+
+/// `body` in place of parameter `info`'s control, taking the control's room so nothing below it
+/// moves: under the parameter's name at the control's height, or, for a toggle, whose button
+/// carries its name, both within the button's height.
+fn stand_in<'a>(info: &ParameterInfo, body: Text<'a>) -> Element<'a, Message> {
+    let name = text(label(info)).size(12);
+    let height = control_height(&info.scale);
+    let content: Element<'a, Message> = if info.scale == Scale::Toggle {
+        container(column![name, body].spacing(2))
+            .height(height)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        column![
+            name,
+            container(body).height(height).align_y(Alignment::Center)
+        ]
+        .spacing(4)
+        .into()
+    };
+    container(content)
+        .width(Length::Fixed(CONTROL_WIDTH))
+        .into()
+}
+
+/// The height of the control a parameter of `scale` shows: a pick list's for a choice, a
+/// toggle button's for a toggle, a slider's otherwise.
+fn control_height(scale: &Scale) -> f32 {
+    match scale {
+        Scale::Toggle => {
+            text::LineHeight::default().to_absolute(Pixels(TOOL_TEXT)).0 + 2.0 * TOGGLE_PADDING[0]
+        }
+        Scale::Choice(_) => {
+            text::LineHeight::default()
+                .to_absolute(Pixels(PICK_LIST_TEXT))
+                .0
+                + button::DEFAULT_PADDING.y()
+        }
+        _ => slider::Slider::<'_, f32, Message>::DEFAULT_HEIGHT,
+    }
+}
+
 /// Whether a parameter of `scale` is shown as a slider.
 pub(crate) fn is_slider(scale: &Scale) -> bool {
     matches!(scale, Scale::Linear | Scale::Logarithmic | Scale::Integer)
@@ -335,7 +403,11 @@ fn capitalised(text: &str) -> String {
 /// A parameter's label: its name without its group's prefix, capitalised, so `"band 1 q"` in
 /// group `"band 1"` is `"Q"`; a name that is all prefix, such as `"ceiling"` in group
 /// `"ceiling"`, is kept whole.
+/// A parameter's own [`label`](ParameterInfo::label), if it declares one, takes its place.
 fn label(info: &ParameterInfo) -> String {
+    if let Some(label) = &info.label {
+        return label.clone();
+    }
     let name = info
         .name
         .strip_prefix(info.group.as_str())
@@ -347,11 +419,12 @@ fn label(info: &ParameterInfo) -> String {
 
 /// `value` with its unit, to the decimal places of the parameter's declared step if it has one,
 /// else to a precision that suits its size; hertz from 1000 up as kilohertz; the parameter's
-/// maximum label, if it has one, at the maximum.
+/// maximum label, if it has one, at the maximum; multiplied by its display factor, if it has one.
 pub(crate) fn format_value(info: &ParameterInfo, value: f32) -> String {
     if let Some(label) = info.max_label.as_ref().filter(|_| value >= info.max) {
         return label.clone();
     }
+    let value = value * info.display_factor.unwrap_or(1.0);
     let (value, unit) = match info.unit.as_str() {
         "Hz" if value >= 1000.0 => (value / 1000.0, "kHz"),
         unit => (value, unit),
@@ -391,6 +464,34 @@ fn step_places(step: f32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_filter_orders_show_as_the_same_rolloff() -> Result<(), String> {
+        let eq = audio_effects::parameter_infos("parametric-eq").ok_or("no equalizer")?;
+        let synth = instruments::parameter_infos("synth").ok_or("no synth")?;
+        let orders: Vec<&ParameterInfo> = eq
+            .iter()
+            .chain(&synth)
+            .filter(|i| i.name.ends_with(" order"))
+            .collect();
+        assert_eq!(orders.len(), 3, "high-pass, low-pass and synth");
+        for info in orders {
+            assert_eq!(label(info), "Rolloff", "{}", info.name);
+            assert!(is_slider(&info.scale), "{}", info.name);
+            assert_eq!(format_value(info, 2.0), "12 dB/octave", "{}", info.name);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_control_height_holds_a_toggles_stand_in() {
+        let line = |size: f32| text::LineHeight::default().to_absolute(Pixels(size)).0;
+        // A toggle's stand-in: its name (12) over the body (11), 2 apart.
+        assert!(line(12.0) + 2.0 + line(11.0) <= control_height(&Scale::Toggle));
+        // Elsewhere the body (11) sits in the control's own height.
+        assert!(line(11.0) <= control_height(&Scale::Linear));
+        assert!(control_height(&Scale::Choice(Vec::new())) > control_height(&Scale::Linear));
+    }
 
     #[test]
     fn test_label_strips_the_group_and_capitalises() {

@@ -70,13 +70,16 @@ pub(crate) fn cutoff_info(name: impl Into<String>, response: Response) -> Parame
 }
 
 /// The `order` parameter of a filter, named `name`: 1 to [`MAX_ORDER`] poles, whole numbers,
-/// changeable only while stopped, starting at 2.
+/// changeable only while stopped, starting at 2; shown as "Rolloff" in dB per octave, 6 per pole.
 pub(crate) fn order_info(name: impl Into<String>) -> ParameterInfo {
     #[allow(clippy::cast_precision_loss)] // a small order
     let max = MAX_ORDER as f32;
     ParameterInfo::new(name, 1.0, max, DEFAULT_ORDER)
         .with_scale(Scale::Integer)
         .stopped_only()
+        .with_label("Rolloff")
+        .with_unit("dB/octave")
+        .with_display_factor(dsp::DB_PER_POLE)
 }
 
 /// The coefficients of an `order`-pole Butterworth filter passing `response`'s side of `cutoff`

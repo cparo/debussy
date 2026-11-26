@@ -93,7 +93,7 @@ Each pass stage, grouped as `high-pass` or `low-pass`, has three parameters:
 |---|---|---|---|
 | `high-pass enabled`, `low-pass enabled` | off (0) or on (1) | off | Whether the stage acts |
 | `high-pass cutoff`, `low-pass cutoff` | 20 to 20 000, logarithmic | 80, 12 000 | Cutoff in Hz |
-| `high-pass order`, `low-pass order` | 1 to 8, whole numbers | 2 | Poles: 6 dB per octave each |
+| `high-pass order`, `low-pass order` | 1 to 8, whole numbers | 2 | Poles: 6 dB per octave each; shown as **Rolloff** in dB/octave ([ADR-0170](../adrs/0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md)) |
 
 A stage is a Butterworth filter: a cascade of two-pole sections with the Butterworth pole Qs, plus
 a one-pole section for an odd order. It is 3 dB down at the cutoff and falls 6 dB per octave per

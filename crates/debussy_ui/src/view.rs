@@ -109,6 +109,9 @@ pub(crate) fn tool<'a>(
     button_at(face, message, selected, Place::Alone)
 }
 
+/// A [`toggle_button`]'s padding, vertical then horizontal.
+pub(crate) const TOGGLE_PADDING: [f32; 2] = [8.0, 12.0];
+
 /// A text button labelled `label` (owned, unlike [`Face::Label`]) that sends `message`, lit
 /// when `selected`, styled as [`tool`]'s labels and filling its width. `in_group` gives it,
 /// while unlit, the pick lists' background ([`theme::group_toggle`]).
@@ -120,7 +123,7 @@ pub(crate) fn toggle_button<'a>(
 ) -> Element<'a, Message> {
     let face = button(text(label).size(TOOL_TEXT).center().width(Length::Fill))
         .on_press(message)
-        .padding([8.0, 12.0])
+        .padding(TOGGLE_PADDING)
         .width(Length::Fill);
     if in_group {
         face.style(theme::group_toggle(selected)).into()
