@@ -12,8 +12,9 @@ Issue #206 gives the Synthesizer's per-voice low-pass (issue #173, cleared for o
 ADR-0148 and `docs/research/synth-patents.md`) a selectable slope. Software, portable scalar Rust,
 `f32`, per sample on the real-time audio thread. Each element as it will be built:
 
-1. **Order choice.** A stepped (not automatable) parameter `filter order` with options `6 dB`,
-   `12 dB`, `18 dB`, `24 dB` per octave; default `12 dB`.
+1. **Order choice.** A stepped (not automatable) parameter `filter order` selecting 6, 12, 18 or
+   24 dB per octave; default 12 dB. (Later saved as a pole count, 1 to 4, shown in dB/octave;
+   ADR-0170. The slopes and stages are unchanged.)
 2. **Stages.** Each voice holds two trapezoidal (TPT) state-variable filters (`dsp::Svf`, Simper's
    form, as in `docs/research/eq-filter-patents.md` element 1) and one TPT one-pole low-pass
    (`dsp::OnePole`, element 4 there). Per order, the signal passes through:

@@ -32,6 +32,10 @@ is disabled otherwise: greyed out (a slider in the curve-driven style, a pick li
 greyed text of its value in the control's room, as for "Stop to change"), still drawn and in Tab order, and unchanged by drags, presses and keys;
 `signal_graph::check_conditions` refuses any other kind of deciding parameter
 ([ADR-0169](../adrs/0169-a-parameter-s-control-can-be-disabled-by-the-value.md)).
+A parameter may declare a label, shown in place of the one made from its name, and a display
+factor, by which its shown value is multiplied; neither changes the value held or saved. Every
+filter order is labelled "Rolloff" and shown in dB/octave, 6 per pole
+([ADR-0170](../adrs/0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md)).
 Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
 keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
 1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a

@@ -57,7 +57,7 @@ enum Destination {
     Cutoff,
     Amplitude,
 }
-/// The low-pass's slope, in the order of the `filter order` parameter's choices (ADR-0168).
+/// The low-pass's slope; the `filter order` parameter counts its poles, 1 to 4 (ADR-0168).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Order {
     /// One one-pole low-pass, 6 dB per octave; no resonance.
@@ -69,15 +69,21 @@ enum Order {
     /// Two state-variable low-passes in series, at one cutoff and Q: 24 dB per octave.
     TwentyFour,
 }
-const ORDERS: [(&str, Order); 4] = [
-    ("6 dB", Order::Six),
-    ("12 dB", Order::Twelve),
-    ("18 dB", Order::Eighteen),
-    ("24 dB", Order::TwentyFour),
+/// The orders by pole count less one.
+const ORDERS: [Order; 4] = [
+    Order::Six,
+    Order::Twelve,
+    Order::Eighteen,
+    Order::TwentyFour,
 ];
-/// The `filter order` parameter's default: `12 dB`, the one SVF the synth had before it had a
-/// choice, so older projects sound unchanged.
-const DEFAULT_ORDER: f32 = 1.0;
+/// The `filter order` parameter's default: 2 poles, 12 dB per octave, the one SVF the synth had
+/// before it had a choice, so older projects sound unchanged.
+const DEFAULT_ORDER: f32 = 2.0;
+
+/// The order a `filter order` value (poles, 1 to 4) names.
+fn order(poles: f32) -> Order {
+    ORDERS[choice(poles - 1.0, ORDERS.len())]
+}
 
 const DESTINATIONS: [(&str, Destination); 3] = [
     ("pitch", Destination::Pitch),
@@ -176,12 +182,16 @@ impl Parameters {
             )?,
             // The one-pole of the 6 dB order has no resonance.
             resonance: Parameter::new(
-                filter("resonance", 0.5, 12.0, 0.707).enabled_while("filter order", &[1, 2, 3]),
+                filter("resonance", 0.5, 12.0, 0.707).enabled_while("filter order", &[2, 3, 4]),
             )?,
+            // Shown as the Equalizer's filter orders are: a rolloff in dB per octave.
             order: Parameter::new(
-                filter("filter order", 0.0, 3.0, DEFAULT_ORDER)
-                    .with_scale(Scale::Choice(names(&ORDERS)))
-                    .stopped_only(),
+                filter("filter order", 1.0, 4.0, DEFAULT_ORDER)
+                    .with_scale(Scale::Integer)
+                    .stopped_only()
+                    .with_label("Rolloff")
+                    .with_unit("dB/octave")
+                    .with_display_factor(dsp::DB_PER_POLE),
             )?,
             filter_amount: Parameter::new(
                 filter("envelope amount", -5.0, 5.0, 2.0).with_unit("oct"),
@@ -491,7 +501,7 @@ impl Node for Synth {
             ramps: Ramps::new(&self.parameters, sample_rate),
             dc: OnePoleCoefficients::high_pass(DC_BLOCK_HZ, rate),
             bend: 0.0,
-            order: ORDERS[choice(self.parameters.order.get(), ORDERS.len())].1,
+            order: order(self.parameters.order.get()),
         });
     }
 
@@ -536,7 +546,7 @@ impl Node for Synth {
         let bend_range = p.bend_range.get();
         let limit = choice(p.voices.get(), MAX_VOICES + 1).max(1);
         // Stopped-only: a new order takes effect at once, from rest (ADR-0168).
-        let order = ORDERS[choice(p.order.get(), ORDERS.len())].1;
+        let order = order(p.order.get());
         if order != running.order {
             running.order = order;
             for voice in running.pool.voices.iter_mut() {
@@ -667,13 +677,16 @@ mod tests {
 
     #[test]
     fn test_filter_each_order_falls_at_its_slope() {
-        for (n, (name, order)) in ORDERS.iter().enumerate() {
+        for (n, order) in ORDERS.iter().enumerate() {
             // An octave well above the cutoff, below where `f32` rounding sets a floor near
             // −90 dB, and far below Nyquist.
             let fall = 20.0 * (gain_at(*order, 800.0) / gain_at(*order, 1_600.0)).log10();
             #[allow(clippy::cast_precision_loss)] // n < 4
             let slope = 6.0 * (n + 1) as f32;
-            assert!((fall - slope).abs() < 0.6, "{name}: {fall} dB per octave");
+            assert!(
+                (fall - slope).abs() < 0.6,
+                "{order:?}: {fall} dB per octave"
+            );
         }
     }
 
@@ -708,24 +721,30 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_order_defaults_to_twelve_stopped_only_and_greys_resonance() -> Result<(), Error>
-    {
+    fn test_filter_order_is_poles_shown_as_rolloff_and_greys_resonance() -> Result<(), Error> {
         let p = Parameters::new()?;
-        let order = p.order.info();
-        assert_eq!(ORDERS[choice(order.default, ORDERS.len())].1, Order::Twelve);
-        assert!(order.stopped_only);
+        let info = p.order.info();
+        assert_eq!(order(info.default), Order::Twelve);
         assert_eq!(
-            order.scale,
-            Scale::Choice(vec![
-                "6 dB".into(),
-                "12 dB".into(),
-                "18 dB".into(),
-                "24 dB".into()
-            ])
+            (info.min, info.max, &info.scale),
+            (1.0, 4.0, &Scale::Integer)
+        );
+        assert!(info.stopped_only);
+        assert_eq!(info.label.as_deref(), Some("Rolloff"));
+        assert_eq!(info.unit, "dB/octave");
+        assert_eq!(info.display_factor, Some(dsp::DB_PER_POLE));
+        assert_eq!(
+            [1.0, 2.0, 3.0, 4.0].map(order),
+            [
+                Order::Six,
+                Order::Twelve,
+                Order::Eighteen,
+                Order::TwentyFour
+            ]
         );
         let resonance = p.resonance.info();
-        assert!(!resonance.is_enabled(|_| 0.0));
-        assert!((1..4).all(|i| resonance.is_enabled(|_| i as f32)));
+        assert!(!resonance.is_enabled(|_| 1.0));
+        assert!((2..=4).all(|i| resonance.is_enabled(|_| i as f32)));
         Ok(())
     }
 

@@ -104,7 +104,7 @@ Shapes the tone with four bands, and can cut rumble or hiss with a filter at eac
   | Control | Range | Default | What it does |
   |---|---|---|---|
   | **Cutoff** | 20 Hz – 20 kHz | 80 Hz (high-pass), 12 kHz (low-pass) | Where the filter starts cutting. |
-  | **Order*** | 1 – 8 | 2 | How steeply: each step adds 6 dB per octave, so 8 is 48 dB per octave. |
+  | **Rolloff*** | 6 – 48 dB/octave | 12 dB/octave | How steeply it cuts beyond the cutoff, in steps of 6. |
 
 ### Feedback
 
@@ -182,7 +182,7 @@ notes.
 
   | Control | Range | Default | What it does |
   |---|---|---|---|
-  | **Order*** | 6 dB, 12 dB, 18 dB, 24 dB | 12 dB | How steeply it cuts, per octave above the cutoff: higher is darker and more pronounced. |
+  | **Rolloff*** | 6 – 24 dB/octave | 12 dB/octave | How steeply it cuts above the cutoff, in steps of 6: higher is darker and more pronounced. |
   | **Cutoff** | 20 Hz – 20 kHz | 2 kHz | Where it starts cutting. |
   | **Resonance** | 0.5 – 12 | 0.71 | Makes it ring at the cutoff. Greyed out at **6 dB**, which cannot ring. |
   | **Envelope amount** | ±5 oct | 2 oct | How far the filter envelope moves the cutoff when a note starts. |

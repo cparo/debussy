@@ -50,7 +50,8 @@ pub use fft::{
     Complex, Fft, MAX_SIZE as MAX_FFT_SIZE, MIN_SIZE as MIN_FFT_SIZE, RealFft, Stft, hann,
 };
 pub use filter::{
-    MAX_FREQUENCY_RATIO, OnePole, OnePoleCoefficients, Svf, SvfCoefficients, butterworth_q, prewarp,
+    DB_PER_POLE, MAX_FREQUENCY_RATIO, OnePole, OnePoleCoefficients, Svf, SvfCoefficients,
+    butterworth_q, prewarp,
 };
 pub use level::{
     FOLD_DOWN_GAIN, apply_gain, db_to_gain, fold_to_mono, gain_to_db, pan_gains, pan_mono,

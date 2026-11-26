@@ -11,8 +11,7 @@
 Issue #206 asks for a choice of slope on the Synthesizer's low-pass, which until now was one
 trapezoidal state-variable filter (12 dB per octave, ADR-0148). Patent policy (ADR-0023) needs
 evidence before new filter topologies are built in-house, and a new choice parameter changes the
-saved format (`docs/architecture/effects.md` "Effect kinds": names and option order are part of
-it).
+saved format (`docs/architecture/effects.md` "Effect kinds": parameter names are part of it).
 
 The research ([synth-filter-order-patents.md](../research/synth-filter-order-patents.md)) found
 no in-force patent on a selectable 6/12/18/24 dB low-pass, on an SVF followed by a one-pole, or on
@@ -36,8 +35,9 @@ order stopped-only, as the Equalizer's order is, and to grey out `resonance` whi
 
 ## Decision
 
-- A choice parameter `filter order` in group `filter`, options in this order: `6 dB`, `12 dB`,
-  `18 dB`, `24 dB`; default `12 dB`. It is stopped-only and not automatable.
+- A whole-number parameter `filter order` in group `filter`: the poles, 1 to 4, default 2
+  (12 dB per octave). It is stopped-only and not automatable, and shown as **Rolloff** in dB per
+  octave, as the Equalizer's filter orders are (ADR-0170).
 - Per voice: 6 dB is one TPT one-pole low-pass; 12 dB one SVF low-pass; 18 dB an SVF low-pass then
   the one-pole; 24 dB two SVF low-passes in series. Every stage in use takes the same per-sample
   cutoff, and both SVFs the same Q (`resonance`), not Butterworth pole Qs. No gain correction
@@ -57,13 +57,16 @@ order stopped-only, as the Equalizer's order is, and to grey out `resonance` whi
   synthesizer behaviour.
 - **A resonant 6 dB order** (an SVF peak blended with a one-pole slope). Not a true 6 dB slope,
   and a new design needing its own research.
-- **Default `24 dB`.** A common synth default, but older projects, which save only non-default
+- **A choice of named options (`6 dB` … `24 dB`).** Fixed the option order into the saved format,
+  and showed differently from the Equalizer's whole-number order; replaced before merging, at Chris
+  Paro's request, by the pole count shown as a rolloff (ADR-0170).
+- **Default 24 dB.** A common synth default, but older projects, which save only non-default
   values, would change sound.
 
 ## Consequences
 
-- Projects saved before this load at `12 dB` and sound as they did. A later option must be added at
-  the end of the list.
+- Projects saved before this load at 2 poles and sound as they did. A steeper order can be added
+  by raising the maximum.
 - Changing order with a voice still sounding (for example, a held note while stopped) steps its
   filter from rest, which can click. Adding any fade there, or allowing the change while playing,
   needs US10311845B2 read again first.

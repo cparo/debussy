@@ -193,4 +193,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0167](0167-high-pass-and-low-pass-are-stages-of-the-equalizer.md) | High-pass and low-pass are stages of the Equalizer, not effects of their own | Accepted | [Equalizer](../architecture/effects.md#equalizer) |
 | [ADR-0168](0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md) | The synth's low-pass has a stopped-only order of 6, 12, 18 or 24 dB per octave | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
 | [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
+| [ADR-0170](0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md) | A filter order is shown as a rolloff in dB per octave | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 

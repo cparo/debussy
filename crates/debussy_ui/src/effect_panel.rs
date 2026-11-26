@@ -403,7 +403,11 @@ fn capitalised(text: &str) -> String {
 /// A parameter's label: its name without its group's prefix, capitalised, so `"band 1 q"` in
 /// group `"band 1"` is `"Q"`; a name that is all prefix, such as `"ceiling"` in group
 /// `"ceiling"`, is kept whole.
+/// A parameter's own [`label`](ParameterInfo::label), if it declares one, takes its place.
 fn label(info: &ParameterInfo) -> String {
+    if let Some(label) = &info.label {
+        return label.clone();
+    }
     let name = info
         .name
         .strip_prefix(info.group.as_str())
@@ -415,11 +419,12 @@ fn label(info: &ParameterInfo) -> String {
 
 /// `value` with its unit, to the decimal places of the parameter's declared step if it has one,
 /// else to a precision that suits its size; hertz from 1000 up as kilohertz; the parameter's
-/// maximum label, if it has one, at the maximum.
+/// maximum label, if it has one, at the maximum; multiplied by its display factor, if it has one.
 pub(crate) fn format_value(info: &ParameterInfo, value: f32) -> String {
     if let Some(label) = info.max_label.as_ref().filter(|_| value >= info.max) {
         return label.clone();
     }
+    let value = value * info.display_factor.unwrap_or(1.0);
     let (value, unit) = match info.unit.as_str() {
         "Hz" if value >= 1000.0 => (value / 1000.0, "kHz"),
         unit => (value, unit),
@@ -459,6 +464,24 @@ fn step_places(step: f32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_filter_orders_show_as_the_same_rolloff() -> Result<(), String> {
+        let eq = audio_effects::parameter_infos("parametric-eq").ok_or("no equalizer")?;
+        let synth = instruments::parameter_infos("synth").ok_or("no synth")?;
+        let orders: Vec<&ParameterInfo> = eq
+            .iter()
+            .chain(&synth)
+            .filter(|i| i.name.ends_with(" order"))
+            .collect();
+        assert_eq!(orders.len(), 3, "high-pass, low-pass and synth");
+        for info in orders {
+            assert_eq!(label(info), "Rolloff", "{}", info.name);
+            assert!(is_slider(&info.scale), "{}", info.name);
+            assert_eq!(format_value(info, 2.0), "12 dB/octave", "{}", info.name);
+        }
+        Ok(())
+    }
 
     #[test]
     fn test_control_height_holds_a_toggles_stand_in() {

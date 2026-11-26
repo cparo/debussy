@@ -79,6 +79,13 @@ pub struct ParameterInfo {
     /// no edits; it keeps its value. [`check_conditions`] keeps the deciding parameter
     /// stopped-only, so a control is never disabled while playing. Display only: not saved.
     pub enabled_while: Option<(String, Vec<u32>)>,
+    /// The label shown for the control in place of the one made from the name, such as
+    /// `"Rolloff"` for `"low-pass order"`; `None` for that one. Display only: not saved.
+    pub label: Option<String>,
+    /// The factor the value is shown multiplied by, with [`unit`](Self::unit), such as 6 to show
+    /// a filter order as dB per octave; `None` to show the value itself. Display only: the value
+    /// held and saved is unscaled.
+    pub display_factor: Option<f32>,
 }
 
 impl ParameterInfo {
@@ -100,6 +107,8 @@ impl ParameterInfo {
             step: None,
             shown_while: None,
             enabled_while: None,
+            label: None,
+            display_factor: None,
         }
     }
 
@@ -194,6 +203,25 @@ impl ParameterInfo {
             let value = f64::from(value_of(by));
             values.iter().any(|&v| (f64::from(v) - value).abs() < 0.5)
         })
+    }
+
+    /// This, its control labelled `label` (see [`label`](Self::label)).
+    #[must_use]
+    pub fn with_label(self, label: impl Into<String>) -> Self {
+        ParameterInfo {
+            label: Some(label.into()),
+            ..self
+        }
+    }
+
+    /// This, its value shown multiplied by `factor` (see
+    /// [`display_factor`](Self::display_factor)).
+    #[must_use]
+    pub fn with_display_factor(self, factor: f32) -> Self {
+        ParameterInfo {
+            display_factor: Some(factor),
+            ..self
+        }
     }
 
     /// This, in group `group`.
