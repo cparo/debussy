@@ -139,9 +139,9 @@ impl OscillatorParameters {
 /// Every parameter, in the order they are declared.
 struct Parameters {
     osc: [OscillatorParameters; 2],
+    order: Parameter,
     cutoff: Parameter,
     resonance: Parameter,
-    order: Parameter,
     filter_amount: Parameter,
     filter_velocity: Parameter,
     filter_env: EnvelopeParameters,
@@ -229,9 +229,9 @@ impl Parameters {
             all.extend(osc.all().into_iter().cloned());
         }
         all.extend([
+            self.order.clone(),
             self.cutoff.clone(),
             self.resonance.clone(),
-            self.order.clone(),
             self.filter_amount.clone(),
             self.filter_velocity.clone(),
         ]);

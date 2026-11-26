@@ -21,7 +21,8 @@ from 1000 up as kilohertz. A toggle is one button, lit while on and unlit while 
 separate label; it shows the name of its current state if the parameter names its states, else
 the parameter's name; in a group's strip, its unlit background is the
 pick lists' background. A stopped-only parameter shows "Stop to change" in place of its
-control while playing ([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
+control while playing, at the height of a pick list for a choice and of a slider otherwise
+([ADR-0093](../adrs/0093-effect-controls-show-slider-values-as-hover.md)).
 A parameter shown only while a toggle is in a given state is left out otherwise: not drawn,
 skipped by Tab, and unchanged by keys
 ([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)).

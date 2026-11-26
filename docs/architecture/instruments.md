@@ -47,7 +47,7 @@ mono, the same signal on both channels.
   | Group | Parameters |
   |---|---|
   | oscillator 1, 2 | wave, octave (±3), detune (±100 cents), pulse width (5–95%), level (0–1) |
-  | filter | cutoff (20 Hz–20 kHz), resonance (Q 0.5–12), filter order (6, 12, 18, 24 dB), envelope amount (±5 oct), velocity amount (0–4 oct) |
+  | filter | filter order (6, 12, 18, 24 dB), cutoff (20 Hz–20 kHz), resonance (Q 0.5–12), envelope amount (±5 oct), velocity amount (0–4 oct) |
   | filter envelope, amp envelope | attack, decay, release (1 ms–10 s), sustain (0–1); amp velocity (0–1) |
   | lfo | rate (0.01–20 Hz), shape, destination (pitch, cutoff, amplitude), depth (0–1) |
   | (none) | bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |

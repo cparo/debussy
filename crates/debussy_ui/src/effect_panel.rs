@@ -6,7 +6,7 @@
 use iced::widget::{
     Space, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
 };
-use iced::{Alignment, Element, Fill, Length};
+use iced::{Alignment, Element, Fill, Length, Pixels};
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
@@ -25,6 +25,8 @@ pub(crate) const STRIP_SCROLLBAR_GAP: f32 = 4.0;
 
 /// The width of one control, and of a strip of them.
 const CONTROL_WIDTH: f32 = 104.0;
+/// The text size of a choice parameter's pick list.
+const PICK_LIST_TEXT: f32 = 12.0;
 
 /// A curve port button's side, in logical pixels.
 const PORT_BUTTON: f32 = 20.0;
@@ -272,7 +274,10 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
     }
     let input: Element<'a, Message> = match &info.scale {
         // Shown, not offered, until playback stops (ADR-0088).
-        _ if frozen => text("Stop to change").size(11).into(),
+        _ if frozen => container(text("Stop to change").size(11))
+            .height(control_height(&info.scale))
+            .align_y(Alignment::Center)
+            .into(),
         Scale::Linear => styled(
             slider(min..=max, value, slide)
                 .step(info.step.unwrap_or((max - min) / 1000.0))
@@ -298,7 +303,7 @@ fn input<'a>(parameters: &NodeParameters<'a>, info: &'a ParameterInfo) -> Elemen
                 #[allow(clippy::cast_precision_loss)] // a handful of options
                 set(index as f32)
             })
-            .text_size(12)
+            .text_size(PICK_LIST_TEXT)
             .width(Length::Fill)
             .into()
         }
@@ -344,6 +349,20 @@ fn value_text(info: &ParameterInfo, value: f32) -> String {
         }
         Scale::Toggle => toggle_label(info, value >= 0.5),
         _ => format_value(info, value),
+    }
+}
+
+/// The height of the control a parameter of `scale` shows: a pick list's for a choice, a
+/// slider's otherwise; text drawn in its place keeps this height, so nothing below it moves.
+fn control_height(scale: &Scale) -> f32 {
+    match scale {
+        Scale::Choice(_) => {
+            text::LineHeight::default()
+                .to_absolute(Pixels(PICK_LIST_TEXT))
+                .0
+                + button::DEFAULT_PADDING.y()
+        }
+        _ => slider::Slider::<'_, f32, Message>::DEFAULT_HEIGHT,
     }
 }
 
