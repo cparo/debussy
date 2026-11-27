@@ -87,6 +87,13 @@ pub struct ParameterInfo {
     /// a filter order as dB per octave; `None` to show the value itself. Display only: the value
     /// held and saved is unscaled.
     pub display_factor: Option<f32>,
+    /// The row of the node's dialog its group is drawn in, counted from 0 at the top; a group
+    /// takes the row of its first parameter. Display only: not saved.
+    pub row: u32,
+    /// Text shown in a caption strip at the start of the row, before this parameter's group, when
+    /// the group is the row's first; `None` for no caption. A group takes the caption of its
+    /// first parameter. Display only: not saved.
+    pub row_caption: Option<String>,
 }
 
 impl ParameterInfo {
@@ -110,6 +117,8 @@ impl ParameterInfo {
             enabled_while: None,
             label: None,
             display_factor: None,
+            row: 0,
+            row_caption: None,
         }
     }
 
@@ -221,6 +230,21 @@ impl ParameterInfo {
     pub fn with_display_factor(self, factor: f32) -> Self {
         ParameterInfo {
             display_factor: Some(factor),
+            ..self
+        }
+    }
+
+    /// This, its group drawn in row `row` of the dialog (see [`row`](Self::row)).
+    #[must_use]
+    pub fn in_row(self, row: u32) -> Self {
+        ParameterInfo { row, ..self }
+    }
+
+    /// This, its row captioned `caption` (see [`row_caption`](Self::row_caption)).
+    #[must_use]
+    pub fn with_row_caption(self, caption: impl Into<String>) -> Self {
+        ParameterInfo {
+            row_caption: Some(caption.into()),
             ..self
         }
     }

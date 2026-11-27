@@ -14,7 +14,13 @@ metadata (`docs/architecture/signal-graph.md` "Effect nodes"), under its
 [display](effect-displays.md#effect-displays): ungrouped parameters in a row,
 after a "Preset" pick list if the kind has presets (`docs/architecture/effects.md`
 "Effect presets"), then one strip per group in a horizontal scroll whose scrollbar has its own row below the
-strips. A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
+strips. The strips are laid out in rows, by the `row` of each group's first parameter (0 at the
+top), and aligned in columns: column *k* is as wide as the widest *k*-th strip of any row, and
+each row as tall as its tallest strip, every strip filling its cell with its content at the top.
+All rows scroll together. A row whose first group's first parameter has a `row_caption` starts
+with a strip showing only that text, which takes no focus. Drawn order and Tab order are the
+ungrouped parameters, then the groups row by row, within a row in the order they first appear
+([ADR-0175](../adrs/0175-a-node-s-group-strips-are-laid-out-in-rows-aligned.md)). A linear parameter is a slider, a logarithmic one a slider over its logarithm, an
 integer one a slider in whole steps, and a choice a pick list,
 each under its name. A slider shows its value and unit only as a tooltip while hovered, hertz
 from 1000 up as kilohertz. A toggle is one button, lit while on and unlit while off, with no
@@ -37,7 +43,7 @@ A parameter may declare a label, shown in place of the one made from its name, a
 factor, by which its shown value is multiplied; neither changes the value held or saved. Every
 filter order is labelled "Rolloff" and shown in dB/octave, 6 per pole
 ([ADR-0170](../adrs/0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md)).
-Group strips are all as tall as the tallest, their content at the top. The mixer dialogs'
+The mixer dialogs'
 keyboard focus applies, over the controls in drawn order: up and down step a linear slider by
 1 % of its range, a logarithmic one by 1 % of its logarithm's range, an integer by one and a
 choice by one option, each press one step; right and left step a focused slider the same way;

@@ -18,7 +18,7 @@
 //!   its controls, display, presets and keys read.
 //! - `effect_display`: [`Pixels`] and [`DisplayContext`], the picture above an effect's controls
 //!   of the curve its parameter values ask for.
-//! - `equal_heights`: a row whose children all take its tallest child's height.
+//! - `strip_grid`: rows of strips aligned in columns, each row as tall as its tallest strip.
 //! - `reveal`: scrolling the node dialog's focused control into view.
 //! - `response_display`: the equalisers' display, their frequency response.
 //! - `impulse_display`: the delay's and reverb's display, their impulse response.
@@ -58,7 +58,6 @@ mod curve_lane;
 mod device;
 mod effect_display;
 mod effect_panel;
-mod equal_heights;
 mod export_dialog;
 mod focus_target;
 mod gain_display;
@@ -87,6 +86,7 @@ mod sampler_zones;
 mod services;
 mod shell;
 mod shortcuts;
+mod strip_grid;
 mod stroke;
 mod theme;
 mod transfer_display;

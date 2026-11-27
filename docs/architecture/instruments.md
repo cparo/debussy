@@ -76,6 +76,9 @@ mono, the same signal on both channels.
   | (none) | bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |
 - **Reset.** Every voice falls silent at once, the pedal lifts, the bend returns to centre and the
   LFOs return to phase 0.
+- **Dialog rows.** The noise groups are in the dialog's second row, under the oscillator
+  chain's, the first captioned "^ DCO Chain / Noise Chain >"
+  ([ADR-0175](../adrs/0175-a-node-s-group-strips-are-laid-out-in-rows-aligned.md)).
 - **Display.** Its dialog shows one note it plays, as described in
   `docs/architecture/effect-displays.md` "Synth note display".
 

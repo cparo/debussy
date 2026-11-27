@@ -325,18 +325,21 @@ impl<'a> NodeParameters<'a> {
 }
 
 /// The order an effect's controls are drawn and visited by Tab, as indices into `infos`: the
-/// ungrouped parameters, then each group's, groups in the order they first appear.
+/// ungrouped parameters, then each group's, groups by [row](ParameterInfo::row) and within a row
+/// in the order they first appear.
 pub(crate) fn tab_order(infos: &[ParameterInfo]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..infos.len())
         .filter(|&i| infos[i].group.is_empty())
         .collect();
-    let mut groups: Vec<&str> = Vec::new();
+    let mut groups: Vec<&ParameterInfo> = Vec::new();
     for info in infos.iter().filter(|i| !i.group.is_empty()) {
-        if !groups.contains(&info.group.as_str()) {
-            groups.push(&info.group);
+        if !groups.iter().any(|g| g.group == info.group) {
+            groups.push(info);
         }
     }
-    for group in groups {
+    // Stable, so groups of one row keep their order.
+    groups.sort_by_key(|head| head.row);
+    for group in groups.into_iter().map(|head| head.group.as_str()) {
         order.extend((0..infos.len()).filter(|&i| infos[i].group == group));
     }
     order
@@ -618,6 +621,24 @@ mod tests {
         ];
         assert_eq!(tab_order(&infos), [1, 4, 0, 3, 2]);
         Ok(())
+    }
+
+    #[test]
+    fn test_tab_order_takes_groups_row_by_row() {
+        let infos = [
+            ParameterInfo::new("c x", 0.0, 1.0, 0.0)
+                .with_group("c")
+                .in_row(1),
+            ParameterInfo::new("a x", 0.0, 1.0, 0.0).with_group("a"),
+            ParameterInfo::new("d x", 0.0, 1.0, 0.0)
+                .with_group("d")
+                .in_row(1),
+            ParameterInfo::new("b x", 0.0, 1.0, 0.0).with_group("b"),
+            // A group's row is its first parameter's.
+            ParameterInfo::new("c y", 0.0, 1.0, 0.0).with_group("c"),
+            ParameterInfo::new("mix", 0.0, 1.0, 0.0).in_row(1),
+        ];
+        assert_eq!(tab_order(&infos), [5, 1, 3, 0, 4, 2]);
     }
 
     #[test]
