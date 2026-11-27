@@ -45,6 +45,8 @@ const WAVES: [(&str, Wave); 3] = [
     ("pulse", Wave::Pulse),
     ("triangle", Wave::Triangle),
 ];
+/// The index of the pulse wave in [`WAVES`], the `wave` choice that enables `pulse width`.
+const PULSE: u32 = 1;
 /// The LFO shapes, in the order of the `lfo shape` parameter's choices.
 const LFO_SHAPES: [(&str, Shape); 6] = [
     ("sine", Shape::Sine),
@@ -130,7 +132,11 @@ impl OscillatorParameters {
             )?,
             octave: Parameter::new(info("octave", -3.0, 3.0, 0.0).with_scale(Scale::Integer))?,
             detune: Parameter::new(info("detune", -100.0, 100.0, detune).with_unit("cents"))?,
-            width: Parameter::new(info("pulse width", 5.0, 95.0, 50.0).with_unit("%"))?,
+            width: Parameter::new(
+                info("pulse width", 5.0, 95.0, 50.0)
+                    .with_unit("%")
+                    .enabled_while(format!("osc {n} wave"), &[PULSE]),
+            )?,
             level: Parameter::new(info("level", 0.0, 1.0, level))?,
         })
     }
@@ -827,6 +833,21 @@ mod tests {
         let resonance = p.resonance.info();
         assert!(!resonance.is_enabled(|_| 1.0));
         assert!((2..=4).all(|i| resonance.is_enabled(|_| i as f32)));
+        Ok(())
+    }
+
+    #[test]
+    fn test_pulse_width_is_enabled_only_for_the_pulse_wave() -> Result<(), Error> {
+        let p = Parameters::new()?;
+        assert_eq!(WAVES[PULSE as usize].1, Wave::Pulse);
+        for osc in &p.osc {
+            let width = osc.width.info();
+            assert!(width.is_enabled(|_| 1.0));
+            assert!(!width.is_enabled(|_| 0.0), "saw");
+            assert!(!width.is_enabled(|_| 2.0), "triangle");
+            let by = width.enabled_while.as_ref().map(|(by, _)| by.as_str());
+            assert_eq!(by, Some(osc.wave.info().name.as_str()));
+        }
         Ok(())
     }
 

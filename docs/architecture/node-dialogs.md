@@ -27,11 +27,12 @@ toggle shows its name and that text within its button's height
 A parameter shown only while a toggle is in a given state is left out otherwise: not drawn,
 skipped by Tab, and unchanged by keys
 ([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)).
-A parameter enabled only while a stopped-only stepped parameter of its node holds given values
+A parameter enabled only while a stepped parameter of its node holds given values
 is disabled otherwise: greyed out (a slider in the curve-driven style, a pick list or toggle as
 greyed text of its value in the control's room, as for "Stop to change"), still drawn and in Tab order, and unchanged by drags, presses and keys;
 `signal_graph::check_conditions` refuses any other kind of deciding parameter
-([ADR-0169](../adrs/0169-a-parameter-s-control-can-be-disabled-by-the-value.md)).
+([ADR-0169](../adrs/0169-a-parameter-s-control-can-be-disabled-by-the-value.md),
+[ADR-0173](../adrs/0173-a-control-can-be-disabled-by-any-stepped-parameter.md)).
 A parameter may declare a label, shown in place of the one made from its name, and a display
 factor, by which its shown value is multiplied; neither changes the value held or saved. Every
 filter order is labelled "Rolloff" and shown in dB/octave, 6 per pole

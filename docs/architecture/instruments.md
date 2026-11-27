@@ -14,7 +14,8 @@ mono, the same signal on both channels.
   their notes.
 - **Signal flow per voice.** Two oscillators (`dsp::Oscillator`, saw, pulse or triangle,
   band-limited by `dsp::MinBlep`), each at the note plus its octave and detune and scaled by its
-  level, are summed; a 5 Hz one-pole high-pass removes their DC; a low-pass of the chosen order
+  level, are summed (`pulse width` is disabled unless the wave is pulse;
+  [ADR-0173](../adrs/0173-a-control-can-be-disabled-by-any-stepped-parameter.md)); a 5 Hz one-pole high-pass removes their DC; a low-pass of the chosen order
   filters them (see **Filter order**); the amplitude envelope (`modulation::Adsr`) scales the result.
 - **Pitch.** 12-tone equal temperament from A4 = 440 Hz (`dsp::note_to_hz`). Pitch bend moves
   every voice by the bend position (−1 to 1, from the 14-bit value centred on 8192) times

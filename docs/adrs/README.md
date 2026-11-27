@@ -192,8 +192,9 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0166](0166-the-amplifier-has-no-tone-stack-tone-is-shaped.md) | The amplifier has no tone stack; tone is shaped with EQ nodes on the patch board | Accepted | [Amplifier](../architecture/effects.md#amplifier) |
 | [ADR-0167](0167-high-pass-and-low-pass-are-stages-of-the-equalizer.md) | High-pass and low-pass are stages of the Equalizer, not effects of their own | Accepted | [Equalizer](../architecture/effects.md#equalizer) |
 | [ADR-0168](0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md) | The synth's low-pass has a stopped-only order of 6, 12, 18 or 24 dB per octave | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
-| [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
+| [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Superseded by ADR-0173 | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 | [ADR-0170](0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md) | A filter order is shown as a rolloff in dB per octave | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 | [ADR-0171](0171-brown-noise-is-a-seeded-leaky-integrator-with-a-5.md) | Brown noise is a seeded leaky integrator with a 5 Hz pole | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0172](0172-an-instrument-s-display-is-a-note-curve-from-a.md) | An instrument's display is a note curve from a registry column of its own | Accepted | [Synth note display](../architecture/effect-displays.md#synth-note-display) |
+| [ADR-0173](0173-a-control-can-be-disabled-by-any-stepped-parameter.md) | A control can be disabled by any stepped parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 
