@@ -17,6 +17,10 @@ use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, 
 use crate::error::Error;
 use crate::voices::{EnvelopeParameters, Pool, SUSTAIN_PEDAL, Sound, Voice};
 
+mod note;
+
+pub(crate) use note::{note_curve, render_note};
+
 /// The most voices a synth plays at once; the `voices` parameter limits it further.
 pub const MAX_VOICES: usize = 16;
 /// The lowest and highest cutoff, in Hz.
@@ -340,6 +344,109 @@ struct Frame {
     tremolo: f32,
 }
 
+/// The values one sample's [`Frame`] is built from: the ramps' values while running, or the
+/// parameters' own for a note preview.
+#[derive(Debug, Clone, Copy)]
+struct Values {
+    /// The pitch bend, in semitones.
+    bend: f32,
+    /// Per oscillator: detune (cents), pulse width (share), level.
+    detune: [f32; 2],
+    width: [f32; 2],
+    level: [f32; 2],
+    /// The cutoff in log2(Hz).
+    cutoff: f32,
+    resonance: f32,
+    filter_amount: f32,
+    filter_velocity: f32,
+    lfo_depth: f32,
+}
+
+impl Values {
+    /// The parameters' values as they stand, with no pitch bend.
+    fn of(p: &Parameters) -> Values {
+        Values {
+            bend: 0.0,
+            detune: [p.osc[0].detune.get(), p.osc[1].detune.get()],
+            width: [p.osc[0].width.get() / 100.0, p.osc[1].width.get() / 100.0],
+            level: [p.osc[0].level.get(), p.osc[1].level.get()],
+            cutoff: p.cutoff.get().log2(),
+            resonance: p.resonance.get(),
+            filter_amount: p.filter_amount.get(),
+            filter_velocity: p.filter_velocity.get(),
+            lfo_depth: p.lfo_depth.get(),
+        }
+    }
+}
+
+/// What stays fixed for a block: the rate and the stepped parameters a frame needs.
+#[derive(Debug, Clone, Copy)]
+struct Block {
+    sample_rate: f32,
+    octave: [f32; 2],
+    order: Order,
+    destination: Destination,
+}
+
+impl Block {
+    /// The block's constants from the parameters, at `sample_rate`.
+    fn new(p: &Parameters, sample_rate: f32) -> Block {
+        Block {
+            sample_rate,
+            octave: [p.osc[0].octave.get().round(), p.osc[1].octave.get().round()],
+            order: order(p.order.get()),
+            destination: DESTINATIONS[choice(p.lfo_destination.get(), DESTINATIONS.len())].1,
+        }
+    }
+
+    /// The frame for one sample at `values`, with the LFO at `lfo` (−1 to 1) sent to its
+    /// destination.
+    fn frame(&self, v: &Values, lfo: f32) -> Frame {
+        let depth = v.lfo_depth;
+        Frame {
+            sample_rate: self.sample_rate,
+            max_cutoff: (MAX_CUTOFF_RATIO * self.sample_rate).min(CUTOFF_RANGE.1),
+            pitch: v.bend
+                + match self.destination {
+                    Destination::Pitch => lfo * depth * LFO_PITCH_SEMITONES,
+                    _ => 0.0,
+                },
+            octave: self.octave,
+            detune: v.detune,
+            width: v.width,
+            level: v.level,
+            cutoff: v.cutoff,
+            resonance: v.resonance,
+            order: self.order,
+            filter_amount: v.filter_amount,
+            filter_velocity: v.filter_velocity,
+            lfo_cutoff: match self.destination {
+                Destination::Cutoff => lfo * depth * LFO_CUTOFF_OCTAVES,
+                _ => 0.0,
+            },
+            tremolo: match self.destination {
+                Destination::Amplitude => 1.0 - depth * 0.5 * (1.0 - lfo),
+                _ => 1.0,
+            },
+        }
+    }
+}
+
+/// Sets `voice`'s envelopes and waves from the parameters, at `sample_rate`.
+fn configure(voice: &mut Voice<Tone>, p: &Parameters, sample_rate: f32) {
+    p.amp_env.apply(&mut voice.amp, sample_rate);
+    p.filter_env.apply(&mut voice.sound.filter_env, sample_rate);
+    for (i, osc) in voice.sound.osc.iter_mut().enumerate() {
+        osc.set_wave(WAVES[choice(p.osc[i].wave.get(), WAVES.len())].1);
+    }
+}
+
+/// Sets the LFO's rate and shape from the parameters.
+fn configure_lfo(lfo: &mut Lfo, p: &Parameters) {
+    lfo.set_frequency(f64::from(p.lfo_rate.get()));
+    lfo.set_shape(LFO_SHAPES[choice(p.lfo_shape.get(), LFO_SHAPES.len())].1);
+}
+
 /// The synth's part of a voice: its oscillators, filter stages and filter envelope.
 #[derive(Debug, Clone)]
 struct Tone {
@@ -530,25 +637,15 @@ impl Node for Synth {
         // Read once per block (ADR-0128).
         running.ramps.read(p);
         for voice in running.pool.voices.iter_mut() {
-            p.amp_env.apply(&mut voice.amp, running.sample_rate);
-            p.filter_env
-                .apply(&mut voice.sound.filter_env, running.sample_rate);
-            for (i, osc) in voice.sound.osc.iter_mut().enumerate() {
-                osc.set_wave(WAVES[choice(p.osc[i].wave.get(), WAVES.len())].1);
-            }
+            configure(voice, p, running.sample_rate);
         }
-        running.lfo.set_frequency(f64::from(p.lfo_rate.get()));
-        running
-            .lfo
-            .set_shape(LFO_SHAPES[choice(p.lfo_shape.get(), LFO_SHAPES.len())].1);
-        let destination = DESTINATIONS[choice(p.lfo_destination.get(), DESTINATIONS.len())].1;
-        let octave = [p.osc[0].octave.get().round(), p.osc[1].octave.get().round()];
+        configure_lfo(&mut running.lfo, p);
         let bend_range = p.bend_range.get();
         let limit = choice(p.voices.get(), MAX_VOICES + 1).max(1);
+        let block = Block::new(p, running.sample_rate);
         // Stopped-only: a new order takes effect at once, from rest (ADR-0168).
-        let order = order(p.order.get());
-        if order != running.order {
-            running.order = order;
+        if block.order != running.order {
+            running.order = block.order;
             for voice in running.pool.voices.iter_mut() {
                 voice.sound.reset_filter();
             }
@@ -583,33 +680,18 @@ impl Node for Synth {
             let r = &mut running.ramps;
             r.bend.set_target(running.bend * bend_range);
             let lfo = running.lfo.next_value();
-            let depth = r.lfo_depth.next_value();
-            let frame = Frame {
-                sample_rate: running.sample_rate,
-                max_cutoff: (MAX_CUTOFF_RATIO * running.sample_rate).min(CUTOFF_RANGE.1),
-                pitch: r.bend.next_value()
-                    + match destination {
-                        Destination::Pitch => lfo * depth * LFO_PITCH_SEMITONES,
-                        _ => 0.0,
-                    },
-                octave,
+            let values = Values {
+                bend: r.bend.next_value(),
                 detune: [r.detune[0].next_value(), r.detune[1].next_value()],
                 width: [r.width[0].next_value(), r.width[1].next_value()],
                 level: [r.level[0].next_value(), r.level[1].next_value()],
                 cutoff: r.cutoff.next_value(),
                 resonance: r.resonance.next_value(),
-                order,
                 filter_amount: r.filter_amount.next_value(),
                 filter_velocity: r.filter_velocity.next_value(),
-                lfo_cutoff: match destination {
-                    Destination::Cutoff => lfo * depth * LFO_CUTOFF_OCTAVES,
-                    _ => 0.0,
-                },
-                tremolo: match destination {
-                    Destination::Amplitude => 1.0 - depth * 0.5 * (1.0 - lfo),
-                    _ => 1.0,
-                },
+                lfo_depth: r.lfo_depth.next_value(),
             };
+            let frame = block.frame(&values, lfo);
             let amp_velocity = r.amp_velocity.next_value();
             let gain = r.gain.next_value();
             let mut sum = 0.0;

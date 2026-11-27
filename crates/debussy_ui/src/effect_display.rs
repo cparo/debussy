@@ -1,5 +1,6 @@
-//! The display at the top of an effect's dialog: a picture of the curve its parameter values ask
-//! for (`audio_effects::curve`), drawn by the display of that kind of curve, or blank charcoal
+//! The display at the top of an effect's or instrument's dialog: a picture of the curve an
+//! effect's parameter values ask for (`audio_effects::curve`) or of the note an instrument's play
+//! (`instruments::note_curve`), drawn by the display of that kind of picture, or blank charcoal
 //! grey for a kind with none (`docs/architecture/effect-displays.md` "Effect displays"). The
 //! picture is drawn again only when the curve, the tone or its size changes (ADR-0095).
 
@@ -9,14 +10,22 @@ use audio_effects::Curve;
 use iced::widget::canvas::{Cache, Geometry, Program};
 use iced::widget::{canvas, container};
 use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
+use instruments::{Note, NoteCurve};
+use project_model::NodeKind;
 
 use crate::app::Message;
 use crate::raster::draw_tiled;
 use crate::theme::{self, Tone};
-use crate::{amplifier_display, gain_display, impulse_display, response_display, transfer_display};
+use crate::{
+    amplifier_display, gain_display, impulse_display, note_display, response_display,
+    transfer_display,
+};
 
 /// The display area's height, in logical pixels; its width fills the dialog.
 pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
+
+/// An instrument's note display's height, in logical pixels: half an effect's.
+pub(crate) const NOTE_DISPLAY_HEIGHT: f32 = DISPLAY_HEIGHT / 2.0;
 
 /// An image a display drew: `width` × `height` pixels, row by row from the top left, four
 /// bytes (red, green, blue, alpha; not premultiplied) each.
@@ -55,6 +64,20 @@ impl Pixels {
     }
 }
 
+/// What a display area is drawn for, besides its node: the tone, the project's rate and tempo,
+/// and the screen's scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DisplaySettings {
+    /// The tone of the chrome around the display.
+    pub tone: Tone,
+    /// The project's sample rate, in Hz.
+    pub sample_rate: u32,
+    /// How long a whole note of the project tempo is, in frames at `sample_rate`.
+    pub frames_per_whole_note: f64,
+    /// Physical pixels per logical pixel.
+    pub scale: f32,
+}
+
 /// What a display draws for, besides the curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DisplayContext {
@@ -62,9 +85,71 @@ pub struct DisplayContext {
     pub tone: Tone,
     /// The picture's width in physical pixels.
     pub width: u32,
-    /// The picture's height in physical pixels; [`DISPLAY_HEIGHT`] logical pixels at the
-    /// display's scale.
+    /// The picture's height in physical pixels: `logical_height` at the display's scale.
     pub height: u32,
+    /// The display's height in logical pixels: [`DISPLAY_HEIGHT`], or
+    /// [`NOTE_DISPLAY_HEIGHT`] for an instrument's note.
+    pub logical_height: u32,
+}
+
+/// The kind of node a display area belongs to, by its kind id: which registry to ask for its
+/// picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DisplayKind<'a> {
+    /// A built-in effect, such as `"parametric-eq"`.
+    Effect(&'a str),
+    /// A built-in instrument, such as `"synth"`.
+    Instrument(&'a str),
+}
+
+impl<'a> DisplayKind<'a> {
+    /// The display kind of a node of kind `node`; `None` for a node that is neither an effect
+    /// nor an instrument.
+    pub(crate) fn of(node: &'a NodeKind) -> Option<DisplayKind<'a>> {
+        match node {
+            NodeKind::Effect { kind, .. } => Some(DisplayKind::Effect(kind)),
+            NodeKind::Instrument { kind, .. } => Some(DisplayKind::Instrument(kind)),
+            _ => None,
+        }
+    }
+}
+
+/// What a display area pictures: an effect's curve or an instrument's note.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Picture {
+    /// The curve an effect's parameter values ask for.
+    Effect(Curve),
+    /// The note an instrument's parameter values play.
+    Note(NoteCurve),
+}
+
+impl Picture {
+    /// The picture of a node of `kind` at `values`, from the instruments' or the effects'
+    /// registry; `None` for a kind with no picture.
+    fn of(
+        kind: DisplayKind<'_>,
+        values: &[f32],
+        sample_rate: u32,
+        frames_per_whole_note: f64,
+    ) -> Option<Picture> {
+        match kind {
+            DisplayKind::Instrument(id) => {
+                instruments::note_curve(id, values, sample_rate).map(Picture::Note)
+            }
+            DisplayKind::Effect(id) => {
+                audio_effects::curve(id, values, sample_rate, frames_per_whole_note)
+                    .map(Picture::Effect)
+            }
+        }
+    }
+
+    /// The display area's height for this picture, in logical pixels.
+    fn height(&self) -> f32 {
+        match self {
+            Picture::Effect(_) => DISPLAY_HEIGHT,
+            Picture::Note(_) => NOTE_DISPLAY_HEIGHT,
+        }
+    }
 }
 
 /// The picture of `curve`, `context.width` × `context.height` physical pixels, drawn by the
@@ -80,10 +165,12 @@ pub(crate) fn draw(curve: &Curve, context: &DisplayContext) -> Option<Pixels> {
     }
 }
 
-/// The default values of `kind`'s parameters with `changes` set by name, for tests.
+/// The default values of effect or instrument kind `kind`'s parameters with `changes` set by
+/// name, for tests.
 #[cfg(test)]
 pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32>> {
-    let infos = audio_effects::parameter_infos(kind)?;
+    let infos =
+        audio_effects::parameter_infos(kind).or_else(|| instruments::parameter_infos(kind))?;
     Some(
         infos
             .iter()
@@ -97,54 +184,65 @@ pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32
     )
 }
 
-/// The display area for an effect of `kind` whose parameters stand at `values` (in the effect's
-/// order), in a project at `sample_rate` whose whole note is `frames_per_whole_note` frames, at
-/// `scale` physical pixels per logical pixel: the picture of the curve they ask for, or charcoal
-/// grey. It fills the width it is given.
+/// The display area for a node of `kind` whose parameters stand at `values` (in the node's
+/// order), drawn for `settings`: the picture of the curve or note they give, or charcoal grey. It
+/// fills the width it is given; it is [`NOTE_DISPLAY_HEIGHT`] tall for a note and
+/// [`DISPLAY_HEIGHT`] otherwise.
 pub(crate) fn display_area<'a>(
-    kind: &str,
+    kind: DisplayKind<'_>,
     values: &[f32],
-    tone: Tone,
-    sample_rate: u32,
-    frames_per_whole_note: f64,
-    scale: f32,
+    settings: DisplaySettings,
 ) -> Element<'a, Message> {
-    let curve = audio_effects::curve(kind, values, sample_rate, frames_per_whole_note);
-    let body: Element<'a, Message> = match curve {
-        Some(curve) => canvas(DisplayView { curve, tone, scale })
-            .width(Fill)
-            .height(Fill)
-            .into(),
+    let DisplaySettings {
+        tone,
+        sample_rate,
+        frames_per_whole_note,
+        scale,
+    } = settings;
+    let picture = Picture::of(kind, values, sample_rate, frames_per_whole_note);
+    let height = picture.as_ref().map_or(DISPLAY_HEIGHT, Picture::height);
+    let body: Element<'a, Message> = match picture {
+        Some(picture) => canvas(DisplayView {
+            picture,
+            tone,
+            scale,
+        })
+        .width(Fill)
+        .height(Fill)
+        .into(),
         None => iced::widget::Space::new().into(),
     };
     container(body)
         .width(Fill)
-        .height(Length::Fixed(DISPLAY_HEIGHT))
+        .height(Length::Fixed(height))
         .style(theme::blank_display)
         .into()
 }
 
-/// What the cached picture was drawn from: the curve, the tone and its size in physical pixels.
+/// What the cached picture was drawn from: the picture, the tone and its size in physical
+/// pixels.
 #[derive(Debug, Clone, PartialEq)]
 struct Key {
-    curve: Curve,
+    picture: Picture,
     tone: Tone,
     width: u32,
     height: u32,
 }
 
 /// The canvas state of a display area: its picture, kept until the key it was drawn from
-/// changes.
+/// changes, and the last note rendered, kept until its curve changes, so a resize or a change
+/// of tone does not render it again.
 #[derive(Default)]
 struct DisplayState {
     cache: Cache,
     key: RefCell<Option<Key>>,
+    note: RefCell<Option<(NoteCurve, Note)>>,
 }
 
-/// Draws a curve's picture into a canvas, once per change of the curve, the tone or the size.
+/// Draws a picture into a canvas, once per change of the picture, the tone or the size.
 struct DisplayView {
     /// What the picture shows.
-    curve: Curve,
+    picture: Picture,
     /// The tone of the chrome around the display.
     tone: Tone,
     /// The display's physical pixels per logical pixel.
@@ -155,7 +253,7 @@ impl DisplayView {
     /// The key of a picture `size` logical pixels big.
     fn key(&self, size: Size) -> Key {
         Key {
-            curve: self.curve.clone(),
+            picture: self.picture.clone(),
             tone: self.tone,
             width: physical(size.width, self.scale),
             height: physical(size.height, self.scale),
@@ -175,14 +273,28 @@ impl DisplayView {
         true
     }
 
-    /// The display's picture, `width` × `height` physical pixels.
-    fn picture(&self, width: u32, height: u32) -> Option<Pixels> {
+    /// The display's picture, `width` × `height` physical pixels, rendering a note only if
+    /// `state` does not hold it already.
+    fn picture(&self, state: &DisplayState, width: u32, height: u32) -> Option<Pixels> {
+        // The display heights are whole logical pixels.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let context = DisplayContext {
             tone: self.tone,
             width,
             height,
+            logical_height: self.picture.height() as u32,
         };
-        draw(&self.curve, &context)
+        match &self.picture {
+            Picture::Effect(curve) => draw(curve, &context),
+            Picture::Note(curve) => {
+                let mut kept = state.note.borrow_mut();
+                if kept.as_ref().is_none_or(|(c, _)| c != curve) {
+                    *kept = Some((curve.clone(), curve.render()));
+                }
+                let (_, note) = kept.as_ref()?;
+                note_display::render(curve, note, &context)
+            }
+        }
     }
 }
 
@@ -201,7 +313,7 @@ impl Program<Message> for DisplayView {
         self.refresh(state, size);
         let key = self.key(size);
         let geometry = state.cache.draw(renderer, size, |frame| {
-            if let Some(p) = self.picture(key.width, key.height) {
+            if let Some(p) = self.picture(state, key.width, key.height) {
                 draw_tiled(
                     frame,
                     Rectangle::with_size(size),
@@ -227,6 +339,14 @@ fn physical(logical: f32, scale: f32) -> u32 {
 mod tests {
     use super::*;
 
+    /// Display settings for the display-area tests.
+    const SETTINGS: DisplaySettings = DisplaySettings {
+        tone: Tone::Dark,
+        sample_rate: 48_000,
+        frames_per_whole_note: 96_000.0,
+        scale: 2.0,
+    };
+
     /// The curve of `kind` at its defaults with `changes` by name, at `sample_rate`.
     fn curve_of(kind: &str, changes: &[(&str, f32)], sample_rate: u32) -> Option<Curve> {
         audio_effects::curve(kind, &values_with(kind, changes)?, sample_rate, 96_000.0)
@@ -236,7 +356,7 @@ mod tests {
     fn view(cutoff: f32, tone: Tone, sample_rate: u32) -> Option<DisplayView> {
         let changes = [("high-pass enabled", 1.0), ("high-pass cutoff", cutoff)];
         Some(DisplayView {
-            curve: curve_of("parametric-eq", &changes, sample_rate)?,
+            picture: Picture::Effect(curve_of("parametric-eq", &changes, sample_rate)?),
             tone,
             scale: 2.0,
         })
@@ -256,6 +376,7 @@ mod tests {
             tone: Tone::Light,
             width: physical(100.0, 2.0),
             height: physical(DISPLAY_HEIGHT, 2.0),
+            logical_height: 320,
         };
         for kind in audio_effects::EFFECTS.iter().filter(|k| k.curve.is_some()) {
             let curve = curve_of(kind.id, &[], 48_000).ok_or("no curve")?;
@@ -282,9 +403,9 @@ mod tests {
     {
         let eq = "parametric-eq";
         let values = values_with(eq, &[]).ok_or("unknown kind")?;
-        let _blank = display_area("unknown", &[0.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _wrong_length = display_area(eq, &[80.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _drawn = display_area(eq, &values, Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _blank = display_area(DisplayKind::Effect("unknown"), &[0.0], SETTINGS);
+        let _wrong_length = display_area(DisplayKind::Effect(eq), &[80.0], SETTINGS);
+        let _drawn = display_area(DisplayKind::Effect(eq), &values, SETTINGS);
         Ok(())
     }
 
@@ -321,7 +442,7 @@ mod tests {
         let size = Size::new(300.0, DISPLAY_HEIGHT);
         let view = |attack| -> Option<DisplayView> {
             Some(DisplayView {
-                curve: curve_of("dynamics", &[("attack", attack)], 48_000)?,
+                picture: Picture::Effect(curve_of("dynamics", &[("attack", attack)], 48_000)?),
                 tone: Tone::Dark,
                 scale: 2.0,
             })
@@ -335,8 +456,87 @@ mod tests {
     fn test_picture_is_drawn_at_physical_size() -> Result<(), Box<dyn std::error::Error>> {
         let view = view(80.0, Tone::Light, 48_000).ok_or("no curve")?;
         let key = view.key(Size::new(100.0, DISPLAY_HEIGHT));
-        let picture = view.picture(key.width, key.height).ok_or("no picture")?;
+        let picture = view
+            .picture(&DisplayState::default(), key.width, key.height)
+            .ok_or("no picture")?;
         assert_eq!((picture.width(), picture.height()), (200, 640));
+        Ok(())
+    }
+
+    #[test]
+    fn test_picture_height_is_half_for_a_note() -> Result<(), Box<dyn std::error::Error>> {
+        let synth = values_with("synth", &[]).ok_or("no synth")?;
+        let note = Picture::of(DisplayKind::Instrument("synth"), &synth, 48_000, 96_000.0)
+            .ok_or("no note")?;
+        assert_eq!(note.height(), 160.0);
+        let eq = values_with("parametric-eq", &[]).ok_or("no eq")?;
+        let effect = Picture::of(DisplayKind::Effect("parametric-eq"), &eq, 48_000, 96_000.0)
+            .ok_or("no eq")?;
+        assert_eq!(effect.height(), 320.0);
+        assert!(Picture::of(DisplayKind::Instrument("sampler"), &[], 48_000, 96_000.0).is_none());
+        // An instrument's kind is not looked up among the effects, nor the reverse.
+        assert!(Picture::of(DisplayKind::Effect("synth"), &synth, 48_000, 96_000.0).is_none());
+        let _area = display_area(DisplayKind::Instrument("synth"), &synth, SETTINGS);
+        Ok(())
+    }
+
+    #[test]
+    fn test_refresh_ignores_synth_values_the_note_does_not_use()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let state = DisplayState::default();
+        let size = Size::new(300.0, NOTE_DISPLAY_HEIGHT);
+        let view = |changes: &[(&str, f32)]| -> Option<DisplayView> {
+            Some(DisplayView {
+                picture: Picture::of(
+                    DisplayKind::Instrument("synth"),
+                    &values_with("synth", changes)?,
+                    48_000,
+                    96_000.0,
+                )?,
+                tone: Tone::Dark,
+                scale: 1.0,
+            })
+        };
+        assert!(
+            view(&[("voices", 8.0)])
+                .ok_or("no note")?
+                .refresh(&state, size)
+        );
+        assert!(
+            !view(&[("voices", 3.0)])
+                .ok_or("no note")?
+                .refresh(&state, size)
+        );
+        assert!(
+            view(&[("cutoff", 500.0)])
+                .ok_or("no note")?
+                .refresh(&state, size)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_picture_is_drawn_at_physical_size_and_keeps_its_note()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let picture = Picture::of(
+            DisplayKind::Instrument("synth"),
+            &values_with("synth", &[]).ok_or("no synth")?,
+            48_000,
+            0.0,
+        )
+        .ok_or("no note")?;
+        let view = DisplayView {
+            picture,
+            tone: Tone::Light,
+            scale: 2.0,
+        };
+        let state = DisplayState::default();
+        let key = view.key(Size::new(300.0, NOTE_DISPLAY_HEIGHT));
+        let picture = view
+            .picture(&state, key.width, key.height)
+            .ok_or("no picture")?;
+        assert_eq!((picture.width(), picture.height()), (600, 320));
+        assert!(state.note.borrow().is_some());
         Ok(())
     }
 }

@@ -7,16 +7,17 @@ use iced::widget::{
     Space, Text, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Pixels};
+use project_model::NodeKind;
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
-use crate::effect_display::display_area;
+use crate::effect_display::{DisplayKind, DisplaySettings, display_area};
 use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
-use crate::theme::{self, Tone};
+use crate::theme;
 use crate::view::{TOGGLE_PADDING, TOOL_TEXT, toggle_button};
 
 /// The gap between a dialog's strips (an effect's groups, a mixer's channels) and their
@@ -97,32 +98,24 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
     Some(order[next])
 }
 
-/// The display and controls of the effect whose parameters are `parameters`, with the control
-/// or port button at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate`, for a
+/// The display and controls of the effect or instrument of kind `node` whose parameters are
+/// `parameters`, with the control or port button at `focus` ringed; empty for a mixer or any other node. The
+/// display, drawn in `tone` at `sample_rate`, for a
 /// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
 /// pixel, comes first; then the preset picker, if the kind
 /// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
 /// horizontally.
 pub(crate) fn effect_panel<'a>(
     parameters: &NodeParameters<'a>,
+    node: &NodeKind,
     focus: Option<DialogFocus>,
-    tone: Tone,
-    sample_rate: u32,
-    frames_per_whole_note: f64,
-    scale: f32,
+    settings: DisplaySettings,
 ) -> Element<'a, Message> {
-    let Some(kind) = parameters.kind() else {
+    let (Some(kind), Some(display_kind)) = (parameters.kind(), DisplayKind::of(node)) else {
         return Space::new().into();
     };
     let infos = parameters.infos();
-    let display = display_area(
-        kind,
-        &parameters.values(),
-        tone,
-        sample_rate,
-        frames_per_whole_note,
-        scale,
-    );
+    let display = display_area(display_kind, &parameters.values(), settings);
     // Drawn in Tab order, so the two cannot disagree: the ungrouped first, then each group's run
     // as a strip.
     let order = parameters.shown_order();

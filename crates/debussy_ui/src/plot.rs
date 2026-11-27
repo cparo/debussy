@@ -4,7 +4,9 @@
 
 use iced::Color;
 
-use crate::effect_display::{DISPLAY_HEIGHT, DisplayContext, Pixels};
+#[cfg(test)]
+use crate::effect_display::DISPLAY_HEIGHT;
+use crate::effect_display::{DisplayContext, Pixels};
 use crate::raster::Raster;
 use crate::stroke::Mask;
 use crate::theme::LABEL;
@@ -155,13 +157,22 @@ pub(crate) struct Plot {
 
 impl Plot {
     /// The plot in a display `width` logical pixels wide and [`DISPLAY_HEIGHT`] tall: inside the
-    /// [`LEFT_GUTTER`] and [`BOTTOM_GUTTER`] gutters, running to the top and right edges.
+    /// [`LEFT_GUTTER`] and [`BOTTOM_GUTTER`] gutters, running to the top and right edges. The
+    /// tests' reference for where a display's [`Canvas::plot`] lies.
+    #[cfg(test)]
     pub(crate) fn new(width: f32, x_axis: Axis, y_axis: Axis) -> Plot {
+        Plot::within(0.0, width, DISPLAY_HEIGHT, x_axis, y_axis)
+    }
+
+    /// The plot in the part of a display `height` logical pixels tall that starts at `left` and
+    /// is `width` wide: inside that part's own [`LEFT_GUTTER`] and the display's
+    /// [`BOTTOM_GUTTER`], running to the top edge and the part's right edge.
+    pub(crate) fn within(left: f32, width: f32, height: f32, x_axis: Axis, y_axis: Axis) -> Plot {
         Plot {
-            left: LEFT_GUTTER,
+            left: left + LEFT_GUTTER,
             top: 0.0,
             width: (width - LEFT_GUTTER).max(1.0),
-            height: DISPLAY_HEIGHT - BOTTOM_GUTTER,
+            height: (height - BOTTOM_GUTTER).max(1.0),
             x_axis,
             y_axis,
         }
@@ -194,7 +205,7 @@ impl Plot {
 }
 
 /// A display's picture while it is drawn: a transparent raster of the context's physical size,
-/// at [`DISPLAY_HEIGHT`] logical pixels tall.
+/// at the context's logical height.
 pub(crate) struct Canvas {
     /// The picture so far.
     raster: Raster,
@@ -204,6 +215,8 @@ pub(crate) struct Canvas {
     height: usize,
     /// Physical pixels per logical pixel.
     scale: f32,
+    /// The height in logical pixels.
+    logical_height: f32,
 }
 
 impl Canvas {
@@ -211,14 +224,17 @@ impl Canvas {
     pub(crate) fn new(context: &DisplayContext) -> Option<Canvas> {
         let width = usize::try_from(context.width).ok()?;
         let height = usize::try_from(context.height).ok()?;
-        // `height` is `DISPLAY_HEIGHT` logical pixels; at most a few thousand.
+        // A display's height, in logical and physical pixels: at most a few thousand.
         #[allow(clippy::cast_precision_loss)]
-        let scale = height as f32 / DISPLAY_HEIGHT;
+        let logical_height = context.logical_height.max(1) as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let scale = height as f32 / logical_height;
         Some(Canvas {
             raster: Raster::with_physical_size(width, height, scale),
             width,
             height,
             scale,
+            logical_height,
         })
     }
 
@@ -227,11 +243,23 @@ impl Canvas {
         self.scale
     }
 
-    /// The plot of `x_axis` across and `y_axis` up, at this canvas's width.
+    /// The plot of `x_axis` across and `y_axis` up, at this canvas's width and height.
     pub(crate) fn plot(&self, x_axis: Axis, y_axis: Axis) -> Plot {
+        self.plot_in(0.0, self.logical_width(), x_axis, y_axis)
+    }
+
+    /// The plot of `x_axis` across and `y_axis` up in the part of this canvas from `left`,
+    /// `width` wide, with a left gutter of its own, in logical pixels.
+    pub(crate) fn plot_in(&self, left: f32, width: f32, x_axis: Axis, y_axis: Axis) -> Plot {
+        Plot::within(left, width, self.logical_height, x_axis, y_axis)
+    }
+
+    /// The width in logical pixels.
+    pub(crate) fn logical_width(&self) -> f32 {
         // `width` is a display's width in physical pixels; at most a few thousand.
         #[allow(clippy::cast_precision_loss)]
-        Plot::new(self.width as f32 / self.scale, x_axis, y_axis)
+        let width = self.width as f32;
+        width / self.scale
     }
 
     /// Grid lines across the whole plot: a vertical line at each of `verticals` (a
@@ -682,6 +710,7 @@ mod tests {
             tone: Tone::Light,
             width: 900,
             height: 480,
+            logical_height: 320,
         };
         let mut canvas = Canvas::new(&context).ok_or("no canvas")?;
         assert!((canvas.scale() - 1.5).abs() < 1e-6);

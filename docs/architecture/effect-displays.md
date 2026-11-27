@@ -2,12 +2,14 @@
 
 ## Effect displays
 
-An effect's dialog shows a display area between its header and its controls: the dialog's width
-less its padding, 320 logical pixels tall, scrolling with the controls. The area shows the picture
-of the `Curve` its parameter values (the dragged one while dragging) ask for
-(`docs/architecture/effects.md` "Effect curves"). `draw` in
-`crates/debussy_ui/src/effect_display.rs` matches on the curve's variant and calls that kind of
-curve's `render`, given a `DisplayContext`: the tone and the area's size in physical pixels. It
+An effect's or instrument's dialog shows a display area between its header and its controls:
+the dialog's width less its padding, 320 logical pixels tall (160 for an instrument's note),
+scrolling with the controls. The area shows the picture of the `Curve` an effect's parameter
+values (the dragged one while dragging) ask for (`docs/architecture/effects.md` "Effect curves"),
+or of the `NoteCurve` an instrument's play (see "Synth note display"). `draw` in
+`crates/debussy_ui/src/effect_display.rs` matches on the picture's variant and calls that kind of
+picture's `render`, given a `DisplayContext`: the tone, the area's size in physical pixels and
+its height in logical pixels. It
 returns non-premultiplied RGBA pixels, stretched to the area. A kind with no curve, or a picture
 that cannot be drawn, leaves the area charcoal grey (`#2B2B2B`) in both tones
 ([ADR-0105](../adrs/0105-effect-curves-are-described-per-kind-in-audio.md)). It runs on the
@@ -141,3 +143,35 @@ values; the simulation runs only when the picture is drawn.
   (`theme::spectrum_colour`) over charcoal: −48 dB and below and undefined cells are left as
   background, 0 dB is the tone's audio colour, and +12 dB and above the ramp's hot end
   ([ADR-0121](../adrs/0121-chorus-and-flanger-displays-plot-the-gain-over-10.md)).
+
+## Synth note display
+
+An instrument kind's `display` column in `instruments::INSTRUMENTS` names the function that builds
+its `NoteCurve`; `instruments::note_curve` looks it up. The synthesizer has one; the sampler has
+none, and its area stays blank. `crates/debussy_ui/src/note_display.rs` draws it.
+
+- The note is an A4 at velocity 127, from rest, held and then released. `NoteCurve::render`
+  renders it with the synth's own per-sample voice code on state of its own: fixed values with no
+  ramps, no pitch bend, LFO phase 0 and the LFO's fixed seed, after the output gain, at the
+  project's sample rate or 48 kHz, whichever is lower. Building the curve copies the values; the
+  rendering runs only when the picture is drawn, and the display keeps it while the curve is
+  unchanged. Values that cannot change the note (`voices`, `bend range`, `amp velocity`, and the
+  LFO's rate, shape and destination at zero depth) are set to their defaults in the curve.
+- The span, in seconds, is `held + amp release`, at most 10, where `held` is the longer of the
+  two envelopes' attack plus decay, plus 0.25. The note is released at the lower of `held` and
+  three quarters of the span.
+- The plot splits into two halves 12 logical pixels apart, each with its own left gutter, sharing
+  one linear time axis from 0 to the span with the marks of "Impulse response display", labelled
+  below both halves.
+- The left half plots the waveform from −1 to +1, with grey lines at ±1 and a brighter one at 0,
+  labelled `+1`, `0` and `−1`. Each physical column fills, in the tone's audio colour, from the
+  lowest sample in its equal slice of the note to the highest, at least one physical pixel tall;
+  values beyond ±1 lie on the edge.
+- The right half is a spectrogram of the note's absolute level, with the frequency axis, rows,
+  columns and analysis window of "Modulation display". Each column's window is centred on its
+  slice, with silence before the note-on and after the span. A cell's level is
+  `10·log10(Σ|X|²)` over its band (`dsp::Bands`), a sine at a bin centre reading its amplitude;
+  bands at or above the Nyquist frequency are undefined. Colours are on the spectrum ramp over
+  charcoal: −72 dBFS and below and undefined cells are background, −12 dBFS is the tone's audio
+  colour, 0 dBFS and above the hot end
+  ([ADR-0172](../adrs/0172-an-instrument-s-display-is-a-note-curve-from-a.md)).
