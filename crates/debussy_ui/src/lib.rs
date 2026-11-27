@@ -23,6 +23,7 @@
 //! - `response_display`: the equalisers' display, their frequency response.
 //! - `impulse_display`: the delay's and reverb's display, their impulse response.
 //! - `gain_display`: the chorus's and flanger's display, their gain over pink noise.
+//! - `note_display`: the synthesizer's display, one note's waveform and spectrogram.
 //! - `plot`: the effect displays' plot toolkit: frame, axes, grid, labels and curve.
 //! - `stroke`: anti-aliased strokes drawn as coverage into a mask.
 //! - `typeface`: the `Typeface` seam and the in-house stroke font behind it.
@@ -73,6 +74,7 @@ mod midi_out;
 mod mixer_strip;
 mod node_dialog;
 mod node_parameters;
+mod note_display;
 mod open_requests;
 mod patch_board;
 mod plot;

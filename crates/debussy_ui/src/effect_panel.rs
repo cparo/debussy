@@ -97,14 +97,16 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
     Some(order[next])
 }
 
-/// The display and controls of the effect whose parameters are `parameters`, with the control
-/// or port button at `focus` ringed; empty for a mixer. The display, drawn in `tone` at `sample_rate`, for a
+/// The display and controls of the effect or instrument (if `instrument`) whose parameters are
+/// `parameters`, with the control or port button at `focus` ringed; empty for a mixer. The
+/// display, drawn in `tone` at `sample_rate`, for a
 /// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
 /// pixel, comes first; then the preset picker, if the kind
 /// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
 /// horizontally.
 pub(crate) fn effect_panel<'a>(
     parameters: &NodeParameters<'a>,
+    instrument: bool,
     focus: Option<DialogFocus>,
     tone: Tone,
     sample_rate: u32,
@@ -117,6 +119,7 @@ pub(crate) fn effect_panel<'a>(
     let infos = parameters.infos();
     let display = display_area(
         kind,
+        instrument,
         &parameters.values(),
         tone,
         sample_rate,

@@ -10,13 +10,13 @@ use crate::plot::{Axis, Canvas, Plot, lanes, time_marks, time_step};
 use crate::theme::{self, CHARCOAL, GRID, SPECTRUM_KNEE, spectrum_colour};
 
 /// The lowest frequency on a lane's axis, in Hz.
-const LOW_HZ: f32 = 20.0;
+pub(crate) const LOW_HZ: f32 = 20.0;
 
 /// The highest frequency on a lane's axis, in Hz.
-const HIGH_HZ: f32 = 20_000.0;
+pub(crate) const HIGH_HZ: f32 = 20_000.0;
 
 /// The frequencies of each lane's grid lines and labels, in Hz.
-const FREQUENCY_MARKS: [(f32, &str); 3] =
+pub(crate) const FREQUENCY_MARKS: [(f32, &str); 3] =
     [(100.0, "100Hz"), (1_000.0, "1kHz"), (10_000.0, "10kHz")];
 
 /// The frequency a lane's tag is centred on in the gutter, in Hz: between two labels.
@@ -47,7 +47,9 @@ pub(crate) fn render(curve: &SpectrogramCurve, context: &DisplayContext) -> Opti
     let gains = curve.gains(columns, rows, LOW_HZ, HIGH_HZ);
     let audio = theme::tokens(context.tone).audio;
     for (lane, gains) in [&top, &bottom].into_iter().zip(&gains) {
-        cells(&mut canvas, lane, pixels, columns, gains, audio);
+        cells(&mut canvas, lane, pixels, columns, gains, |db| {
+            colour(db, audio)
+        });
     }
     let step = time_step(span);
     let verticals: Vec<(f32, Color)> = time_marks(span, step)
@@ -71,32 +73,32 @@ fn lane_axis() -> Axis {
     Axis::log(LOW_HZ, HIGH_HZ)
 }
 
-/// Fills `lane`, `pixels` physical pixels wide, with one cell per gain in `gains` (rows of
-/// `columns`, the lowest band first), each coloured by [`colour`] and spanning whole physical
-/// pixels; cells at the background are left transparent.
-fn cells(
+/// Fills `lane`, `pixels` physical pixels wide, with one cell per value in `values` (rows of
+/// `columns`, the lowest band first), each coloured by `colour` and spanning whole physical
+/// pixels; cells it gives no colour (the background) are left transparent.
+pub(crate) fn cells(
     canvas: &mut Canvas,
     lane: &Plot,
     pixels: usize,
     columns: usize,
-    gains: &[f32],
-    audio: Color,
+    values: &[f32],
+    colour: impl Fn(f32) -> Option<Color>,
 ) {
     if columns == 0 {
         return;
     }
-    let rows = gains.len() / columns;
+    let rows = values.len() / columns;
     let scale = canvas.scale();
     // The left edge of column `c`, on a physical pixel; a lane is at most a few thousand wide.
     #[allow(clippy::cast_precision_loss)]
     let edge = |c: usize| lane.left + (c * pixels / columns) as f32 / scale;
     #[allow(clippy::cast_precision_loss)]
     let height = lane.height / rows.max(1) as f32;
-    for (row, line) in gains.chunks_exact(columns).enumerate() {
+    for (row, line) in values.chunks_exact(columns).enumerate() {
         #[allow(clippy::cast_precision_loss)]
         let y = lane.bottom() - (row + 1) as f32 * height;
-        for (column, &db) in line.iter().enumerate() {
-            if let Some(color) = colour(db, audio) {
+        for (column, &value) in line.iter().enumerate() {
+            if let Some(color) = colour(value) {
                 let x = edge(column);
                 canvas.fill(x, y, edge(column + 1) - x, height, color);
             }
@@ -142,6 +144,7 @@ mod tests {
             tone: Tone::Dark,
             width: 300,
             height: 320,
+            logical_height: 320,
         };
         let pixels = render(&curve, &context)?;
         let lanes = lanes(Plot::new(

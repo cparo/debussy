@@ -13,6 +13,8 @@
 //! - `level`: gain in decibels, the −3 dB pan law (ADR-0018) and the mono fold-down (ADR-0030).
 //! - `fft`: [`Fft`] and [`RealFft`], radix-2 transforms, and [`Stft`], Hann-windowed spectra
 //!   (ADR-0039).
+//! - `bands`: [`Bands`], log-spaced bands read from a spectrum, and [`window_size`], for the
+//!   spectrogram displays (ADR-0172).
 //! - `filter`: [`Svf`] and [`OnePole`], trapezoidal filters, their coefficient designers and
 //!   [`butterworth_q`].
 //! - `dynamics`: [`Ballistics`], the [`Curve`] and [`Ceiling`] of a compressor, expander, gate
@@ -27,6 +29,7 @@
 
 #![forbid(unsafe_code)]
 
+mod bands;
 mod delay;
 mod dither;
 mod dynamics;
@@ -39,6 +42,7 @@ mod oscillator;
 mod oversample;
 mod resample;
 
+pub use bands::{Bands, window_size};
 pub use delay::{TapDelay, hermite};
 pub use dither::{Depth, Ditherer};
 pub use dynamics::{

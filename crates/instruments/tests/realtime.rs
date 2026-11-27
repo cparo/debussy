@@ -1,11 +1,11 @@
 //! The synthesizer run in a processing graph from an event source, every block inside the
 //! real-time guard: note timing, release, voice stealing, pitch bend, velocity, reset and every
-//! parameter's range.
+//! parameter's range; and the note display's preview against the synth it pictures.
 
 use std::error::Error as StdError;
 
 use audio_buffers::Layout;
-use instruments::{MAX_VOICES, instrument};
+use instruments::{MAX_VOICES, instrument, note_curve, parameter_infos};
 use realtime_guard::{GuardAllocator, assert_realtime};
 use signal_graph::{Config, Event, Graph, Message, NodeId, Parameter, Runner};
 
@@ -338,5 +338,60 @@ fn test_parameters_change_while_playing_without_a_jump() -> TestResult {
         "step {edge} while ramping, {typical} steady"
     );
     assert!(rms(&after[1_024..]) < 0.25 * rms(&before));
+    Ok(())
+}
+
+/// The synth's default values with each `(name, value)` of `settings` set, in declaration order.
+fn values(settings: &[(&str, f32)]) -> Result<Vec<f32>, Box<dyn StdError>> {
+    Ok(parameter_infos("synth")
+        .ok_or("no synth")?
+        .iter()
+        .map(|info| {
+            settings
+                .iter()
+                .find(|(n, _)| *n == info.name)
+                .map_or(info.default, |&(_, v)| v)
+        })
+        .collect())
+}
+
+#[test]
+fn test_note_curve_matches_the_live_synth() -> TestResult {
+    // The LFO on the cutoff, a pulse and the 24 dB order, and settings the preview ignores.
+    let settings = [
+        ("lfo depth", 0.5),
+        ("lfo destination", 1.0),
+        ("lfo shape", 5.0),
+        ("osc 1 wave", 1.0),
+        ("filter order", 4.0),
+        ("voices", 3.0),
+        ("amp velocity", 0.2),
+        ("amp release", 0.1),
+    ];
+    let curve = note_curve("synth", &values(&settings)?, RATE).ok_or("no curve")?;
+    let note = curve.render();
+    let samples = note.samples();
+    // Under a second at 48 kHz.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let gate_off = (curve.gate_off() * RATE as f32).round() as usize;
+    let mut rig = Rig::new(&settings)?;
+    let frames = samples.len().div_ceil(BLOCK) * BLOCK;
+    let out = rig.render(frames, &[(0, on(69, 127)?), (gate_off, off(69)?)])?;
+    assert!(peak(samples) > 0.01);
+    assert_eq!(&out[..samples.len()], samples);
+    Ok(())
+}
+
+#[test]
+fn test_note_curve_leaves_a_live_synth_unchanged() -> TestResult {
+    let (mut with, mut without) = (Rig::new(PLAIN)?, Rig::new(PLAIN)?);
+    let events = [(0, on(60, 100)?)];
+    assert_eq!(
+        with.render(1_024, &events)?,
+        without.render(1_024, &events)?
+    );
+    let curve = note_curve("synth", &values(PLAIN)?, RATE).ok_or("no curve")?;
+    let _note = curve.render();
+    assert_eq!(with.render(1_024, &[])?, without.render(1_024, &[])?);
     Ok(())
 }

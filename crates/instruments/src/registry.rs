@@ -5,8 +5,13 @@ use signal_graph::{Node, ParameterInfo};
 
 use std::sync::Arc;
 
+use crate::note_curve::NoteCurve;
 use crate::sampler::{Sampler, Zone};
-use crate::synth::Synth;
+use crate::synth::{self, Synth};
+
+/// Builds one instrument kind's note curve from its parameter values (in the order the
+/// instrument declares them) at a sample rate in Hz; `None` for values of the wrong length.
+pub type DisplayFn = fn(&[f32], u32) -> Option<NoteCurve>;
 
 /// A built-in instrument kind.
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +23,9 @@ pub struct InstrumentKind {
     /// Builds a new instrument of this kind at its defaults, ready to add to a graph; `None` if
     /// it cannot be made. Allocates.
     pub build: fn() -> Option<Box<dyn Node>>,
+    /// Builds the note its parameter values play, for its display; `None` for a kind with no
+    /// note display (`docs/architecture/effect-displays.md` "Synth note display").
+    pub display: Option<DisplayFn>,
 }
 
 /// Every built-in instrument kind, in the order a menu lists them: alphabetical by name.
@@ -26,11 +34,13 @@ pub const INSTRUMENTS: &[InstrumentKind] = &[
         id: "sampler",
         name: "Sampler",
         build: build_empty_sampler,
+        display: None,
     },
     InstrumentKind {
         id: "synth",
         name: "Synthesizer",
         build: build_synth,
+        display: Some(synth::note_curve),
     },
 ];
 
@@ -60,6 +70,17 @@ pub fn instrument(kind: &str) -> Option<Box<dyn Node>> {
 /// The name shown for instrument kind `kind`, or `None` if this build does not know it.
 pub fn display_name(kind: &str) -> Option<&'static str> {
     INSTRUMENTS.iter().find(|i| i.id == kind).map(|i| i.name)
+}
+
+/// The note an instrument of kind `kind` plays with its parameters at `values` (in the order
+/// [`parameter_infos`] gives them), in a project at `sample_rate` Hz, for its display. `None` for
+/// a kind with no note display or one this build does not know, or for `values` of the wrong
+/// length.
+///
+/// Cheap: it copies the values, and the note is rendered only when the curve is read.
+pub fn note_curve(kind: &str, values: &[f32], sample_rate: u32) -> Option<NoteCurve> {
+    let build = INSTRUMENTS.iter().find(|i| i.id == kind)?.display?;
+    build(values, sample_rate)
 }
 
 /// The parameters of instrument kind `kind`, or `None` if this build does not know it.

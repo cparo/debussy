@@ -3,7 +3,7 @@
 //! measured by running seeded pink noise through the effect's own per-frame processing offline,
 //! so it matches what is heard; the simulation waits until the curve is read.
 
-use dsp::{Pink, Stft};
+use dsp::{Bands, Pink, Stft, window_size};
 
 use crate::chorus::{self, Voices};
 use crate::flanger::{self, Comb};
@@ -91,7 +91,7 @@ impl SpectrogramCurve {
             return [Vec::new(), Vec::new()];
         };
         let rate = self.sample_rate.min(MAX_RATE);
-        let Ok(stft) = Stft::new(window_size(rate)) else {
+        let Ok(stft) = Stft::new(window_size(WINDOW_SECONDS, rate)) else {
             return [vec![f32::NAN; cells], vec![f32::NAN; cells]];
         };
         let bands = Bands::new(rows, low_hz, high_hz, rate, stft.size());
@@ -114,90 +114,6 @@ impl SpectrogramCurve {
     }
 }
 
-/// The analysis window for `sample_rate`: the power of two nearest [`WINDOW_SECONDS`], within
-/// the transform's sizes.
-fn window_size(sample_rate: u32) -> usize {
-    let target = (WINDOW_SECONDS * f64::from(sample_rate)).max(1.0);
-    // A power of two within the FFT's range: the exponent is small and non-negative.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let exponent = target.log2().round().max(0.0) as u32;
-    1_usize
-        .checked_shl(exponent)
-        .unwrap_or(dsp::MAX_FFT_SIZE)
-        .clamp(dsp::MIN_FFT_SIZE, dsp::MAX_FFT_SIZE)
-}
-
-/// Where a band reads its power from a spectrum.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Band {
-    /// The sum over bins `start..end`.
-    Bins(usize, usize),
-    /// Between bin `.0` and the next, `.1` of the way.
-    Between(usize, f32),
-    /// Nothing: the band lies at or above the Nyquist frequency.
-    Beyond,
-}
-
-/// The bands of a spectrogram, lowest first.
-struct Bands(Vec<Band>);
-
-impl Bands {
-    /// `rows` log-spaced bands from `low_hz` to `high_hz`, read from spectra of a `size`-point
-    /// transform at `sample_rate`.
-    fn new(rows: usize, low_hz: f32, high_hz: f32, sample_rate: u32, size: usize) -> Bands {
-        // Transform sizes and display rows are small.
-        #[allow(clippy::cast_precision_loss)]
-        let (size_f, rows_f) = (size as f64, rows as f64);
-        let rate = f64::from(sample_rate);
-        let bin_hz = rate / size_f;
-        let last = size / 2;
-        let (low, high) = (f64::from(low_hz), f64::from(high_hz));
-        // The frequency `r` rows up from `low`, as a fractional bin.
-        #[allow(clippy::cast_precision_loss)]
-        let bin_at = |r: f64| low * (high / low).powf(r / rows_f) / bin_hz;
-        let bands = (0..rows)
-            .map(|row| {
-                #[allow(clippy::cast_precision_loss)]
-                let r = row as f64;
-                let centre = bin_at(r + 0.5);
-                // NaN (from bad bounds) counts as beyond, too.
-                #[allow(clippy::cast_precision_loss)]
-                if centre.is_nan() || centre >= last as f64 {
-                    return Band::Beyond;
-                }
-                // Bins whose centres lie in the band: `ceil` of each edge.
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let edge = |b: f64| (b.ceil().max(0.0) as usize).min(last + 1);
-                let (start, end) = (edge(bin_at(r)), edge(bin_at(r + 1.0)));
-                if end > start {
-                    Band::Bins(start, end)
-                } else {
-                    let below = centre.floor().max(0.0);
-                    // Below `last`, so in range.
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let bin = below as usize;
-                    #[allow(clippy::cast_possible_truncation)]
-                    let frac = (centre - below) as f32;
-                    Band::Between(bin, frac)
-                }
-            })
-            .collect();
-        Bands(bands)
-    }
-
-    /// The power in each band of `magnitudes`, into `powers`.
-    fn powers(&self, magnitudes: &[f32], powers: &mut [f32]) {
-        let power = |k: usize| magnitudes.get(k).map_or(0.0, |m| m * m);
-        for (p, band) in powers.iter_mut().zip(&self.0) {
-            *p = match *band {
-                Band::Bins(start, end) => (start..end).map(power).sum(),
-                Band::Between(bin, frac) => power(bin) + (power(bin + 1) - power(bin)) * frac,
-                Band::Beyond => 0.0,
-            };
-        }
-    }
-}
-
 /// One measurement: the window, the bands and the columns.
 struct Measure {
     stft: Stft,
@@ -210,7 +126,7 @@ impl Measure {
     /// The gains of `step` (one frame in, one out) fed pink noise, as
     /// [`SpectrogramCurve::gains`] gives them.
     fn run(mut self, mut step: impl FnMut(f32, f32) -> (f32, f32)) -> [Vec<f32>; 2] {
-        let (size, rows, columns) = (self.stft.size(), self.bands.0.len(), self.columns);
+        let (size, rows, columns) = (self.stft.size(), self.bands.len(), self.columns);
         let rate = f64::from(self.sample_rate);
         // Half a second at an audio rate.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -318,15 +234,6 @@ mod tests {
         };
         assert!(low.gains(8, 40, 20.0, 20_000.0) == high.gains(8, 40, 20.0, 20_000.0));
         Ok(())
-    }
-
-    #[test]
-    fn test_window_size_is_the_nearest_power_of_two() {
-        assert_eq!(window_size(44_100), 2048);
-        assert_eq!(window_size(48_000), 2048);
-        assert_eq!(window_size(96_000), 4096);
-        assert_eq!(window_size(192_000), 8192);
-        assert_eq!(window_size(0), dsp::MIN_FFT_SIZE);
     }
 
     #[test]

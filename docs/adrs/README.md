@@ -195,4 +195,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 | [ADR-0170](0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md) | A filter order is shown as a rolloff in dB per octave | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 | [ADR-0171](0171-brown-noise-is-a-seeded-leaky-integrator-with-a-5.md) | Brown noise is a seeded leaky integrator with a 5 Hz pole | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
+| [ADR-0172](0172-an-instrument-s-display-is-a-note-curve-from-a.md) | An instrument's display is a note curve from a registry column of its own | Accepted | [Synth note display](../architecture/effect-displays.md#synth-note-display) |
 

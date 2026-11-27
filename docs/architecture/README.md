@@ -51,6 +51,7 @@ The principles every crate and module follows are in [Design Principles](princip
   - [Amplifier display](effect-displays.md#amplifier-display)
   - [Impulse response display](effect-displays.md#impulse-response-display)
   - [Modulation display](effect-displays.md#modulation-display)
+  - [Synth note display](effect-displays.md#synth-note-display)
 - [Effects](effects.md)
   - [Effect kinds](effects.md#effect-kinds)
   - [Effect presets](effects.md#effect-presets)

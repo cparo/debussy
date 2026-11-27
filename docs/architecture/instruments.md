@@ -54,6 +54,8 @@ mono, the same signal on both channels.
   | (none) | bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |
 - **Reset.** Every voice falls silent at once, the pedal lifts, the bend returns to centre and the
   LFO returns to phase 0.
+- **Display.** Its dialog shows one note it plays, as described in
+  `docs/architecture/effect-displays.md` "Synth note display".
 
 The design follows [ADR-0148](../adrs/0148-the-synth-s-oscillators-use-minblep-with-polyblep.md)
 and [ADR-0149](../adrs/0149-the-synthesizer-is-a-fixed-pool-of-two-oscillator.md).

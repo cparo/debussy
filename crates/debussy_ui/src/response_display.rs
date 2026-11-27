@@ -87,6 +87,7 @@ mod tests {
             tone: Tone::Dark,
             width: 600,
             height: 320,
+            logical_height: 320,
         };
         render(&response, &context)
     }
