@@ -4,7 +4,8 @@
 //!
 //! [`Pink`] filters it to pink (1/f) noise through a cascade of first-order sections whose real
 //! poles and zeros alternate along the frequency axis (J. O. Smith, *Spectral Audio Signal
-//! Processing*, and his spectral-tilt filters; ADR-0122).
+//! Processing*, and his spectral-tilt filters; ADR-0122). [`Brown`] filters it to brown (1/f²)
+//! noise through one leaky integrator, a single real pole at 5 Hz (ADR-0171).
 
 /// A deterministic noise source: the same seed always gives the same sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,8 +53,11 @@ const PINK_LOWEST_POLE_HZ: f64 = 5.0;
 /// for rates up to about 650 kHz.
 const PINK_MAX_SECTIONS: usize = 16;
 
-/// The frequency at which a [`Pink`] filter's gain is 1, in Hz.
-const PINK_UNITY_HZ: f64 = 1_000.0;
+/// The frequency at which a [`Pink`] or [`Brown`] filter's gain is 1, in Hz.
+const UNITY_HZ: f64 = 1_000.0;
+
+/// The pole of a [`Brown`] leaky integrator, in Hz: the same corner as [`Pink`]'s lowest pole.
+const BROWN_POLE_HZ: f64 = PINK_LOWEST_POLE_HZ;
 
 /// One first-order section, `(1 − q·z⁻¹) / (1 − p·z⁻¹)`, and its state.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -96,7 +100,7 @@ pub struct Pink {
     sections: [Section; PINK_MAX_SECTIONS],
     /// How many of `sections` are used.
     count: usize,
-    /// Scales the cascade to unity at [`PINK_UNITY_HZ`].
+    /// Scales the cascade to unity at [`UNITY_HZ`].
     gain: f64,
 }
 
@@ -119,16 +123,7 @@ impl Pink {
             count += 1;
             pole *= 2.0;
         }
-        let omega = std::f64::consts::TAU * PINK_UNITY_HZ.min(nyquist / 2.0) / rate.max(1.0);
-        let magnitude: f64 = sections[..count]
-            .iter()
-            .map(|s| s.magnitude(omega))
-            .product();
-        let gain = if magnitude > 0.0 && magnitude.is_finite() {
-            magnitude.recip()
-        } else {
-            1.0
-        };
+        let gain = unity_gain(&sections[..count], rate);
         Self {
             noise: Noise::new(seed),
             sections,
@@ -144,6 +139,64 @@ impl Pink {
             .iter_mut()
             .fold(x, |x, section| section.step(x));
         // Pink noise of a few times the uniform values' level: well within f32.
+        #[allow(clippy::cast_possible_truncation)]
+        let y = (y * self.gain) as f32;
+        y
+    }
+}
+
+/// The gain that brings `sections` to a magnitude of 1 at [`UNITY_HZ`] (or a quarter of the
+/// rate, if lower) at `rate` Hz; 1.0 when that magnitude is zero or not finite.
+fn unity_gain(sections: &[Section], rate: f64) -> f64 {
+    let omega = std::f64::consts::TAU * UNITY_HZ.min(rate / 4.0) / rate.max(1.0);
+    let magnitude: f64 = sections.iter().map(|s| s.magnitude(omega)).product();
+    if magnitude > 0.0 && magnitude.is_finite() {
+        magnitude.recip()
+    } else {
+        1.0
+    }
+}
+
+/// Seeded brown noise: [`Noise::uniform`] values through a leaky integrator,
+/// `y[n] = x[n] + a·y[n−1]`, whose one real pole sits at 5 Hz for the given sample rate. Its power
+/// falls 6 dB per octave above 5 Hz and is flat below, so it never wanders and has no DC; its
+/// magnitude at 1 kHz is that of the uniform values, as [`Pink`]'s is. The same seed and rate
+/// always give the same sequence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Brown {
+    noise: Noise,
+    /// The leaky integrator: a [`Section`] with no zero, or `None` when the rate is too low for
+    /// its pole.
+    integrator: Option<Section>,
+    /// Scales the integrator to unity at [`UNITY_HZ`].
+    gain: f64,
+}
+
+impl Brown {
+    /// Brown noise from `seed` at `sample_rate` Hz. A rate too low for the 5 Hz pole gives the
+    /// uniform values unfiltered.
+    pub fn new(seed: u64, sample_rate: u32) -> Self {
+        let rate = f64::from(sample_rate);
+        let integrator = (BROWN_POLE_HZ < rate / 2.0).then(|| Section {
+            p: (-std::f64::consts::TAU * BROWN_POLE_HZ / rate).exp(),
+            ..Section::default()
+        });
+        let gain = unity_gain(integrator.as_slice(), rate);
+        Self {
+            noise: Noise::new(seed),
+            integrator,
+            gain,
+        }
+    }
+
+    /// The next sample.
+    pub fn sample(&mut self) -> f32 {
+        let x = f64::from(self.noise.uniform());
+        let y = match &mut self.integrator {
+            Some(integrator) => integrator.step(x),
+            None => x,
+        };
+        // Brown noise of a few times the uniform values' level: well within f32.
         #[allow(clippy::cast_possible_truncation)]
         let y = (y * self.gain) as f32;
         y
@@ -222,10 +275,10 @@ mod tests {
         assert_eq!(pink.sample(), white.uniform());
     }
 
-    /// The mean power per bin of `pink` in each of `bands` (low and high edges in Hz), over
-    /// `frames` Hann-windowed frames of `size` at `rate`.
+    /// The mean power per bin of `sample`'s output in each of `bands` (low and high edges in Hz),
+    /// over `frames` Hann-windowed frames of `size` at `rate`.
     fn band_powers(
-        pink: &mut Pink,
+        mut sample: impl FnMut() -> f32,
         rate: u32,
         size: usize,
         frames: usize,
@@ -236,7 +289,7 @@ mod tests {
         let mut magnitudes = vec![0.0_f32; stft.bins()];
         let mut power = vec![0.0_f64; stft.bins()];
         for _ in 0..frames {
-            frame.iter_mut().for_each(|x| *x = pink.sample());
+            frame.iter_mut().for_each(|x| *x = sample());
             stft.magnitudes(&frame, &mut magnitudes)?;
             for (p, &m) in power.iter_mut().zip(&magnitudes) {
                 *p += f64::from(m) * f64::from(m);
@@ -260,14 +313,8 @@ mod tests {
             for _ in 0..rate {
                 pink.sample();
             }
-            // Third-octave bands an octave apart, from 100 Hz up to `top`.
-            let mut bands = Vec::new();
-            let mut centre = 100.0_f32;
-            while centre <= top {
-                bands.push((centre / 1.122, centre * 1.122));
-                centre *= 2.0;
-            }
-            let powers = band_powers(&mut pink, rate, size, 300, &bands)?;
+            let bands = octave_bands(top);
+            let powers = band_powers(|| pink.sample(), rate, size, 300, &bands)?;
             let db: Vec<f64> = powers.iter().map(|p| 10.0 * p.log10()).collect();
             for (octave, pair) in db.windows(2).enumerate() {
                 let step = pair[1] - pair[0];
@@ -280,6 +327,118 @@ mod tests {
             let expected = -3.01 * (db.len() - 1) as f64;
             assert!((total - expected).abs() < 1.5, "{rate} Hz: {total} dB");
         }
+        Ok(())
+    }
+
+    /// Octave-spaced third-octave bands (low and high edges in Hz), centred from 100 Hz up to
+    /// `top`.
+    fn octave_bands(top: f32) -> Vec<(f32, f32)> {
+        let mut bands = Vec::new();
+        let mut centre = 100.0_f32;
+        while centre <= top {
+            bands.push((centre / 1.122, centre * 1.122));
+            centre *= 2.0;
+        }
+        bands
+    }
+
+    #[test]
+    fn test_brown_new_same_seed_same_sequence() {
+        let (mut a, mut b) = (Brown::new(3, 48_000), Brown::new(3, 48_000));
+        for _ in 0..1_000 {
+            assert_eq!(a.sample(), b.sample());
+        }
+        assert_ne!(
+            Brown::new(3, 48_000).sample(),
+            Brown::new(4, 48_000).sample()
+        );
+    }
+
+    #[test]
+    fn test_brown_new_without_pole_is_white() {
+        for rate in [0, 10] {
+            let (mut brown, mut white) = (Brown::new(5, rate), Noise::new(5));
+            assert!(brown.integrator.is_none());
+            assert_eq!(brown.sample(), white.uniform());
+        }
+    }
+
+    #[test]
+    fn test_brown_falls_six_db_per_octave() -> Result<(), crate::Error> {
+        for (rate, size, top) in [(48_000, 4096, 12_800.0), (192_000, 16_384, 51_200.0)] {
+            let mut brown = Brown::new(9, rate);
+            // Settle the integrator.
+            for _ in 0..rate {
+                brown.sample();
+            }
+            let bands = octave_bands(top);
+            let powers = band_powers(|| brown.sample(), rate, size, 300, &bands)?;
+            let db: Vec<f64> = powers.iter().map(|p| 10.0 * p.log10()).collect();
+            for (octave, pair) in db.windows(2).enumerate() {
+                let step = pair[1] - pair[0];
+                assert!(
+                    (step + 6.02).abs() < 1.0,
+                    "{rate} Hz, octave {octave}: {step} dB"
+                );
+            }
+            let total = db[db.len() - 1] - db[0];
+            let expected = -6.02 * (db.len() - 1) as f64;
+            assert!((total - expected).abs() < 1.5, "{rate} Hz: {total} dB");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_brown_has_no_dc() {
+        // The 5 Hz pole correlates samples over about 1 / (2π·5 Hz) ≈ 32 ms, so the mean of T
+        // seconds has a standard deviation of about √(2·0.032 / T) of the RMS: 2.5 % over 100 s.
+        // The rate does not change that, so a low one keeps the test quick.
+        let rate = 8_000;
+        let mut brown = Brown::new(11, rate);
+        let count = 100 * rate;
+        let (mut sum, mut sum_sq, mut peak) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for _ in 0..count {
+            let y = f64::from(brown.sample());
+            sum += y;
+            sum_sq += y * y;
+            peak = peak.max(y.abs());
+        }
+        let count = f64::from(count);
+        let (mean, rms) = (sum / count, (sum_sq / count).sqrt());
+        // Four standard deviations of the mean.
+        assert!(mean.abs() < 0.1 * rms, "mean {mean}, rms {rms}");
+        // A random walk would wander far beyond its RMS; a leaky integrator stays near it.
+        assert!(peak < 8.0 * rms, "peak {peak}, rms {rms}");
+    }
+
+    #[test]
+    fn test_brown_matches_pink_at_1khz() -> Result<(), crate::Error> {
+        let rate = 48_000;
+        let omega = std::f64::consts::TAU * UNITY_HZ / f64::from(rate);
+        let brown = Brown::new(1, rate);
+        let pink = Pink::new(1, rate);
+        let brown_magnitude = brown
+            .integrator
+            .iter()
+            .map(|s| s.magnitude(omega))
+            .product::<f64>();
+        let pink_magnitude: f64 = pink.sections[..pink.count]
+            .iter()
+            .map(|s| s.magnitude(omega))
+            .product();
+        assert!((brown_magnitude * brown.gain - 1.0).abs() < 1e-9);
+        assert!((pink_magnitude * pink.gain - 1.0).abs() < 1e-9);
+
+        let band = [(950.0, 1_050.0)];
+        let (mut brown, mut pink) = (Brown::new(2, rate), Pink::new(2, rate));
+        for _ in 0..rate {
+            brown.sample();
+            pink.sample();
+        }
+        let brown_power = band_powers(|| brown.sample(), rate, 4096, 300, &band)?[0];
+        let pink_power = band_powers(|| pink.sample(), rate, 4096, 300, &band)?[0];
+        let difference = 10.0 * (brown_power / pink_power).log10();
+        assert!(difference.abs() < 0.5, "{difference} dB");
         Ok(())
     }
 }

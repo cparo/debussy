@@ -38,6 +38,8 @@ feedback and without through-zero flanging
 ([ADR-0120](../adrs/0120-chorus-and-flanger-are-lfo-modulated-delays-read.md)), and pink noise:
 white noise through a cascade of first-order sections with alternating real poles and zeros, one
 pole per octave ([ADR-0122](../adrs/0122-pink-noise-is-a-seeded-alternating-pole-zero.md)), and
+brown noise: white noise through one leaky integrator with a real pole at 5 Hz
+([ADR-0171](../adrs/0171-brown-noise-is-a-seeded-leaky-integrator-with-a-5.md)), and
 automation curves: cubic Bézier segments kept functions of time, read by fixed-count bisection,
 without split-value steps ([ADR-0123](../adrs/0123-automation-curves-are-cubic-b-zier-segments-kept.md)), and the synthesizer:
 MinBLEP-corrected saw and pulse oscillators and a triangle integrated from the MinBLEP square,

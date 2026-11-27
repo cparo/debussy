@@ -194,4 +194,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0168](0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md) | The synth's low-pass has a stopped-only order of 6, 12, 18 or 24 dB per octave | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
 | [ADR-0169](0169-a-parameter-s-control-can-be-disabled-by-the-value.md) | A parameter's control can be disabled by the value of a stopped-only parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
 | [ADR-0170](0170-a-filter-order-is-shown-as-a-rolloff-in-db-per.md) | A filter order is shown as a rolloff in dB per octave | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
+| [ADR-0171](0171-brown-noise-is-a-seeded-leaky-integrator-with-a-5.md) | Brown noise is a seeded leaky integrator with a 5 Hz pole | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 
