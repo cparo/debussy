@@ -197,4 +197,5 @@ deliberately separate from, the [architectural specs](../architecture/README.md)
 | [ADR-0171](0171-brown-noise-is-a-seeded-leaky-integrator-with-a-5.md) | Brown noise is a seeded leaky integrator with a 5 Hz pole | Accepted | [Patent policy](../architecture/patents.md#patent-policy) |
 | [ADR-0172](0172-an-instrument-s-display-is-a-note-curve-from-a.md) | An instrument's display is a note curve from a registry column of its own | Accepted | [Synth note display](../architecture/effect-displays.md#synth-note-display) |
 | [ADR-0173](0173-a-control-can-be-disabled-by-any-stepped-parameter.md) | A control can be disabled by any stepped parameter | Accepted | [Node dialogs](../architecture/node-dialogs.md#node-dialogs) |
+| [ADR-0174](0174-the-synth-sums-a-per-voice-noise-chain-with-its.md) | The synth sums a per-voice noise chain with its own envelopes, velocity and LFO, and a voice stays busy while that chain sounds | Accepted | [Synthesizer](../architecture/instruments.md#synthesizer) |
 

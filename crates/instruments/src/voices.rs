@@ -34,6 +34,17 @@ pub(crate) trait Sound {
     fn gated(&self) -> bool {
         true
     }
+
+    /// Whether the sound still sounds by itself, so its voice stays busy after the amplitude
+    /// envelope ends (ADR-0174); `false` for a sound that ends with it.
+    fn sounding(&self) -> bool {
+        false
+    }
+
+    /// How loud the sound is by itself, 0 to 1, for choosing the quietest released voice.
+    fn level(&self) -> f32 {
+        0.0
+    }
 }
 
 /// A note waiting for its stolen voice to fade out.
@@ -84,9 +95,21 @@ impl<S: Sound> Voice<S> {
         }
     }
 
-    /// Whether the voice is silent and free.
+    /// Whether the voice is silent and free: its amplitude envelope idle, its sound no longer
+    /// [sounding](Sound::sounding), and no note pending.
     pub fn is_free(&self) -> bool {
-        self.amp.is_idle() && self.pending.is_none()
+        self.amp.is_idle() && !self.sound.sounding() && self.pending.is_none()
+    }
+
+    /// Whether the voice's note is released but still sounds: its amplitude envelope releasing,
+    /// or ended while its sound still sounds.
+    fn is_released(&self) -> bool {
+        self.amp.stage() == EnvelopeStage::Release || (self.amp.is_idle() && self.sound.sounding())
+    }
+
+    /// How loud the voice is: the louder of its amplitude envelope and its sound's own level.
+    fn loudness(&self) -> f32 {
+        self.amp.level().max(self.sound.level())
     }
 
     /// Returns to silence at once.
@@ -168,8 +191,8 @@ impl<S: Sound> Pool<S> {
             return Some((i, false));
         }
         let quietest_released = candidates()
-            .filter(|(_, v)| v.fade == 0 && v.amp.stage() == EnvelopeStage::Release)
-            .min_by(|a, b| a.1.amp.level().total_cmp(&b.1.amp.level()));
+            .filter(|(_, v)| v.fade == 0 && v.is_released())
+            .min_by(|a, b| a.1.loudness().total_cmp(&b.1.loudness()));
         if let Some((i, _)) = quietest_released {
             return Some((i, true));
         }
@@ -342,11 +365,14 @@ impl EnvelopeParameters {
 mod tests {
     use super::*;
 
-    /// A sound that only records whether it is gated.
+    /// A sound that only records whether it is gated, and sounds by itself at `level` while
+    /// `sounding` is set.
     #[derive(Debug, Clone, Default)]
     struct Probe {
         gated: bool,
         starts: u32,
+        sounding: bool,
+        level: f32,
     }
 
     impl Sound for Probe {
@@ -363,6 +389,14 @@ mod tests {
 
         fn gated(&self) -> bool {
             self.gated
+        }
+
+        fn sounding(&self) -> bool {
+            self.sounding
+        }
+
+        fn level(&self) -> f32 {
+            self.level
         }
     }
 
@@ -449,5 +483,44 @@ mod tests {
             last = share;
         }
         assert!(p.voices[0].is_free());
+    }
+
+    #[test]
+    fn test_sounding_sound_keeps_its_voice_busy_after_the_amp_ends() {
+        let mut p = pool();
+        p.note_on(60, 1.0, 4, 0.0, false, true);
+        p.voices[0].sound.sounding = true;
+        p.voices[0].amp.reset();
+        assert!(!p.voices[0].is_free());
+        // A busy voice is not offered as free; the next note takes another.
+        assert_eq!(p.choose(62, 4), Some((1, false)));
+        p.voices[0].sound.sounding = false;
+        assert!(p.voices[0].is_free());
+    }
+
+    #[test]
+    fn test_quietest_released_counts_the_sound_level() {
+        let mut p = pool();
+        for note in [60, 62] {
+            p.note_on(note, 1.0, 2, 0.0, false, true);
+        }
+        for v in p.voices.iter_mut() {
+            v.amp.next_value();
+        }
+        // Voice 0 releasing but loud by its sound; voice 1's amp has ended, its sound still
+        // sounds, quieter.
+        p.note_off(60);
+        for _ in 0..20_000 {
+            p.voices[0].amp.next_value();
+        }
+        assert!(p.voices[0].amp.level() < 0.1);
+        p.voices[0].sound.level = 0.9;
+        p.note_off(62);
+        p.voices[1].amp.reset();
+        p.voices[1].sound.sounding = true;
+        p.voices[1].sound.level = 0.2;
+        assert_eq!(p.choose(64, 2), Some((1, true)));
+        p.voices[1].sound.level = 0.95;
+        assert_eq!(p.choose(64, 2), Some((0, true)));
     }
 }

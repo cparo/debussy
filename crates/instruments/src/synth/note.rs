@@ -7,10 +7,11 @@ use modulation::Lfo;
 use signal_graph::Parameter;
 
 use super::{
-    Block, DC_BLOCK_HZ, LFO_SEED, Parameters, Tone, Values, configure, configure_lfo, render,
+    Block, DC_BLOCK_HZ, LFO_SEED, NOISE_LFO_SEED, Parameters, Tone, Values, configure,
+    configure_lfo, render,
 };
 use crate::note_curve::{Envelopes, NOTE, NoteCurve, Source};
-use crate::voices::Pool;
+use crate::voices::EnvelopeParameters;
 
 /// A fresh set of parameters at `values` (in declaration order, clamped and rounded as a
 /// running synth's are); `None` for values of the wrong length.
@@ -39,15 +40,29 @@ fn to_default<'a>(parameters: impl IntoIterator<Item = &'a Parameter>) {
 /// curve equal.
 pub(crate) fn note_curve(values: &[f32], sample_rate: u32) -> Option<NoteCurve> {
     let p = parameters_at(values)?;
-    to_default([&p.voices, &p.bend_range, &p.amp_velocity]);
+    let n = &p.noise;
+    to_default([&p.voices, &p.bend_range, &p.amp_velocity, &n.amp_velocity]);
     if p.lfo_depth.get() == 0.0 {
         to_default([&p.lfo_rate, &p.lfo_shape, &p.lfo_destination]);
     }
-    let settle = |env: &crate::voices::EnvelopeParameters| env.attack.get() + env.decay.get();
-    let envelopes = Envelopes {
+    let noise_on = n.level.get() > 0.0;
+    if !noise_on {
+        to_default(n.all());
+    } else if n.lfo_depth.get() == 0.0 {
+        to_default([&n.lfo_rate, &n.lfo_shape, &n.lfo_destination]);
+    }
+    let settle = |env: &EnvelopeParameters| env.attack.get() + env.decay.get();
+    let mut envelopes = Envelopes {
         settle: settle(&p.amp_env).max(settle(&p.filter_env)),
         release: p.amp_env.release.get(),
     };
+    if noise_on {
+        envelopes.settle = envelopes
+            .settle
+            .max(settle(&n.amp_env))
+            .max(settle(&n.filter_env));
+        envelopes.release = envelopes.release.max(n.amp_env.release.get());
+    }
     let values = p.all().iter().map(Parameter::get).collect();
     Some(NoteCurve::new(
         Source::Synth,
@@ -75,22 +90,25 @@ pub(crate) fn render_note(
     // Sample rates are exact in `f32` well past any audio rate.
     #[allow(clippy::cast_precision_loss)]
     let rate = sample_rate as f32;
-    let mut pool = Pool::new(1, rate, Tone::new);
+    let mut pool = Tone::pool(1, sample_rate);
     for voice in pool.voices.iter_mut() {
-        configure(voice, &p, rate);
+        configure(voice, &p, rate, p.noise.level.get() > 0.0);
     }
     let mut lfo = Lfo::new(sample_rate, LFO_SEED);
     configure_lfo(&mut lfo, &p);
+    let mut noise_lfo = Lfo::new(sample_rate, NOISE_LFO_SEED);
+    p.noise.configure_lfo(&mut noise_lfo);
     let block = Block::new(&p, rate);
     let values = Values::of(&p);
     let dc = OnePoleCoefficients::high_pass(DC_BLOCK_HZ, rate);
     let (gain, amp_velocity) = (db_to_gain(p.gain.get()), p.amp_velocity.get());
-    pool.note_on(NOTE, 1.0, 1, amp_velocity, false, ());
+    let noise_velocity = p.noise.amp_velocity.get();
+    pool.note_on(NOTE, 1.0, 1, amp_velocity, false, noise_velocity);
     for (n, out) in out.iter_mut().enumerate() {
         if n == gate_off {
             pool.note_off(NOTE);
         }
-        let frame = block.frame(&values, lfo.next_value());
+        let frame = block.frame(&values, lfo.next_value(), noise_lfo.next_value());
         if pool.voices[0].is_free() {
             continue;
         }
@@ -171,6 +189,29 @@ mod tests {
         let deep = [("lfo depth", 0.5)];
         assert_ne!(curve(&[deep[0], ("lfo rate", 9.0)])?, curve(&deep)?);
         assert_ne!(curve(&[("cutoff", 500.0)])?, base);
+        Ok(())
+    }
+
+    #[test]
+    fn test_note_curve_noise_counts_only_above_level_zero() -> TestResult {
+        let base = curve(&[])?;
+        for change in [
+            ("noise type", 2.0),
+            ("noise filter gain", -12.0),
+            ("noise amp release", 5.0),
+            ("noise lfo depth", 1.0),
+        ] {
+            assert_eq!(curve(&[change])?, base, "{}", change.0);
+        }
+        let on = [("noise level", 0.5)];
+        assert_ne!(curve(&on)?, base);
+        assert_ne!(curve(&[on[0], ("noise type", 2.0)])?, curve(&on)?);
+        // Its velocity cannot change a note at full velocity; its LFO needs depth.
+        assert_eq!(curve(&[on[0], ("noise amp velocity", 0.0)])?, curve(&on)?);
+        assert_eq!(curve(&[on[0], ("noise lfo rate", 9.0)])?, curve(&on)?);
+        // A longer noise release lengthens the span.
+        let long = curve(&[on[0], ("noise amp release", 2.0)])?;
+        assert!(long.span() > curve(&on)?.span() + 1.0);
         Ok(())
     }
 

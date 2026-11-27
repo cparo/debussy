@@ -152,13 +152,16 @@ none, and its area stays blank. `crates/debussy_ui/src/note_display.rs` draws it
 
 - The note is an A4 at velocity 127, from rest, held and then released. `NoteCurve::render`
   renders it with the synth's own per-sample voice code on state of its own: fixed values with no
-  ramps, no pitch bend, LFO phase 0 and the LFO's fixed seed, after the output gain, at the
+  ramps, no pitch bend, both LFOs at phase 0 with their fixed seeds, the noise from the first
+  voice's seed, after the output gain, at the
   project's sample rate or 48 kHz, whichever is lower. Building the curve copies the values; the
   rendering runs only when the picture is drawn, and the display keeps it while the curve is
-  unchanged. Values that cannot change the note (`voices`, `bend range`, `amp velocity`, and the
-  LFO's rate, shape and destination at zero depth) are set to their defaults in the curve.
-- The span, in seconds, is `held + amp release`, at most 10, where `held` is the longer of the
-  two envelopes' attack plus decay, plus 0.25. The note is released at the lower of `held` and
+  unchanged. Values that cannot change the note (`voices`, `bend range`, `amp velocity`,
+  `noise amp velocity`, each LFO's rate, shape and destination at zero depth, and every noise
+  parameter at `noise level` 0) are set to their defaults in the curve.
+- The span, in seconds, is `held + release`, at most 10, where `held` is the longest attack plus
+  decay of the envelopes that sound, plus 0.25, and `release` the longest release of the amp
+  envelopes that sound; the noise envelopes sound while `noise level` is above 0. The note is released at the lower of `held` and
   three quarters of the span.
 - The plot splits into two halves 12 logical pixels apart, each with its own left gutter, sharing
   one linear time axis from 0 to the span with the marks of "Impulse response display", labelled

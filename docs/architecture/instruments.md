@@ -17,6 +17,17 @@ mono, the same signal on both channels.
   level, are summed (`pulse width` is disabled unless the wave is pulse;
   [ADR-0173](../adrs/0173-a-control-can-be-disabled-by-any-stepped-parameter.md)); a 5 Hz one-pole high-pass removes their DC; a low-pass of the chosen order
   filters them (see **Filter order**); the amplitude envelope (`modulation::Adsr`) scales the result.
+  The voice's noise chain (see **Noise**) is added to that, before `gain`.
+- **Noise.** Per voice, white, pink or brown noise (`dsp::Noise`, `dsp::Pink`, `dsp::Brown`, each
+  ×2) through a bell (`dsp::SvfCoefficients::bell`), scaled by the noise amp envelope,
+  `noise level` and the noise LFO. The bell's centre, in log2 Hz, is the note plus the pitch bend
+  (not the LFO), plus `noise filter octave`, plus `noise filter envelope amount` times the noise
+  filter envelope, plus the noise LFO, clamped as the cutoff is; its gain is `noise filter gain`
+  plus the noise LFO, clamped to ±24 dB; its Q is `noise filter q`. Voice *i*'s noise is seeded
+  with a fixed seed plus *i*. The chain is on while `noise level` or its ramp is above 0; while off
+  it adds nothing and does not keep a voice busy, so a synth at `noise level` 0 sounds as one
+  without the chain
+  ([ADR-0174](../adrs/0174-the-synth-sums-a-per-voice-noise-chain-with-its.md)).
 - **Pitch.** 12-tone equal temperament from A4 = 440 Hz (`dsp::note_to_hz`). Pitch bend moves
   every voice by the bend position (−1 to 1, from the 14-bit value centred on 8192) times
   `bend range` semitones, ramped.
@@ -32,18 +43,24 @@ mono, the same signal on both channels.
   every voice's filter stages reset to zero, with no crossfade
   ([ADR-0168](../adrs/0168-the-synth-s-low-pass-has-a-stopped-only-order-of-6.md)).
 - **Envelopes.** Exponential one-pole segments; each gate-on attacks from the current level. The
-  amplitude envelope peaks at `1 − amp velocity · (1 − velocity)`; the filter envelope at 1.
+  amplitude envelope peaks at `1 − amp velocity · (1 − velocity)`, the noise amp envelope at
+  `1 − noise amp velocity · (1 − velocity)`; the filter envelopes at 1.
 - **LFO.** One `modulation::Lfo` shared by all voices, its phase reset by `reset`. At full
   `lfo depth` it moves pitch ±2 semitones, cutoff ±4 octaves, or amplitude down to 0 at the
-  bottom of its cycle (`1 − depth · (1 − lfo) / 2`).
+  bottom of its cycle (`1 − depth · (1 − lfo) / 2`). A second LFO, the noise LFO, reset with it,
+  moves the bell's centre ±4 octaves, its gain ±24 dB, or the noise's amplitude the same way.
 - **Notes.** A note-on with velocity 0 is a note-off. A note-on takes, in order: the voice already
-  playing that note, retriggered; a free voice; the quietest voice in its release; the voice whose
+  playing that note, retriggered; a free voice; the quietest released voice; the voice whose
   note started first. Taking a sounding voice steals it: it fades out over 3 ms, then the new note
-  starts from silence. A note-off releases its voice, unless the sustain pedal (controller 64,
+  starts from silence. A voice is free once its amp envelope is idle, its noise chain no longer
+  sounds and no note waits for it; it is released while its amp envelope releases, or has ended
+  while its noise still sounds, and its loudness is the louder of the two amp envelopes. A
+  note-off releases its voice, unless the sustain pedal (controller 64,
   down at 64 and above) is down, in which case the voice releases when the pedal lifts. Other
   messages are ignored.
 - **Parameters.** Read once per block; continuous ones are ramped (the cutoff in log2 Hz). The
-  choices (`osc N wave`, `lfo shape`, `lfo destination`) and whole numbers (`osc N octave`, `filter order`,
+  choices (`osc N wave`, `lfo shape`, `lfo destination`, `noise type`, `noise lfo shape`,
+  `noise lfo destination`) and whole numbers (`osc N octave`, `filter order`,
   `voices`) are stepped and take effect at the next block; every other parameter is automatable.
 
   | Group | Parameters |
@@ -52,9 +69,13 @@ mono, the same signal on both channels.
   | filter | filter order (1–4 poles, shown as 6–24 dB/octave), cutoff (20 Hz–20 kHz), resonance (Q 0.5–12), envelope amount (±5 oct), velocity amount (0–4 oct) |
   | filter envelope, amp envelope | attack, decay, release (1 ms–10 s), sustain (0–1); amp velocity (0–1) |
   | lfo | rate (0.01–20 Hz), shape, destination (pitch, cutoff, amplitude), depth (0–1) |
+  | noise | noise type (white, pink, brown), noise level (0–1, default 0) |
+  | noise filter | octave (±4 oct), gain (±24 dB), Q (0.5–12), envelope amount (±5 oct) |
+  | noise filter envelope, noise amp envelope | as the envelopes above; noise amp velocity (0–1) |
+  | noise lfo | as the lfo, destination bell frequency, bell gain or amplitude |
   | (none) | bend range (0–24 st), voices (1–16), gain (−48 to +12 dB) |
 - **Reset.** Every voice falls silent at once, the pedal lifts, the bend returns to centre and the
-  LFO returns to phase 0.
+  LFOs return to phase 0.
 - **Display.** Its dialog shows one note it plays, as described in
   `docs/architecture/effect-displays.md` "Synth note display".
 

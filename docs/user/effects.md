@@ -165,7 +165,9 @@ from a folder of samples. See [The sampler](sampler.md) for how to set it up.
 
 Turns notes into sound. Wire a MIDI track's output to its
 input (the only input a MIDI track can reach) and its output to a mixer or the outputs. Each voice
-mixes two oscillators, then a filter, shaped by two envelopes and an LFO. The sustain pedal holds
+mixes two oscillators, then a filter, shaped by two envelopes and an LFO. Beside them a noise
+chain, off until you raise its **Level**, adds hiss shaped by a filter that follows the note, with
+envelopes and an LFO of its own: for breath, chiff or a percussive attack. The sustain pedal holds
 notes.
 
 The picture above the controls shows one note as you have set it up: an A above middle C played at
@@ -212,6 +214,32 @@ enough to show the envelopes and the release, and redraw as you change a control
   | **Shape** | sine, triangle, saw up, saw down, square, sample and hold | sine | How it moves. |
   | **Destination** | pitch, cutoff, amplitude | pitch | What it wobbles. |
   | **Depth** | 0 – 1 | 0 | How far; at 0 it does nothing. |
+
+- **Noise** — the noise source.
+
+  | Control | Range | Default | What it does |
+  |---|---|---|---|
+  | **Type** | white, pink, brown | white | The colour: **white** is bright hiss, **pink** softer, **brown** a deep rumble. |
+  | **Level** | 0 – 1 | 0 | How loud it is in the mix; at 0 the noise is off. |
+
+- **Noise filter** — boosts or cuts the noise around a centre that follows the note's pitch and
+  the pitch wheel.
+
+  | Control | Range | Default | What it does |
+  |---|---|---|---|
+  | **Octave** | ±4 oct | 0 oct | Moves the centre above or below the note. |
+  | **Gain** | ±24 dB | 12 dB | How much it boosts (or, below 0, cuts) at the centre. |
+  | **Q** | 0.5 – 12 | 1 | How narrow: higher picks out a pitch from the noise. |
+  | **Envelope amount** | ±5 oct | 0 oct | How far the noise filter envelope moves the centre. |
+
+- **Noise filter envelope** and **Noise amp envelope** — the same controls as the filter and amp
+  envelopes, with the same defaults, labelled **Noise filter** or **Noise amp**. The noise amp
+  envelope shapes the noise's loudness on its own, so it can fade before the tone does or ring on
+  after it; **Noise amp velocity**, 0 – 1 (default 0.7), sets how much louder harder playing
+  makes the noise.
+- **Noise LFO** — a second LFO with the same controls and defaults as the **LFO**, for the noise.
+  Its **Destination** is **bell frequency** (the noise filter's centre), **bell gain** (its boost)
+  or **amplitude**.
 
 - **Bend range**, 0 – 24 st (default 2) — how far the pitch wheel bends, in semitones.
 - **Voices**, 1 – 16 (default 8) — how many notes sound at once; a note beyond that takes over the
