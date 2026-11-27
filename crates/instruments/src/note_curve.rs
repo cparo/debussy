@@ -30,14 +30,37 @@ pub(crate) enum Source {
     Synth,
 }
 
-/// The span and release time of a note whose envelopes reach their sustain after `settle`
-/// seconds and whose amplitude envelope releases over `release` seconds: the note holds for
-/// [`HOLD`] past `settle`, the span covers its release, up to [`NOTE_MAX_SPAN`], and the release comes no later than [`LATEST_GATE_OFF`] of the span.
-pub(crate) fn fit(settle: f32, release: f32) -> (f32, f32) {
-    let held = settle.max(0.0) + HOLD;
-    // `max` turns NaN into 0.
-    let span = (held + release.max(0.0)).min(NOTE_MAX_SPAN);
-    (span, held.min(LATEST_GATE_OFF * span))
+/// How long a note's envelopes take, in seconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Envelopes {
+    /// Until every envelope reaches its sustain: the longest attack plus decay.
+    pub settle: f32,
+    /// The amplitude envelope's release.
+    pub release: f32,
+}
+
+/// A note curve's time axis and when its note is released, in seconds from the note-on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Timing {
+    /// Where the time axis ends.
+    pub span: f32,
+    /// When the note is released.
+    pub gate_off: f32,
+}
+
+impl Envelopes {
+    /// The timing of a note with these envelopes: the note holds for [`HOLD`] past `settle`,
+    /// the span covers its release, up to [`NOTE_MAX_SPAN`], and the release comes no later
+    /// than [`LATEST_GATE_OFF`] of the span.
+    pub(crate) fn fit(self) -> Timing {
+        let held = self.settle.max(0.0) + HOLD;
+        // `max` turns NaN into 0.
+        let span = (held + self.release.max(0.0)).min(NOTE_MAX_SPAN);
+        Timing {
+            span,
+            gate_off: held.min(LATEST_GATE_OFF * span),
+        }
+    }
 }
 
 /// One note of an instrument at given parameter values: an A4 at velocity 127, held, then
@@ -50,38 +73,34 @@ pub struct NoteCurve {
     values: Vec<f32>,
     /// The simulated rate, in Hz.
     sample_rate: u32,
-    span: f32,
-    gate_off: f32,
+    timing: Timing,
 }
 
 impl NoteCurve {
     /// The curve of `source` at `values`, at `sample_rate` capped at [`NOTE_MAX_RATE`], over the
-    /// span [`fit`] gives for `settle` and `release`.
+    /// timing fitted to `envelopes`.
     pub(crate) fn new(
         source: Source,
         values: Vec<f32>,
         sample_rate: u32,
-        settle: f32,
-        release: f32,
+        envelopes: Envelopes,
     ) -> NoteCurve {
-        let (span, gate_off) = fit(settle, release);
         NoteCurve {
             source,
             values,
             sample_rate: sample_rate.clamp(1, NOTE_MAX_RATE),
-            span,
-            gate_off,
+            timing: envelopes.fit(),
         }
     }
 
     /// The time the curve shows, in seconds, from the note-on.
     pub fn span(&self) -> f32 {
-        self.span
+        self.timing.span
     }
 
     /// When the note is released, in seconds from the note-on.
     pub fn gate_off(&self) -> f32 {
-        self.gate_off
+        self.timing.gate_off
     }
 
     /// The rate the note is simulated at, in Hz.
@@ -100,8 +119,8 @@ impl NoteCurve {
             Source::Synth => crate::synth::render_note(
                 &self.values,
                 self.sample_rate,
-                frames(self.gate_off),
-                frames(self.span).max(1),
+                frames(self.timing.gate_off),
+                frames(self.timing.span).max(1),
             ),
         };
         Note {
@@ -187,29 +206,35 @@ impl Note {
 mod tests {
     use super::*;
 
+    /// The timing of envelopes that settle after `settle` seconds and release over `release`.
+    fn fit(settle: f32, release: f32) -> Timing {
+        Envelopes { settle, release }.fit()
+    }
+
     #[test]
     fn test_fit_holds_past_the_envelopes_then_releases() {
         // Settled after 0.5 s, held 0.25 s more, then a 1 s release.
-        let (span, gate_off) = fit(0.5, 1.0);
-        assert!((span - 1.75).abs() < 1e-6, "{span}");
-        assert!((gate_off - 0.75).abs() < 1e-6, "{gate_off}");
+        let timing = fit(0.5, 1.0);
+        assert!((timing.span - 1.75).abs() < 1e-6, "{timing:?}");
+        assert!((timing.gate_off - 0.75).abs() < 1e-6, "{timing:?}");
     }
 
     #[test]
     fn test_fit_spans_at_least_the_hold_and_at_most_ten_seconds() {
         // The hold sets the shortest span.
-        assert_eq!(fit(0.0, 0.0), (HOLD, LATEST_GATE_OFF * HOLD));
+        let timing = |span: f32| Timing {
+            span,
+            gate_off: LATEST_GATE_OFF * span,
+        };
+        assert_eq!(fit(0.0, 0.0), timing(HOLD));
         assert_eq!(fit(f32::NAN, f32::NAN), fit(0.0, 0.0));
-        assert_eq!(
-            fit(20.0, 10.0),
-            (NOTE_MAX_SPAN, LATEST_GATE_OFF * NOTE_MAX_SPAN)
-        );
+        assert_eq!(fit(20.0, 10.0), timing(NOTE_MAX_SPAN));
     }
 
     #[test]
     fn test_fit_releases_by_three_quarters_of_the_span() {
         for (settle, release) in [(0.0, 0.0), (0.002, 0.002), (5.0, 0.01), (20.0, 10.0)] {
-            let (span, gate_off) = fit(settle, release);
+            let Timing { span, gate_off } = fit(settle, release);
             assert!(gate_off <= LATEST_GATE_OFF * span, "{settle}, {release}");
             assert!(gate_off > 0.0);
         }

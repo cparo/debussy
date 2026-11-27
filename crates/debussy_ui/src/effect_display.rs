@@ -64,6 +64,20 @@ impl Pixels {
     }
 }
 
+/// What a display area is drawn for, besides its node: the tone, the project's rate and tempo,
+/// and the screen's scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DisplaySettings {
+    /// The tone of the chrome around the display.
+    pub tone: Tone,
+    /// The project's sample rate, in Hz.
+    pub sample_rate: u32,
+    /// How long a whole note of the project tempo is, in frames at `sample_rate`.
+    pub frames_per_whole_note: f64,
+    /// Physical pixels per logical pixel.
+    pub scale: f32,
+}
+
 /// What a display draws for, besides the curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DisplayContext {
@@ -170,18 +184,21 @@ pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32
     )
 }
 
-/// The display area for a node of `kind` whose parameters stand at `values` (in the node's order), in a project at `sample_rate` whose
-/// whole note is `frames_per_whole_note` frames, at `scale` physical pixels per logical pixel:
-/// the picture of the curve or note they give, or charcoal grey. It fills the width it is given;
-/// it is [`NOTE_DISPLAY_HEIGHT`] tall for a note and [`DISPLAY_HEIGHT`] otherwise.
+/// The display area for a node of `kind` whose parameters stand at `values` (in the node's
+/// order), drawn for `settings`: the picture of the curve or note they give, or charcoal grey. It
+/// fills the width it is given; it is [`NOTE_DISPLAY_HEIGHT`] tall for a note and
+/// [`DISPLAY_HEIGHT`] otherwise.
 pub(crate) fn display_area<'a>(
     kind: DisplayKind<'_>,
     values: &[f32],
-    tone: Tone,
-    sample_rate: u32,
-    frames_per_whole_note: f64,
-    scale: f32,
+    settings: DisplaySettings,
 ) -> Element<'a, Message> {
+    let DisplaySettings {
+        tone,
+        sample_rate,
+        frames_per_whole_note,
+        scale,
+    } = settings;
     let picture = Picture::of(kind, values, sample_rate, frames_per_whole_note);
     let height = picture.as_ref().map_or(DISPLAY_HEIGHT, Picture::height);
     let body: Element<'a, Message> = match picture {
@@ -322,6 +339,14 @@ fn physical(logical: f32, scale: f32) -> u32 {
 mod tests {
     use super::*;
 
+    /// Display settings for the display-area tests.
+    const SETTINGS: DisplaySettings = DisplaySettings {
+        tone: Tone::Dark,
+        sample_rate: 48_000,
+        frames_per_whole_note: 96_000.0,
+        scale: 2.0,
+    };
+
     /// The curve of `kind` at its defaults with `changes` by name, at `sample_rate`.
     fn curve_of(kind: &str, changes: &[(&str, f32)], sample_rate: u32) -> Option<Curve> {
         audio_effects::curve(kind, &values_with(kind, changes)?, sample_rate, 96_000.0)
@@ -378,30 +403,9 @@ mod tests {
     {
         let eq = "parametric-eq";
         let values = values_with(eq, &[]).ok_or("unknown kind")?;
-        let _blank = display_area(
-            DisplayKind::Effect("unknown"),
-            &[0.0],
-            Tone::Dark,
-            48_000,
-            96_000.0,
-            2.0,
-        );
-        let _wrong_length = display_area(
-            DisplayKind::Effect(eq),
-            &[80.0],
-            Tone::Dark,
-            48_000,
-            96_000.0,
-            2.0,
-        );
-        let _drawn = display_area(
-            DisplayKind::Effect(eq),
-            &values,
-            Tone::Dark,
-            48_000,
-            96_000.0,
-            2.0,
-        );
+        let _blank = display_area(DisplayKind::Effect("unknown"), &[0.0], SETTINGS);
+        let _wrong_length = display_area(DisplayKind::Effect(eq), &[80.0], SETTINGS);
+        let _drawn = display_area(DisplayKind::Effect(eq), &values, SETTINGS);
         Ok(())
     }
 
@@ -472,14 +476,7 @@ mod tests {
         assert!(Picture::of(DisplayKind::Instrument("sampler"), &[], 48_000, 96_000.0).is_none());
         // An instrument's kind is not looked up among the effects, nor the reverse.
         assert!(Picture::of(DisplayKind::Effect("synth"), &synth, 48_000, 96_000.0).is_none());
-        let _area = display_area(
-            DisplayKind::Instrument("synth"),
-            &synth,
-            Tone::Dark,
-            48_000,
-            96_000.0,
-            2.0,
-        );
+        let _area = display_area(DisplayKind::Instrument("synth"), &synth, SETTINGS);
         Ok(())
     }
 

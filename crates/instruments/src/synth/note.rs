@@ -9,7 +9,7 @@ use signal_graph::Parameter;
 use super::{
     Block, DC_BLOCK_HZ, LFO_SEED, Parameters, Tone, Values, configure, configure_lfo, render,
 };
-use crate::note_curve::{NOTE, NoteCurve, Source};
+use crate::note_curve::{Envelopes, NOTE, NoteCurve, Source};
 use crate::voices::Pool;
 
 /// A fresh set of parameters at `values` (in declaration order, clamped and rounded as a
@@ -44,14 +44,16 @@ pub(crate) fn note_curve(values: &[f32], sample_rate: u32) -> Option<NoteCurve> 
         to_default([&p.lfo_rate, &p.lfo_shape, &p.lfo_destination]);
     }
     let settle = |env: &crate::voices::EnvelopeParameters| env.attack.get() + env.decay.get();
-    let settle = settle(&p.amp_env).max(settle(&p.filter_env));
+    let envelopes = Envelopes {
+        settle: settle(&p.amp_env).max(settle(&p.filter_env)),
+        release: p.amp_env.release.get(),
+    };
     let values = p.all().iter().map(Parameter::get).collect();
     Some(NoteCurve::new(
         Source::Synth,
         values,
         sample_rate,
-        settle,
-        p.amp_env.release.get(),
+        envelopes,
     ))
 }
 

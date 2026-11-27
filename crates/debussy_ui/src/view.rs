@@ -757,6 +757,21 @@ impl App {
 
     /// The selected node's dialog, `size` big, covering the track pane; its body scrolls under a
     /// fixed header.
+    /// What a dialog's display area is drawn for: the tone, the project's rate and tempo, and
+    /// the window's scale.
+    fn display_settings(&self) -> crate::effect_display::DisplaySettings {
+        crate::effect_display::DisplaySettings {
+            tone: self.tone(),
+            sample_rate: self.sample_rate(),
+            frames_per_whole_note: self
+                .session()
+                .state()
+                .tempo
+                .frames_per_whole_note(self.sample_rate()),
+            scale: self.scale_factor(),
+        }
+    }
+
     fn node_dialog(&self, size: Size) -> Option<Element<'_, Message>> {
         let Some(Selection::Node(id)) = self.selection() else {
             return None;
@@ -818,13 +833,7 @@ impl App {
                             &parameters,
                             &node.kind,
                             self.focus(),
-                            self.tone(),
-                            self.sample_rate(),
-                            self.session()
-                                .state()
-                                .tempo
-                                .frames_per_whole_note(self.sample_rate()),
-                            self.scale_factor(),
+                            self.display_settings(),
                         )
                     ]
                     .spacing(16)
@@ -837,13 +846,7 @@ impl App {
                     &parameters,
                     &node.kind,
                     self.focus(),
-                    self.tone(),
-                    self.sample_rate(),
-                    self.session()
-                        .state()
-                        .tempo
-                        .frames_per_whole_note(self.sample_rate()),
-                    self.scale_factor(),
+                    self.display_settings(),
                 ),
                 None => Space::new().into(),
             },
