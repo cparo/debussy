@@ -180,7 +180,7 @@ enough to show the envelopes and the release, and redraw as you change a control
   | **Wave** | saw, pulse, triangle | saw | The tone. |
   | **Octave** | −3 – +3 | 0 | Shifts by whole octaves. |
   | **Detune** | ±100 cents | 0 (osc 1), 7 cents (osc 2) | Fine pitch; a little thickens the sound. |
-  | **Pulse width** | 5 – 95 % | 50 % | The pulse wave's shape; only heard with **pulse**. |
+  | **Pulse width** | 5 – 95 % | 50 % | The pulse wave's shape. Greyed out unless **Wave** is **pulse**. |
   | **Level** | 0 – 1 | 1 (osc 1), 0.5 (osc 2) | How loud it is in the mix. |
 
 - **Filter** — removes what is above the cutoff.

@@ -1,6 +1,6 @@
 # ADR-0169 — A parameter's control can be disabled by the value of a stopped-only parameter
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0173
 - **Decided by:** Chris Paro
 - **Date:** 2026-11-26
 - **Issue:** #206
