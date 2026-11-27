@@ -11,7 +11,7 @@ use crate::synth::{self, Synth};
 
 /// Builds one instrument kind's note curve from its parameter values (in the order the
 /// instrument declares them) at a sample rate in Hz; `None` for values of the wrong length.
-pub type DisplayFn = fn(&[f32], u32) -> Option<NoteCurve>;
+pub type NoteCurveFn = fn(&[f32], u32) -> Option<NoteCurve>;
 
 /// A built-in instrument kind.
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +25,7 @@ pub struct InstrumentKind {
     pub build: fn() -> Option<Box<dyn Node>>,
     /// Builds the note its parameter values play, for its display; `None` for a kind with no
     /// note display (`docs/architecture/effect-displays.md` "Synth note display").
-    pub display: Option<DisplayFn>,
+    pub display: Option<NoteCurveFn>,
 }
 
 /// Every built-in instrument kind, in the order a menu lists them: alphabetical by name.
@@ -87,6 +87,24 @@ pub fn note_curve(kind: &str, values: &[f32], sample_rate: u32) -> Option<NoteCu
 /// Allocates: builds the instrument to ask it.
 pub fn parameter_infos(kind: &str) -> Option<Vec<ParameterInfo>> {
     instrument(kind).map(|node| node.parameters().iter().map(|p| p.info().clone()).collect())
+}
+
+/// The default values of instrument kind `kind`'s parameters with `changes` set by name, for
+/// tests; `None` for a kind this build does not know.
+#[cfg(test)]
+pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32>> {
+    let infos = parameter_infos(kind)?;
+    Some(
+        infos
+            .iter()
+            .map(|info| {
+                changes
+                    .iter()
+                    .find(|(name, _)| *name == info.name)
+                    .map_or(info.default, |&(_, value)| value)
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -132,6 +132,7 @@ fn colour(db: f32, audio: Color) -> Option<Color> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::effect_display::values_with;
     use crate::plot::probe::pixel;
     use crate::theme::Tone;
 
@@ -140,16 +141,7 @@ mod tests {
     /// The synth's note at its defaults with `changes` by name at `rate`, drawn 600 × 160
     /// logical pixels at scale 1, with the canvas's halves.
     fn draw(changes: &[(&str, f32)], rate: u32) -> Option<(NoteCurve, Pixels, [Plot; 2])> {
-        let infos = instruments::parameter_infos("synth")?;
-        let values: Vec<f32> = infos
-            .iter()
-            .map(|info| {
-                changes
-                    .iter()
-                    .find(|(name, _)| *name == info.name)
-                    .map_or(info.default, |&(_, v)| v)
-            })
-            .collect();
+        let values = values_with("synth", changes)?;
         let curve = instruments::note_curve("synth", &values, rate)?;
         let context = DisplayContext {
             tone: Tone::Dark,
@@ -164,16 +156,8 @@ mod tests {
 
     #[test]
     fn test_render_returns_pixels_of_the_requested_size() -> TestResult {
-        let curve = instruments::note_curve(
-            "synth",
-            &instruments::parameter_infos("synth")
-                .ok_or("no synth")?
-                .iter()
-                .map(|i| i.default)
-                .collect::<Vec<_>>(),
-            48_000,
-        )
-        .ok_or("no curve")?;
+        let values = values_with("synth", &[]).ok_or("no synth")?;
+        let curve = instruments::note_curve("synth", &values, 48_000).ok_or("no curve")?;
         let note = curve.render();
         for (width, height, logical) in [(600, 160, 160), (1_200, 320, 160), (301, 240, 160)] {
             let context = DisplayContext {

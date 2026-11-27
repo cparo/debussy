@@ -17,7 +17,7 @@ independent core crates; only `debussy_ui` depends on both.
 
 ## Decision
 
-- `instruments::InstrumentKind` has a `display: Option<DisplayFn>` column, `DisplayFn =
+- `instruments::InstrumentKind` has a `display: Option<NoteCurveFn>` column, `NoteCurveFn =
   fn(&[f32], u32) -> Option<NoteCurve>`, and `instruments::note_curve` looks it up, mirroring
   `audio_effects::curve`. The display asks `note_curve` for an instrument and `curve` for an
   effect, through a UI-side `Picture { Effect(Curve), Note(NoteCurve) }`.

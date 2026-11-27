@@ -3,7 +3,7 @@
 //! measured by running seeded pink noise through the effect's own per-frame processing offline,
 //! so it matches what is heard; the simulation waits until the curve is read.
 
-use dsp::{Bands, Pink, Stft, window_size};
+use dsp::{Bands, Pink, SPECTROGRAM_WINDOW_SECONDS, Stft, window_size};
 
 use crate::chorus::{self, Voices};
 use crate::flanger::{self, Comb};
@@ -26,9 +26,6 @@ const SEED: u64 = 0x7069_6e6b;
 /// How long the effect runs before the measured stretch, in seconds, so its lines have filled
 /// and the flanger's feedback has settled.
 const SETTLE: f64 = 0.5;
-
-/// The analysis window's target length, in seconds; the window is the power of two nearest it.
-const WINDOW_SECONDS: f64 = 0.043;
 
 /// The effect a spectrogram curve simulates, at its parameter values in declaration order, with
 /// the whole-note length it runs at, in frames.
@@ -91,7 +88,7 @@ impl SpectrogramCurve {
             return [Vec::new(), Vec::new()];
         };
         let rate = self.sample_rate.min(MAX_RATE);
-        let Ok(stft) = Stft::new(window_size(WINDOW_SECONDS, rate)) else {
+        let Ok(stft) = Stft::new(window_size(SPECTROGRAM_WINDOW_SECONDS, rate)) else {
             return [vec![f32::NAN; cells], vec![f32::NAN; cells]];
         };
         let bands = Bands::new(rows, low_hz, high_hz, rate, stft.size());

@@ -4,17 +4,17 @@
 //! matches what is heard. Building a curve only copies the values: [`NoteCurve::render`] runs the
 //! simulation.
 
-use dsp::{Bands, Stft, window_size};
+use dsp::{Bands, SPECTROGRAM_WINDOW_SECONDS, Stft, window_size};
 
 /// The note a curve plays: A4.
 pub const NOTE: u8 = 69;
 
 /// The highest rate a note is simulated at, in Hz: a project at a higher rate is simulated at
 /// this one, which covers the display's frequencies.
-pub const MAX_RATE: u32 = 48_000;
+pub const NOTE_MAX_RATE: u32 = 48_000;
 
 /// The longest span a curve shows, in seconds.
-pub const MAX_SPAN: f32 = 10.0;
+pub const NOTE_MAX_SPAN: f32 = 10.0;
 
 /// How long the note holds after its envelopes reach their sustain, in seconds; also the
 /// shortest span.
@@ -22,9 +22,6 @@ const HOLD: f32 = 0.25;
 
 /// The latest the note is released, as a share of the span, so its release always shows.
 const LATEST_GATE_OFF: f32 = 0.75;
-
-/// The analysis window's target length, in seconds; the window is the power of two nearest it.
-const WINDOW_SECONDS: f64 = 0.043;
 
 /// The instrument a note curve simulates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,11 +32,11 @@ pub(crate) enum Source {
 
 /// The span and release time of a note whose envelopes reach their sustain after `settle`
 /// seconds and whose amplitude envelope releases over `release` seconds: the note holds for
-/// [`HOLD`] past `settle`, the span covers its release, up to [`MAX_SPAN`], and the release comes no later than [`LATEST_GATE_OFF`] of the span.
+/// [`HOLD`] past `settle`, the span covers its release, up to [`NOTE_MAX_SPAN`], and the release comes no later than [`LATEST_GATE_OFF`] of the span.
 pub(crate) fn fit(settle: f32, release: f32) -> (f32, f32) {
     let held = settle.max(0.0) + HOLD;
     // `max` turns NaN into 0.
-    let span = (held + release.max(0.0)).min(MAX_SPAN);
+    let span = (held + release.max(0.0)).min(NOTE_MAX_SPAN);
     (span, held.min(LATEST_GATE_OFF * span))
 }
 
@@ -58,7 +55,7 @@ pub struct NoteCurve {
 }
 
 impl NoteCurve {
-    /// The curve of `source` at `values`, at `sample_rate` capped at [`MAX_RATE`], over the
+    /// The curve of `source` at `values`, at `sample_rate` capped at [`NOTE_MAX_RATE`], over the
     /// span [`fit`] gives for `settle` and `release`.
     pub(crate) fn new(
         source: Source,
@@ -71,7 +68,7 @@ impl NoteCurve {
         NoteCurve {
             source,
             values,
-            sample_rate: sample_rate.clamp(1, MAX_RATE),
+            sample_rate: sample_rate.clamp(1, NOTE_MAX_RATE),
             span,
             gate_off,
         }
@@ -142,7 +139,8 @@ impl Note {
         let Some(cells) = columns.checked_mul(rows).filter(|&n| n > 0) else {
             return Vec::new();
         };
-        let Ok(mut stft) = Stft::new(window_size(WINDOW_SECONDS, self.sample_rate)) else {
+        let Ok(mut stft) = Stft::new(window_size(SPECTROGRAM_WINDOW_SECONDS, self.sample_rate))
+        else {
             return vec![f32::NAN; cells];
         };
         let size = stft.size();
@@ -190,7 +188,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_note_curve_span_fits_the_envelopes() {
+    fn test_fit_holds_past_the_envelopes_then_releases() {
         // Settled after 0.5 s, held 0.25 s more, then a 1 s release.
         let (span, gate_off) = fit(0.5, 1.0);
         assert!((span - 1.75).abs() < 1e-6, "{span}");
@@ -198,15 +196,18 @@ mod tests {
     }
 
     #[test]
-    fn test_note_curve_span_clamps_at_both_ends() {
+    fn test_fit_spans_at_least_the_hold_and_at_most_ten_seconds() {
         // The hold sets the shortest span.
         assert_eq!(fit(0.0, 0.0), (HOLD, LATEST_GATE_OFF * HOLD));
         assert_eq!(fit(f32::NAN, f32::NAN), fit(0.0, 0.0));
-        assert_eq!(fit(20.0, 10.0), (MAX_SPAN, LATEST_GATE_OFF * MAX_SPAN));
+        assert_eq!(
+            fit(20.0, 10.0),
+            (NOTE_MAX_SPAN, LATEST_GATE_OFF * NOTE_MAX_SPAN)
+        );
     }
 
     #[test]
-    fn test_note_curve_span_releases_by_three_quarters() {
+    fn test_fit_releases_by_three_quarters_of_the_span() {
         for (settle, release) in [(0.0, 0.0), (0.002, 0.002), (5.0, 0.01), (20.0, 10.0)] {
             let (span, gate_off) = fit(settle, release);
             assert!(gate_off <= LATEST_GATE_OFF * span, "{settle}, {release}");

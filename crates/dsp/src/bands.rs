@@ -3,6 +3,10 @@
 
 use crate::fft::{MAX_SIZE, MIN_SIZE};
 
+/// The spectrogram displays' analysis window length, in seconds; [`window_size`] gives the
+/// transform size nearest it.
+pub const SPECTROGRAM_WINDOW_SECONDS: f64 = 0.043;
+
 /// The analysis window for `seconds` at `sample_rate`: the power of two nearest that many
 /// frames, within the transform's sizes ([`MIN_SIZE`] to [`MAX_SIZE`]).
 pub fn window_size(seconds: f64, sample_rate: u32) -> usize {
@@ -123,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bands_beyond_nyquist_have_no_power() {
+    fn test_powers_beyond_nyquist_are_zero() {
         // 20 Hz to 20 kHz at 22.05 kHz: the Nyquist frequency, 11.025 kHz, lies in row 26 of 30.
         let bands = Bands::new(30, 20.0, 20_000.0, 22_050, 1024);
         assert_eq!(bands.len(), 30);
@@ -137,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bands_sum_wide_bands_and_interpolate_narrow_ones() {
+    fn test_powers_sum_wide_bands_and_interpolate_narrow_ones() {
         // Two bands at 48 kHz over a 64-point spectrum (750 Hz bins): 20 to 632 Hz holds no bin
         // centre, so it reads between bins 0 and 1; 632 Hz to 20 kHz sums bins 1 to 26.
         let bands = Bands::new(2, 20.0, 20_000.0, 48_000, 64);
@@ -148,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bands_with_bad_bounds_are_beyond() {
+    fn test_new_with_bad_bounds_is_beyond() {
         let bands = Bands::new(4, f32::NAN, 20_000.0, 48_000, 2048);
         assert!((0..4).all(|r| bands.is_beyond(r)));
         assert!(Bands::new(0, 20.0, 20_000.0, 48_000, 2048).is_empty());

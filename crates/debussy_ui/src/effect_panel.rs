@@ -7,10 +7,11 @@ use iced::widget::{
     Space, Text, button, column, container, pick_list, row, scrollable, slider, svg, text, tooltip,
 };
 use iced::{Alignment, Element, Fill, Length, Pixels};
+use project_model::NodeKind;
 use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
-use crate::effect_display::display_area;
+use crate::effect_display::{DisplayKind, display_area};
 use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
@@ -97,8 +98,8 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
     Some(order[next])
 }
 
-/// The display and controls of the effect or instrument (if `instrument`) whose parameters are
-/// `parameters`, with the control or port button at `focus` ringed; empty for a mixer. The
+/// The display and controls of the effect or instrument of kind `node` whose parameters are
+/// `parameters`, with the control or port button at `focus` ringed; empty for a mixer or any other node. The
 /// display, drawn in `tone` at `sample_rate`, for a
 /// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
 /// pixel, comes first; then the preset picker, if the kind
@@ -106,20 +107,19 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
 /// horizontally.
 pub(crate) fn effect_panel<'a>(
     parameters: &NodeParameters<'a>,
-    instrument: bool,
+    node: &NodeKind,
     focus: Option<DialogFocus>,
     tone: Tone,
     sample_rate: u32,
     frames_per_whole_note: f64,
     scale: f32,
 ) -> Element<'a, Message> {
-    let Some(kind) = parameters.kind() else {
+    let (Some(kind), Some(display_kind)) = (parameters.kind(), DisplayKind::of(node)) else {
         return Space::new().into();
     };
     let infos = parameters.infos();
     let display = display_area(
-        kind,
-        instrument,
+        display_kind,
         &parameters.values(),
         tone,
         sample_rate,

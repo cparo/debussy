@@ -169,9 +169,9 @@ mixes two oscillators, then a filter, shaped by two envelopes and an LFO. The su
 notes.
 
 The picture above the controls shows one note as you have set it up: an A above middle C played at
-full strength, held, then let go. On the left is its waveform; on the right, which pitches it holds
-and how loud, brightest where it is loudest. Both share one time line, long enough to show the
-envelopes and the release, and redraw as you change a control.
+full strength, held, then let go. On the left is the shape of its sound wave; on the right, which
+pitches it holds and how loud, brightest where it is loudest. Both share one time line, long
+enough to show the envelopes and the release, and redraw as you change a control.
 
 - **Oscillator 1** and **Oscillator 2** — the same controls, labelled **Osc 1** or **Osc 2**:
 

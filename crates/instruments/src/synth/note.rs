@@ -101,10 +101,8 @@ pub(crate) fn render_note(
 #[cfg(test)]
 mod tests {
     use dsp::Stft;
-    use signal_graph::Node;
 
     use super::*;
-    use crate::synth::Synth;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -112,17 +110,7 @@ mod tests {
 
     /// The synth's default values with `changes` set by name.
     fn values_with(changes: &[(&str, f32)]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        Ok(Synth::new()?
-            .parameters()
-            .iter()
-            .map(|p| {
-                let info = p.info();
-                changes
-                    .iter()
-                    .find(|(name, _)| *name == info.name)
-                    .map_or(info.default, |&(_, v)| v)
-            })
-            .collect())
+        Ok(crate::registry::values_with("synth", changes).ok_or("no synth")?)
     }
 
     /// The curve of a synth at its defaults with `changes`, at [`RATE`].
@@ -185,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn test_note_curve_samples_deterministic() -> TestResult {
+    fn test_render_is_deterministic() -> TestResult {
         let changes = [("lfo depth", 0.5), ("lfo shape", 5.0)];
         let (a, b) = (curve(&changes)?.render(), curve(&changes)?.render());
         assert_eq!(a, b);
@@ -194,14 +182,14 @@ mod tests {
     }
 
     #[test]
-    fn test_note_curve_silent_when_both_levels_are_zero() -> TestResult {
+    fn test_render_silent_when_both_levels_are_zero() -> TestResult {
         let note = curve(&[("osc 1 level", 0.0), ("osc 2 level", 0.0)])?.render();
         assert!(note.samples().iter().all(|&s| s == 0.0));
         Ok(())
     }
 
     #[test]
-    fn test_note_curve_peak_near_the_amp_envelope_peak() -> TestResult {
+    fn test_render_peaks_near_the_amp_envelope_peak() -> TestResult {
         // One saw, the filter open, full sustain: a full-scale wave, over-shooting at its edges
         // and offset while the DC blocker settles, then scaled by the gain.
         let plain = |gain| {
@@ -224,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_note_curve_pitch_is_440_hz() -> TestResult {
+    fn test_render_pitch_is_440_hz() -> TestResult {
         let note = curve(&[("osc 2 level", 0.0), ("amp sustain", 1.0)])?.render();
         let mut stft = Stft::new(8192)?;
         let mut magnitudes = vec![0.0; stft.bins()];
@@ -239,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_note_curve_levels_nan_above_nyquist() -> TestResult {
+    fn test_levels_nan_above_nyquist() -> TestResult {
         let note = note_curve(&values_with(&[])?, 22_050)
             .ok_or("no curve")?
             .render();
@@ -263,7 +251,7 @@ mod tests {
     #[test]
     fn test_note_curve_rate_is_capped() -> TestResult {
         let curve = note_curve(&values_with(&[])?, 192_000).ok_or("no curve")?;
-        assert_eq!(curve.sample_rate(), crate::note_curve::MAX_RATE);
+        assert_eq!(curve.sample_rate(), crate::NOTE_MAX_RATE);
         Ok(())
     }
 
@@ -271,7 +259,7 @@ mod tests {
     #[ignore = "timing: run in release with --ignored --nocapture"]
     // It prints its timings; it runs off the real-time thread.
     #[allow(clippy::disallowed_macros)]
-    fn test_note_curve_worst_case_time() -> TestResult {
+    fn test_render_and_levels_worst_case_time() -> TestResult {
         // The longest span, the 24 dB order and the LFO on, with a display at scale 2's columns
         // and rows.
         let curve = curve(&[
@@ -280,16 +268,11 @@ mod tests {
             ("filter order", 4.0),
             ("lfo depth", 1.0),
         ])?;
-        assert_eq!(curve.span(), crate::note_curve::MAX_SPAN);
+        assert_eq!(curve.span(), crate::NOTE_MAX_SPAN);
         let start = std::time::Instant::now();
         let note = curve.render();
         let rendered = start.elapsed();
-        let levels = note.levels(
-            crate::note_curve::MAX_SPAN as usize * 48,
-            280,
-            20.0,
-            20_000.0,
-        );
+        let levels = note.levels(crate::NOTE_MAX_SPAN as usize * 48, 280, 20.0, 20_000.0);
         println!(
             "render {rendered:?}, levels {:?}",
             start.elapsed() - rendered

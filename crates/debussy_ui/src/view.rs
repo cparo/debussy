@@ -816,7 +816,7 @@ impl App {
                         zones,
                         crate::effect_panel::effect_panel(
                             &parameters,
-                            true,
+                            &node.kind,
                             self.focus(),
                             self.tone(),
                             self.sample_rate(),
@@ -835,7 +835,7 @@ impl App {
             NodeKind::Effect { .. } | NodeKind::Instrument { .. } => match self.parameters(id) {
                 Some(parameters) => crate::effect_panel::effect_panel(
                     &parameters,
-                    matches!(node.kind, NodeKind::Instrument { .. }),
+                    &node.kind,
                     self.focus(),
                     self.tone(),
                     self.sample_rate(),

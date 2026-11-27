@@ -11,6 +11,7 @@ use iced::widget::canvas::{Cache, Geometry, Program};
 use iced::widget::{canvas, container};
 use iced::{Element, Fill, Length, Rectangle, Renderer, Size, Theme, mouse};
 use instruments::{Note, NoteCurve};
+use project_model::NodeKind;
 
 use crate::app::Message;
 use crate::raster::draw_tiled;
@@ -24,7 +25,7 @@ use crate::{
 pub(crate) const DISPLAY_HEIGHT: f32 = 320.0;
 
 /// An instrument's note display's height, in logical pixels: half an effect's.
-pub(crate) const SYNTH_DISPLAY_HEIGHT: f32 = DISPLAY_HEIGHT / 2.0;
+pub(crate) const NOTE_DISPLAY_HEIGHT: f32 = DISPLAY_HEIGHT / 2.0;
 
 /// An image a display drew: `width` × `height` pixels, row by row from the top left, four
 /// bytes (red, green, blue, alpha; not premultiplied) each.
@@ -73,8 +74,30 @@ pub struct DisplayContext {
     /// The picture's height in physical pixels: `logical_height` at the display's scale.
     pub height: u32,
     /// The display's height in logical pixels: [`DISPLAY_HEIGHT`], or
-    /// [`SYNTH_DISPLAY_HEIGHT`] for an instrument's note.
+    /// [`NOTE_DISPLAY_HEIGHT`] for an instrument's note.
     pub logical_height: u32,
+}
+
+/// The kind of node a display area belongs to, by its kind id: which registry to ask for its
+/// picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DisplayKind<'a> {
+    /// A built-in effect, such as `"parametric-eq"`.
+    Effect(&'a str),
+    /// A built-in instrument, such as `"synth"`.
+    Instrument(&'a str),
+}
+
+impl<'a> DisplayKind<'a> {
+    /// The display kind of a node of kind `node`; `None` for a node that is neither an effect
+    /// nor an instrument.
+    pub(crate) fn of(node: &'a NodeKind) -> Option<DisplayKind<'a>> {
+        match node {
+            NodeKind::Effect { kind, .. } => Some(DisplayKind::Effect(kind)),
+            NodeKind::Instrument { kind, .. } => Some(DisplayKind::Instrument(kind)),
+            _ => None,
+        }
+    }
 }
 
 /// What a display area pictures: an effect's curve or an instrument's note.
@@ -87,20 +110,22 @@ pub(crate) enum Picture {
 }
 
 impl Picture {
-    /// The picture of node kind `kind` at `values`, asking the instruments for an `instrument`
-    /// and the effects otherwise; `None` for a kind with no picture.
+    /// The picture of a node of `kind` at `values`, from the instruments' or the effects'
+    /// registry; `None` for a kind with no picture.
     fn of(
-        kind: &str,
-        instrument: bool,
+        kind: DisplayKind<'_>,
         values: &[f32],
         sample_rate: u32,
         frames_per_whole_note: f64,
     ) -> Option<Picture> {
-        if instrument {
-            instruments::note_curve(kind, values, sample_rate).map(Picture::Note)
-        } else {
-            audio_effects::curve(kind, values, sample_rate, frames_per_whole_note)
-                .map(Picture::Effect)
+        match kind {
+            DisplayKind::Instrument(id) => {
+                instruments::note_curve(id, values, sample_rate).map(Picture::Note)
+            }
+            DisplayKind::Effect(id) => {
+                audio_effects::curve(id, values, sample_rate, frames_per_whole_note)
+                    .map(Picture::Effect)
+            }
         }
     }
 
@@ -108,7 +133,7 @@ impl Picture {
     fn height(&self) -> f32 {
         match self {
             Picture::Effect(_) => DISPLAY_HEIGHT,
-            Picture::Note(_) => SYNTH_DISPLAY_HEIGHT,
+            Picture::Note(_) => NOTE_DISPLAY_HEIGHT,
         }
     }
 }
@@ -126,10 +151,12 @@ pub(crate) fn draw(curve: &Curve, context: &DisplayContext) -> Option<Pixels> {
     }
 }
 
-/// The default values of `kind`'s parameters with `changes` set by name, for tests.
+/// The default values of effect or instrument kind `kind`'s parameters with `changes` set by
+/// name, for tests.
 #[cfg(test)]
 pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32>> {
-    let infos = audio_effects::parameter_infos(kind)?;
+    let infos =
+        audio_effects::parameter_infos(kind).or_else(|| instruments::parameter_infos(kind))?;
     Some(
         infos
             .iter()
@@ -143,21 +170,19 @@ pub(crate) fn values_with(kind: &str, changes: &[(&str, f32)]) -> Option<Vec<f32
     )
 }
 
-/// The display area for a node of `kind` (an instrument's if `instrument`, else an effect's)
-/// whose parameters stand at `values` (in the node's order), in a project at `sample_rate` whose
+/// The display area for a node of `kind` whose parameters stand at `values` (in the node's order), in a project at `sample_rate` whose
 /// whole note is `frames_per_whole_note` frames, at `scale` physical pixels per logical pixel:
 /// the picture of the curve or note they give, or charcoal grey. It fills the width it is given;
-/// it is [`SYNTH_DISPLAY_HEIGHT`] tall for a note and [`DISPLAY_HEIGHT`] otherwise.
+/// it is [`NOTE_DISPLAY_HEIGHT`] tall for a note and [`DISPLAY_HEIGHT`] otherwise.
 pub(crate) fn display_area<'a>(
-    kind: &str,
-    instrument: bool,
+    kind: DisplayKind<'_>,
     values: &[f32],
     tone: Tone,
     sample_rate: u32,
     frames_per_whole_note: f64,
     scale: f32,
 ) -> Element<'a, Message> {
-    let picture = Picture::of(kind, instrument, values, sample_rate, frames_per_whole_note);
+    let picture = Picture::of(kind, values, sample_rate, frames_per_whole_note);
     let height = picture.as_ref().map_or(DISPLAY_HEIGHT, Picture::height);
     let body: Element<'a, Message> = match picture {
         Some(picture) => canvas(DisplayView {
@@ -353,9 +378,30 @@ mod tests {
     {
         let eq = "parametric-eq";
         let values = values_with(eq, &[]).ok_or("unknown kind")?;
-        let _blank = display_area("unknown", false, &[0.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _wrong_length = display_area(eq, false, &[80.0], Tone::Dark, 48_000, 96_000.0, 2.0);
-        let _drawn = display_area(eq, false, &values, Tone::Dark, 48_000, 96_000.0, 2.0);
+        let _blank = display_area(
+            DisplayKind::Effect("unknown"),
+            &[0.0],
+            Tone::Dark,
+            48_000,
+            96_000.0,
+            2.0,
+        );
+        let _wrong_length = display_area(
+            DisplayKind::Effect(eq),
+            &[80.0],
+            Tone::Dark,
+            48_000,
+            96_000.0,
+            2.0,
+        );
+        let _drawn = display_area(
+            DisplayKind::Effect(eq),
+            &values,
+            Tone::Dark,
+            48_000,
+            96_000.0,
+            2.0,
+        );
         Ok(())
     }
 
@@ -413,34 +459,27 @@ mod tests {
         Ok(())
     }
 
-    /// The synth's default values with `changes` set by name.
-    fn synth_values(changes: &[(&str, f32)]) -> Option<Vec<f32>> {
-        let infos = instruments::parameter_infos("synth")?;
-        Some(
-            infos
-                .iter()
-                .map(|info| {
-                    changes
-                        .iter()
-                        .find(|(name, _)| *name == info.name)
-                        .map_or(info.default, |&(_, value)| value)
-                })
-                .collect(),
-        )
-    }
-
     #[test]
     fn test_picture_height_is_half_for_a_note() -> Result<(), Box<dyn std::error::Error>> {
-        let synth = synth_values(&[]).ok_or("no synth")?;
-        let note = Picture::of("synth", true, &synth, 48_000, 96_000.0).ok_or("no note")?;
+        let synth = values_with("synth", &[]).ok_or("no synth")?;
+        let note = Picture::of(DisplayKind::Instrument("synth"), &synth, 48_000, 96_000.0)
+            .ok_or("no note")?;
         assert_eq!(note.height(), 160.0);
         let eq = values_with("parametric-eq", &[]).ok_or("no eq")?;
-        let effect = Picture::of("parametric-eq", false, &eq, 48_000, 96_000.0).ok_or("no eq")?;
+        let effect = Picture::of(DisplayKind::Effect("parametric-eq"), &eq, 48_000, 96_000.0)
+            .ok_or("no eq")?;
         assert_eq!(effect.height(), 320.0);
-        assert!(Picture::of("sampler", true, &[], 48_000, 96_000.0).is_none());
+        assert!(Picture::of(DisplayKind::Instrument("sampler"), &[], 48_000, 96_000.0).is_none());
         // An instrument's kind is not looked up among the effects, nor the reverse.
-        assert!(Picture::of("synth", false, &synth, 48_000, 96_000.0).is_none());
-        let _area = display_area("synth", true, &synth, Tone::Dark, 48_000, 96_000.0, 2.0);
+        assert!(Picture::of(DisplayKind::Effect("synth"), &synth, 48_000, 96_000.0).is_none());
+        let _area = display_area(
+            DisplayKind::Instrument("synth"),
+            &synth,
+            Tone::Dark,
+            48_000,
+            96_000.0,
+            2.0,
+        );
         Ok(())
     }
 
@@ -448,10 +487,15 @@ mod tests {
     fn test_refresh_ignores_synth_values_the_note_does_not_use()
     -> Result<(), Box<dyn std::error::Error>> {
         let state = DisplayState::default();
-        let size = Size::new(300.0, SYNTH_DISPLAY_HEIGHT);
+        let size = Size::new(300.0, NOTE_DISPLAY_HEIGHT);
         let view = |changes: &[(&str, f32)]| -> Option<DisplayView> {
             Some(DisplayView {
-                picture: Picture::of("synth", true, &synth_values(changes)?, 48_000, 96_000.0)?,
+                picture: Picture::of(
+                    DisplayKind::Instrument("synth"),
+                    &values_with("synth", changes)?,
+                    48_000,
+                    96_000.0,
+                )?,
                 tone: Tone::Dark,
                 scale: 1.0,
             })
@@ -478,9 +522,8 @@ mod tests {
     fn test_note_picture_is_drawn_at_physical_size_and_keeps_its_note()
     -> Result<(), Box<dyn std::error::Error>> {
         let picture = Picture::of(
-            "synth",
-            true,
-            &synth_values(&[]).ok_or("no synth")?,
+            DisplayKind::Instrument("synth"),
+            &values_with("synth", &[]).ok_or("no synth")?,
             48_000,
             0.0,
         )
@@ -491,7 +534,7 @@ mod tests {
             scale: 2.0,
         };
         let state = DisplayState::default();
-        let key = view.key(Size::new(300.0, SYNTH_DISPLAY_HEIGHT));
+        let key = view.key(Size::new(300.0, NOTE_DISPLAY_HEIGHT));
         let picture = view
             .picture(&state, key.width, key.height)
             .ok_or("no picture")?;

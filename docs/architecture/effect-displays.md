@@ -148,7 +148,7 @@ values; the simulation runs only when the picture is drawn.
 
 An instrument kind's `display` column in `instruments::INSTRUMENTS` names the function that builds
 its `NoteCurve`; `instruments::note_curve` looks it up. The synthesizer has one; the sampler has
-none, so its area stays blank. `crates/debussy_ui/src/note_display.rs` draws it.
+none, and its area stays blank. `crates/debussy_ui/src/note_display.rs` draws it.
 
 - The note is an A4 at velocity 127, from rest, held and then released. `NoteCurve::render`
   renders it with the synth's own per-sample voice code on state of its own: fixed values with no

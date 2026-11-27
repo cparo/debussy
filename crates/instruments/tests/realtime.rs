@@ -356,7 +356,7 @@ fn values(settings: &[(&str, f32)]) -> Result<Vec<f32>, Box<dyn StdError>> {
 }
 
 #[test]
-fn test_note_curve_matches_the_live_synth() -> TestResult {
+fn test_render_matches_the_live_synth() -> TestResult {
     // The LFO on the cutoff, a pulse and the 24 dB order, and settings the preview ignores.
     let settings = [
         ("lfo depth", 0.5),
@@ -383,7 +383,7 @@ fn test_note_curve_matches_the_live_synth() -> TestResult {
 }
 
 #[test]
-fn test_note_curve_leaves_a_live_synth_unchanged() -> TestResult {
+fn test_render_leaves_a_live_synth_unchanged() -> TestResult {
     let (mut with, mut without) = (Rig::new(PLAIN)?, Rig::new(PLAIN)?);
     let events = [(0, on(60, 100)?)];
     assert_eq!(

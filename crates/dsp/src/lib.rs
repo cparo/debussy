@@ -42,7 +42,7 @@ mod oscillator;
 mod oversample;
 mod resample;
 
-pub use bands::{Bands, window_size};
+pub use bands::{Bands, SPECTROGRAM_WINDOW_SECONDS, window_size};
 pub use delay::{TapDelay, hermite};
 pub use dither::{Depth, Ditherer};
 pub use dynamics::{

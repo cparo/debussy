@@ -27,10 +27,10 @@ mod synth;
 mod voices;
 
 pub use error::Error;
-pub use note_curve::{MAX_RATE as NOTE_MAX_RATE, MAX_SPAN as NOTE_MAX_SPAN, NOTE, Note, NoteCurve};
+pub use note_curve::{NOTE, NOTE_MAX_RATE, NOTE_MAX_SPAN, Note, NoteCurve};
 pub use registry::{
-    DisplayFn, INSTRUMENTS, InstrumentKind, display_name, instrument, note_curve, parameter_infos,
-    sampler,
+    INSTRUMENTS, InstrumentKind, NoteCurveFn, display_name, instrument, note_curve,
+    parameter_infos, sampler,
 };
 pub use sampler::{Playback, SAMPLER_VOICES, Sampler, Zone};
 pub use silence::Silence;
