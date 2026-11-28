@@ -12,11 +12,11 @@ use signal_graph::{ParameterInfo, Scale};
 
 use crate::app::Message;
 use crate::effect_display::{DisplayKind, DisplaySettings, display_area};
-use crate::equal_heights::equal_heights;
 use crate::focus_target::{focus_target, ringed};
 use crate::icon::Icon;
 use crate::node_dialog::{DialogFocus, DialogMessage};
 use crate::node_parameters::NodeParameters;
+use crate::strip_grid::strip_grid;
 use crate::theme;
 use crate::view::{TOGGLE_PADDING, TOOL_TEXT, toggle_button};
 
@@ -103,8 +103,9 @@ pub(crate) fn moved<T: Copy + PartialEq>(from: Option<T>, order: &[T], forward: 
 /// display, drawn in `tone` at `sample_rate`, for a
 /// whole note of `frames_per_whole_note` frames, and at `scale` physical pixels per logical
 /// pixel, comes first; then the preset picker, if the kind
-/// has presets, and the ungrouped parameters, in a row; then one strip per group, scrolling
-/// horizontally.
+/// has presets, and the ungrouped parameters, in a row; then one strip per group, in rows aligned
+/// in columns, scrolling horizontally together. A row whose first group's first parameter has a
+/// [row caption](signal_graph::ParameterInfo::row_caption) starts with a strip showing it.
 pub(crate) fn effect_panel<'a>(
     parameters: &NodeParameters<'a>,
     node: &NodeKind,
@@ -125,20 +126,31 @@ pub(crate) fn effect_panel<'a>(
     let ungrouped = row(preset_picker(parameters, kind))
         .extend(ungrouped.iter().map(|&i| control(i)))
         .spacing(16);
-    let strips = grouped
-        .chunk_by(|&a, &b| infos[a].group == infos[b].group)
-        .map(|run| {
-            let group = run.first().map_or("", |&i| infos[i].group.as_str());
-            container(
-                column![text(capitalised(group)).size(13)]
-                    .extend(run.iter().map(|&i| control(i)))
-                    .spacing(8),
-            )
-            .padding(6)
-            .style(theme::strip)
-            .into()
-        });
-    let strips = equal_heights(strips, 8.0);
+    let mut rows: Vec<Vec<Element<'a, Message>>> = Vec::new();
+    let mut current_row = None;
+    for run in grouped.chunk_by(|&a, &b| infos[a].group == infos[b].group) {
+        let group = run.first().map_or("", |&i| infos[i].group.as_str());
+        // A group's row and caption are its first parameter's, shown or not.
+        let head = infos.iter().find(|i| i.group == group);
+        let row_number = head.map_or(0, |h| h.row);
+        if current_row != Some(row_number) {
+            current_row = Some(row_number);
+            let caption = head.and_then(|h| h.row_caption.clone());
+            rows.push(caption.map(caption_strip).into_iter().collect());
+        }
+        let strip = container(
+            column![text(capitalised(group)).size(13)]
+                .extend(run.iter().map(|&i| control(i)))
+                .spacing(8),
+        )
+        .padding(6)
+        .style(theme::strip)
+        .into();
+        if let Some(row) = rows.last_mut() {
+            row.push(strip);
+        }
+    }
+    let strips = strip_grid(rows, 8.0);
     column![
         display,
         ungrouped,
@@ -150,6 +162,14 @@ pub(crate) fn effect_panel<'a>(
     ]
     .spacing(10)
     .into()
+}
+
+/// A strip that only shows `caption`, at the start of a row of strips; it takes no focus.
+fn caption_strip<'a>(caption: String) -> Element<'a, Message> {
+    container(text(caption).size(13))
+        .padding(6)
+        .style(theme::strip)
+        .into()
 }
 
 /// A pick list of effect kind `kind`'s presets for the node of `parameters`, showing the preset

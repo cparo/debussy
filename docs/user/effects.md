@@ -215,6 +215,10 @@ enough to show the envelopes and the release, and redraw as you change a control
   | **Destination** | pitch, cutoff, amplitude | pitch | What it wobbles. |
   | **Depth** | 0 – 1 | 0 | How far; at 0 it does nothing. |
 
+The noise controls sit in a second row of strips, each under the oscillator-chain strip it
+mirrors: **Noise** under **Oscillator 2**, **Noise filter** under **Filter**, and so on. Both rows
+scroll together, and Tab runs along the top row, then the bottom.
+
 - **Noise** — the noise source.
 
   | Control | Range | Default | What it does |

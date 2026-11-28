@@ -326,12 +326,18 @@ impl EnvelopeParameters {
     /// The four parameters, at `defaults`: attack, decay and release in seconds (1 ms to 10 s),
     /// and sustain (0 to 1).
     pub fn new(prefix: &str, group: &str, defaults: [f32; 4]) -> Result<Self, Error> {
+        Self::in_row(prefix, group, defaults, 0)
+    }
+
+    /// As [`new`](Self::new), the group drawn in row `row` of the dialog.
+    pub fn in_row(prefix: &str, group: &str, defaults: [f32; 4], row: u32) -> Result<Self, Error> {
         let time = |name: &str, default| {
             Parameter::new(
                 ParameterInfo::new(format!("{prefix} {name}"), 0.001, 10.0, default)
                     .with_unit("s")
                     .with_scale(Scale::Logarithmic)
-                    .with_group(group),
+                    .with_group(group)
+                    .in_row(row),
             )
         };
         Ok(EnvelopeParameters {
@@ -339,7 +345,8 @@ impl EnvelopeParameters {
             decay: time("decay", defaults[1])?,
             sustain: Parameter::new(
                 ParameterInfo::new(format!("{prefix} sustain"), 0.0, 1.0, defaults[2])
-                    .with_group(group),
+                    .with_group(group)
+                    .in_row(row),
             )?,
             release: time("release", defaults[3])?,
         })

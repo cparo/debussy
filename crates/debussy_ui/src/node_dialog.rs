@@ -824,6 +824,52 @@ mod tests {
     }
 
     #[test]
+    fn test_update_tab_walks_the_synth_row_by_row() -> TestResult {
+        let mut f = Fixture::new(NodeKind::Instrument {
+            kind: "synth".to_owned(),
+            parameters: BTreeMap::new(),
+            zones: Vec::new(),
+        })?;
+        let infos = f
+            .catalog
+            .view(f.session.state(), f.node, None, false, 0)
+            .ok_or("no parameters")?
+            .infos()
+            .to_vec();
+        // Each group as Tab first reaches one of its controls, until "Delete".
+        let mut groups: Vec<String> = Vec::new();
+        for _ in 0..4 * infos.len() {
+            f.send(DialogMessage::FocusNext);
+            match f.dialog.focus() {
+                Some(DialogFocus::Parameter(i)) => {
+                    let group = &infos[i].group;
+                    if groups.last() != Some(group) {
+                        groups.push(group.clone());
+                    }
+                }
+                Some(DialogFocus::Delete) => break,
+                _ => {}
+            }
+        }
+        let expected = [
+            "",
+            "oscillator 1",
+            "oscillator 2",
+            "filter",
+            "filter envelope",
+            "amp envelope",
+            "lfo",
+            "noise",
+            "noise filter",
+            "noise filter envelope",
+            "noise amp envelope",
+            "noise lfo",
+        ];
+        assert_eq!(groups, expected);
+        Ok(())
+    }
+
+    #[test]
     fn test_update_nothing_focuses_without_an_open_dialog() -> TestResult {
         let mut f = Fixture::effect("parametric-eq")?;
         let cx = Context {

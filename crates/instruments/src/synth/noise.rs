@@ -15,6 +15,11 @@ use crate::voices::{EnvelopeParameters, peak};
 pub(super) const NOISE_SEED: u64 = 0x0015_E5ED_0000;
 /// The noise LFO's random seed, fixed so a render repeats.
 pub(super) const NOISE_LFO_SEED: u64 = 0x5EED_5718;
+/// The dialog row the noise chain's groups are drawn in, under the oscillator chain's.
+const ROW: u32 = 1;
+/// The caption that starts the noise row, pointing up to the oscillator chain and along the
+/// noise chain.
+const ROW_CAPTION: &str = "^ DCO Chain\nNoise Chain >";
 /// The bell's gain limit, in dB each way; also the noise LFO's gain range at full depth.
 const BELL_GAIN_DB: f32 = 24.0;
 
@@ -67,7 +72,9 @@ impl NoiseParameters {
     pub fn new() -> Result<Self, Error> {
         let grouped = |group: &'static str| {
             move |name: &str, min, max, default| {
-                ParameterInfo::new(name, min, max, default).with_group(group)
+                ParameterInfo::new(name, min, max, default)
+                    .with_group(group)
+                    .in_row(ROW)
             }
         };
         let (noise, filter, lfo) = (
@@ -77,7 +84,9 @@ impl NoiseParameters {
         );
         Ok(NoiseParameters {
             kind: Parameter::new(
-                noise("noise type", 0.0, 2.0, 0.0).with_scale(Scale::Choice(names(&COLOURS))),
+                noise("noise type", 0.0, 2.0, 0.0)
+                    .with_scale(Scale::Choice(names(&COLOURS)))
+                    .with_row_caption(ROW_CAPTION),
             )?,
             // 0 by default, so a project saved before the noise chain sounds as it did.
             level: Parameter::new(noise("noise level", 0.0, 1.0, 0.0))?,
@@ -89,19 +98,22 @@ impl NoiseParameters {
             env_amount: Parameter::new(
                 filter("noise filter envelope amount", -5.0, 5.0, 0.0).with_unit("oct"),
             )?,
-            filter_env: EnvelopeParameters::new(
+            filter_env: EnvelopeParameters::in_row(
                 "noise filter",
                 "noise filter envelope",
                 [0.005, 0.3, 0.3, 0.3],
+                ROW,
             )?,
-            amp_env: EnvelopeParameters::new(
+            amp_env: EnvelopeParameters::in_row(
                 "noise amp",
                 "noise amp envelope",
                 [0.005, 0.2, 0.8, 0.25],
+                ROW,
             )?,
             amp_velocity: Parameter::new(
                 ParameterInfo::new("noise amp velocity", 0.0, 1.0, 0.7)
-                    .with_group("noise amp envelope"),
+                    .with_group("noise amp envelope")
+                    .in_row(ROW),
             )?,
             lfo_rate: Parameter::new(
                 lfo("noise lfo rate", 0.01, 20.0, 5.0)
@@ -359,6 +371,17 @@ mod tests {
         assert_ne!(pink, brown);
         assert!(white.iter().all(|s| (-1.0..1.0).contains(s)));
         assert!(white.iter().any(|s| s.abs() > 0.5));
+    }
+
+    #[test]
+    fn test_every_noise_group_is_in_the_second_row_captioned_at_its_start() -> Result<(), Error> {
+        let p = NoiseParameters::new()?;
+        let all = p.all();
+        assert!(all.iter().all(|q| q.info().row == ROW), "row");
+        assert_eq!(all[0].info().name, "noise type");
+        assert_eq!(all[0].info().row_caption.as_deref(), Some(ROW_CAPTION));
+        assert!(all[1..].iter().all(|q| q.info().row_caption.is_none()));
+        Ok(())
     }
 
     #[test]

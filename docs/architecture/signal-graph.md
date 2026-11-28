@@ -94,7 +94,9 @@ also name a toggle and a state of it: its control is shown only while the toggle
 its value kept meanwhile
 ([ADR-0116](../adrs/0116-a-parameter-may-be-shown-only-while-a-toggle-is-on.md)). The
 node dialog draws an
-effect's controls from this metadata alone, one strip per group. The metadata is not saved
+effect's controls from this metadata alone, one strip per group. A parameter may also name the
+dialog row of its group and a caption for that row
+([ADR-0175](../adrs/0175-a-node-s-group-strips-are-laid-out-in-rows-aligned.md)). The metadata is not saved
 ([ADR-0087](../adrs/0087-a-parameter-declares-its-unit-scale-and-group-so-a.md)).
 
 A parameter may be marked latency-setting: the node's latency depends on it, and it is
