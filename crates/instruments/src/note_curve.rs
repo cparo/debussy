@@ -35,7 +35,7 @@ pub(crate) enum Source {
 pub(crate) struct Envelopes {
     /// Until every envelope reaches its sustain: the longest attack plus decay.
     pub settle: f32,
-    /// The amplitude envelope's release.
+    /// The longest release of the amplitude envelopes that sound.
     pub release: f32,
 }
 

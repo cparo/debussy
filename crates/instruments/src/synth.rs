@@ -3,7 +3,9 @@
 //!
 //! Each voice sums two MinBLEP oscillators, removes their DC, and runs them through a low-pass of
 //! 6 to 24 dB per octave (ADR-0168) and an amplitude envelope; a second envelope, velocity and the shared
-//! LFO move the cutoff. Voices are summed to mono and written to both output channels.
+//! LFO move the cutoff. Beside them a noise chain (white, pink or brown noise through a bell that
+//! tracks the note, with envelopes and an LFO of its own; ADR-0174) is summed in. Voices are
+//! summed to mono and written to both output channels.
 
 use audio_buffers::Layout;
 use dsp::{
@@ -17,7 +19,12 @@ use signal_graph::{Inputs, Node, Outputs, Parameter, ParameterInfo, Port, Ramp, 
 use crate::error::Error;
 use crate::voices::{EnvelopeParameters, Pool, SUSTAIN_PEDAL, Sound, Voice};
 
+mod noise;
 mod note;
+
+use noise::{
+    Colour, NOISE_LFO_SEED, NOISE_SEED, NoiseDestination, NoiseFrame, NoiseParameters, NoiseVoice,
+};
 
 pub(crate) use note::{note_curve, render_note};
 
@@ -167,6 +174,7 @@ struct Parameters {
     lfo_shape: Parameter,
     lfo_destination: Parameter,
     lfo_depth: Parameter,
+    noise: NoiseParameters,
     bend_range: Parameter,
     voices: Parameter,
     gain: Parameter,
@@ -231,6 +239,7 @@ impl Parameters {
                     .with_scale(Scale::Choice(names(&DESTINATIONS))),
             )?,
             lfo_depth: Parameter::new(lfo("lfo depth", 0.0, 1.0, 0.0))?,
+            noise: NoiseParameters::new()?,
             bend_range: Parameter::new(
                 ParameterInfo::new("bend range", 0.0, 24.0, 2.0)
                     .with_unit("st")
@@ -263,6 +272,9 @@ impl Parameters {
             self.lfo_shape.clone(),
             self.lfo_destination.clone(),
             self.lfo_depth.clone(),
+        ]);
+        all.extend(self.noise.all().into_iter().cloned());
+        all.extend([
             self.bend_range.clone(),
             self.voices.clone(),
             self.gain.clone(),
@@ -284,6 +296,7 @@ struct Ramps {
     filter_velocity: Ramp,
     amp_velocity: Ramp,
     lfo_depth: Ramp,
+    noise: NoiseRamps,
     /// The output gain, linear.
     gain: Ramp,
     /// The pitch bend, in semitones.
@@ -306,6 +319,15 @@ impl Ramps {
             filter_velocity: ramp(p.filter_velocity.get()),
             amp_velocity: ramp(p.amp_velocity.get()),
             lfo_depth: ramp(p.lfo_depth.get()),
+            noise: NoiseRamps {
+                level: ramp(p.noise.level.get()),
+                octave: ramp(p.noise.octave.get()),
+                gain: ramp(p.noise.gain.get()),
+                q: ramp(p.noise.q.get()),
+                env_amount: ramp(p.noise.env_amount.get()),
+                amp_velocity: ramp(p.noise.amp_velocity.get()),
+                lfo_depth: ramp(p.noise.lfo_depth.get()),
+            },
             gain: ramp(db_to_gain(p.gain.get())),
             bend: ramp(0.0),
         }
@@ -324,7 +346,71 @@ impl Ramps {
         self.filter_velocity.approach(p.filter_velocity.read());
         self.amp_velocity.approach(p.amp_velocity.read());
         self.lfo_depth.approach(p.lfo_depth.read());
+        let (n, q) = (&mut self.noise, &p.noise);
+        n.level.approach(q.level.read());
+        n.octave.approach(q.octave.read());
+        n.gain.approach(q.gain.read());
+        n.q.approach(q.q.read());
+        n.env_amount.approach(q.env_amount.read());
+        n.amp_velocity.approach(q.amp_velocity.read());
+        n.lfo_depth.approach(q.lfo_depth.read());
         self.gain.approach(p.gain.read().map(db_to_gain));
+    }
+}
+
+/// The noise chain's ramped values.
+struct NoiseRamps {
+    level: Ramp,
+    octave: Ramp,
+    /// The bell's gain, in dB.
+    gain: Ramp,
+    q: Ramp,
+    env_amount: Ramp,
+    amp_velocity: Ramp,
+    lfo_depth: Ramp,
+}
+
+impl NoiseRamps {
+    /// Whether the noise level is above 0 or ramping from it.
+    fn is_on(&self) -> bool {
+        self.level.target() > 0.0 || self.level.current() > 0.0
+    }
+
+    /// The values for the next sample.
+    fn next(&mut self) -> NoiseValues {
+        NoiseValues {
+            level: self.level.next_value(),
+            octave: self.octave.next_value(),
+            gain: self.gain.next_value(),
+            q: self.q.next_value(),
+            env_amount: self.env_amount.next_value(),
+            lfo_depth: self.lfo_depth.next_value(),
+        }
+    }
+}
+
+/// The noise chain's part of [`Values`].
+#[derive(Debug, Clone, Copy)]
+struct NoiseValues {
+    level: f32,
+    octave: f32,
+    /// The bell's gain, in dB.
+    gain: f32,
+    q: f32,
+    env_amount: f32,
+    lfo_depth: f32,
+}
+
+impl NoiseValues {
+    fn of(p: &NoiseParameters) -> NoiseValues {
+        NoiseValues {
+            level: p.level.get(),
+            octave: p.octave.get(),
+            gain: p.gain.get(),
+            q: p.q.get(),
+            env_amount: p.env_amount.get(),
+            lfo_depth: p.lfo_depth.get(),
+        }
     }
 }
 
@@ -335,6 +421,8 @@ struct Frame {
     max_cutoff: f32,
     /// Semitones added to every note: pitch bend and the LFO.
     pitch: f32,
+    /// The pitch bend alone, in semitones, which the noise bell tracks.
+    bend: f32,
     octave: [f32; 2],
     detune: [f32; 2],
     width: [f32; 2],
@@ -348,6 +436,7 @@ struct Frame {
     lfo_cutoff: f32,
     /// The amplitude every voice is multiplied by for the LFO.
     tremolo: f32,
+    noise: NoiseFrame,
 }
 
 /// The values one sample's [`Frame`] is built from: the ramps' values while running, or the
@@ -366,6 +455,7 @@ struct Values {
     filter_amount: f32,
     filter_velocity: f32,
     lfo_depth: f32,
+    noise: NoiseValues,
 }
 
 impl Values {
@@ -381,6 +471,7 @@ impl Values {
             filter_amount: p.filter_amount.get(),
             filter_velocity: p.filter_velocity.get(),
             lfo_depth: p.lfo_depth.get(),
+            noise: NoiseValues::of(&p.noise),
         }
     }
 }
@@ -392,6 +483,8 @@ struct Block {
     octave: [f32; 2],
     order: Order,
     destination: Destination,
+    colour: Colour,
+    noise_destination: NoiseDestination,
 }
 
 impl Block {
@@ -402,12 +495,15 @@ impl Block {
             octave: [p.osc[0].octave.get().round(), p.osc[1].octave.get().round()],
             order: order(p.order.get()),
             destination: DESTINATIONS[choice(p.lfo_destination.get(), DESTINATIONS.len())].1,
+            colour: p.noise.colour(),
+            noise_destination: p.noise.destination(),
         }
     }
 
-    /// The frame for one sample at `values`, with the LFO at `lfo` (−1 to 1) sent to its
-    /// destination.
-    fn frame(&self, v: &Values, lfo: f32) -> Frame {
+    /// The frame for one sample at `values`, with the LFO at `lfo` and the noise LFO at
+    /// `noise_lfo` (each −1 to 1) sent to their destinations.
+    fn frame(&self, v: &Values, lfo: f32, noise_lfo: f32) -> Frame {
+        let n = &v.noise;
         let depth = v.lfo_depth;
         Frame {
             sample_rate: self.sample_rate,
@@ -417,6 +513,7 @@ impl Block {
                     Destination::Pitch => lfo * depth * LFO_PITCH_SEMITONES,
                     _ => 0.0,
                 },
+            bend: v.bend,
             octave: self.octave,
             detune: v.detune,
             width: v.width,
@@ -434,14 +531,30 @@ impl Block {
                 Destination::Amplitude => 1.0 - depth * 0.5 * (1.0 - lfo),
                 _ => 1.0,
             },
+            noise: NoiseFrame::new(
+                self.colour,
+                self.noise_destination,
+                n.level,
+                n.octave,
+                n.gain,
+                n.q,
+                n.env_amount,
+                noise_lfo,
+                n.lfo_depth,
+            ),
         }
     }
 }
 
-/// Sets `voice`'s envelopes and waves from the parameters, at `sample_rate`.
-fn configure(voice: &mut Voice<Tone>, p: &Parameters, sample_rate: f32) {
+/// Sets `voice`'s envelopes and waves from the parameters, at `sample_rate`, with the noise
+/// chain on or off as `noise_on` says.
+fn configure(voice: &mut Voice<Tone>, p: &Parameters, sample_rate: f32, noise_on: bool) {
     p.amp_env.apply(&mut voice.amp, sample_rate);
     p.filter_env.apply(&mut voice.sound.filter_env, sample_rate);
+    let noise = &mut voice.sound.noise;
+    p.noise.filter_env.apply(&mut noise.filter_env, sample_rate);
+    p.noise.amp_env.apply(&mut noise.amp, sample_rate);
+    noise.on = noise_on;
     for (i, osc) in voice.sound.osc.iter_mut().enumerate() {
         osc.set_wave(WAVES[choice(p.osc[i].wave.get(), WAVES.len())].1);
     }
@@ -453,7 +566,8 @@ fn configure_lfo(lfo: &mut Lfo, p: &Parameters) {
     lfo.set_shape(LFO_SHAPES[choice(p.lfo_shape.get(), LFO_SHAPES.len())].1);
 }
 
-/// The synth's part of a voice: its oscillators, filter stages and filter envelope.
+/// The synth's part of a voice: its oscillators, filter stages and filter envelope, and its
+/// noise chain.
 #[derive(Debug, Clone)]
 struct Tone {
     osc: [Oscillator; 2],
@@ -462,17 +576,33 @@ struct Tone {
     svf: [Svf; 2],
     one_pole: OnePole,
     filter_env: Adsr,
+    noise: NoiseVoice,
 }
 
 impl Tone {
-    fn new() -> Self {
+    /// A silent tone at `sample_rate` whose noise starts from `seed`.
+    fn new(sample_rate: u32, seed: u64) -> Self {
         Tone {
             osc: [Oscillator::new(), Oscillator::new()],
             dc: OnePole::new(),
             svf: [Svf::new(), Svf::new()],
             one_pole: OnePole::new(),
             filter_env: Adsr::new(),
+            noise: NoiseVoice::new(seed, sample_rate),
         }
+    }
+
+    /// A pool of `count` tones at `sample_rate`, voice *i* seeded with [`NOISE_SEED`] + *i*, so a
+    /// lone voice sounds as a full pool's first does. Allocates.
+    fn pool(count: usize, sample_rate: u32) -> Pool<Tone> {
+        let mut seed = NOISE_SEED;
+        // Sample rates are exact in `f32` well past any audio rate.
+        #[allow(clippy::cast_precision_loss)]
+        let rate = sample_rate as f32;
+        Pool::new(count, rate, || {
+            seed += 1;
+            Tone::new(sample_rate, seed - 1)
+        })
     }
 
     /// Zeroes every filter stage, for a change of order (ADR-0168).
@@ -504,14 +634,25 @@ impl Tone {
 }
 
 impl Sound for Tone {
-    type Start = ();
+    /// The noise amplitude envelope's velocity sensitivity, 0 to 1.
+    type Start = f32;
 
-    fn start(&mut self, _note: u8, _velocity: f32, _start: ()) {
+    fn start(&mut self, _note: u8, velocity: f32, noise_velocity: f32) {
         self.filter_env.gate_on(1.0);
+        self.noise.start(velocity, noise_velocity);
     }
 
     fn release(&mut self) {
         self.filter_env.gate_off();
+        self.noise.release();
+    }
+
+    fn sounding(&self) -> bool {
+        self.noise.sounding()
+    }
+
+    fn level(&self) -> f32 {
+        self.noise.level()
     }
 
     fn reset(&mut self) {
@@ -521,6 +662,7 @@ impl Sound for Tone {
         self.dc.reset();
         self.reset_filter();
         self.filter_env.reset();
+        self.noise.reset();
     }
 }
 
@@ -545,7 +687,18 @@ fn render(voice: &mut Voice<Tone>, f: &Frame, table: &MinBlep, dc: &OnePoleCoeff
         .exp2()
         .clamp(CUTOFF_RANGE.0, f.max_cutoff);
     let sample = tone.filter(sample, f.order, cutoff, f.resonance, f.sample_rate);
-    sample * amp * f.tremolo
+    let bent = f32::from(voice.note) + f.bend;
+    let noise = tone
+        .noise
+        .render(bent, &f.noise, f.sample_rate, f.max_cutoff);
+    let sample = sample * amp * f.tremolo;
+    // While the chain is off it is not added at all, so the oscillators sound bit for bit as
+    // they would without it.
+    if tone.noise.on {
+        sample + noise
+    } else {
+        sample
+    }
 }
 
 /// The running state, made in `prepare`.
@@ -554,6 +707,7 @@ struct Running {
     table: MinBlep,
     pool: Pool<Tone>,
     lfo: Lfo,
+    noise_lfo: Lfo,
     ramps: Ramps,
     dc: OnePoleCoefficients,
     /// The pitch-bend position, −1 to 1.
@@ -609,8 +763,9 @@ impl Node for Synth {
         self.running = Some(Running {
             sample_rate: rate,
             table,
-            pool: Pool::new(MAX_VOICES, rate, Tone::new),
+            pool: Tone::pool(MAX_VOICES, sample_rate.max(1)),
             lfo: Lfo::new(sample_rate, LFO_SEED),
+            noise_lfo: Lfo::new(sample_rate, NOISE_LFO_SEED),
             ramps: Ramps::new(&self.parameters, sample_rate),
             dc: OnePoleCoefficients::high_pass(DC_BLOCK_HZ, rate),
             bend: 0.0,
@@ -622,6 +777,7 @@ impl Node for Synth {
         if let Some(running) = self.running.as_mut() {
             running.pool.reset();
             running.lfo.reset(0.0);
+            running.noise_lfo.reset(0.0);
             running.bend = 0.0;
             running.ramps.bend.set_target_over(0.0, 1);
             running.ramps.bend.next_value();
@@ -642,10 +798,12 @@ impl Node for Synth {
         };
         // Read once per block (ADR-0128).
         running.ramps.read(p);
+        let noise_on = running.ramps.noise.is_on();
         for voice in running.pool.voices.iter_mut() {
-            configure(voice, p, running.sample_rate);
+            configure(voice, p, running.sample_rate, noise_on);
         }
         configure_lfo(&mut running.lfo, p);
+        p.noise.configure_lfo(&mut running.noise_lfo);
         let bend_range = p.bend_range.get();
         let limit = choice(p.voices.get(), MAX_VOICES + 1).max(1);
         let block = Block::new(p, running.sample_rate);
@@ -666,9 +824,10 @@ impl Node for Synth {
                     Kind::NoteOn { note, velocity } if velocity > 0 => {
                         let velocity = f32::from(velocity) / 127.0;
                         let amount = running.ramps.amp_velocity.target();
+                        let noise_amount = running.ramps.noise.amp_velocity.target();
                         running
                             .pool
-                            .note_on(note, velocity, limit, amount, false, ());
+                            .note_on(note, velocity, limit, amount, false, noise_amount);
                     }
                     Kind::NoteOn { note, .. } | Kind::NoteOff { note, .. } => {
                         running.pool.note_off(note);
@@ -686,6 +845,7 @@ impl Node for Synth {
             let r = &mut running.ramps;
             r.bend.set_target(running.bend * bend_range);
             let lfo = running.lfo.next_value();
+            let noise_lfo = running.noise_lfo.next_value();
             let values = Values {
                 bend: r.bend.next_value(),
                 detune: [r.detune[0].next_value(), r.detune[1].next_value()],
@@ -696,9 +856,11 @@ impl Node for Synth {
                 filter_amount: r.filter_amount.next_value(),
                 filter_velocity: r.filter_velocity.next_value(),
                 lfo_depth: r.lfo_depth.next_value(),
+                noise: r.noise.next(),
             };
-            let frame = block.frame(&values, lfo);
+            let frame = block.frame(&values, lfo, noise_lfo);
             let amp_velocity = r.amp_velocity.next_value();
+            r.noise.amp_velocity.next_value();
             let gain = r.gain.next_value();
             let mut sum = 0.0;
             for i in 0..running.pool.voices.len() {
@@ -738,14 +900,14 @@ mod tests {
             let stepped = matches!(info.scale, Scale::Choice(_) | Scale::Integer);
             assert_eq!(info.is_automatable(), !stepped, "{}", info.name);
         }
-        assert_eq!(infos.len(), 31);
+        assert_eq!(infos.len(), 50);
         Ok(())
     }
 
     /// The gain of `tone`'s low-pass of order `order` (cutoff 200 Hz, Q 0.707, 48 kHz) at
     /// `hz`, from the RMS of a settled sine.
     fn gain_at(order: Order, hz: f32) -> f32 {
-        let mut tone = Tone::new();
+        let mut tone = Tone::new(48_000, NOISE_SEED);
         let rate = 48_000.0;
         let sine = |n: usize| {
             #[allow(clippy::cast_precision_loss)] // n < 2^24
@@ -780,7 +942,7 @@ mod tests {
 
     #[test]
     fn test_filter_twelve_is_the_single_svf() {
-        let (mut tone, mut svf) = (Tone::new(), Svf::new());
+        let (mut tone, mut svf) = (Tone::new(48_000, NOISE_SEED), Svf::new());
         let c = SvfCoefficients::low_pass(500.0, 4.0, 48_000.0);
         for n in 0..256 {
             let x = if n % 37 == 0 { 1.0 } else { -0.25 };
@@ -791,7 +953,7 @@ mod tests {
 
     #[test]
     fn test_reset_filter_zeroes_every_stage() {
-        let mut tone = Tone::new();
+        let mut tone = Tone::new(48_000, NOISE_SEED);
         for order in [Order::TwentyFour, Order::Eighteen] {
             for _ in 0..64 {
                 tone.filter(1.0, order, 1_000.0, 2.0, 48_000.0);

@@ -395,3 +395,149 @@ fn test_render_leaves_a_live_synth_unchanged() -> TestResult {
     assert_eq!(with.render(1_024, &[])?, without.render(1_024, &[])?);
     Ok(())
 }
+
+/// The FNV-1a hash of `signal`'s bits.
+fn fnv(signal: &[f32]) -> u64 {
+    signal.iter().fold(0xCBF2_9CE4_8422_2325, |hash, s| {
+        s.to_bits().to_le_bytes().iter().fold(hash, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3)
+        })
+    })
+}
+
+/// A busy polyphonic passage: more notes than voices so some are stolen, the pedal, a bend and
+/// the LFO on, from a synth with `settings`; the hash of what it plays.
+fn passage_hash(settings: &[(&str, f32)]) -> Result<u64, Box<dyn StdError>> {
+    let base = [
+        ("voices", 4.0),
+        ("lfo depth", 0.3),
+        ("lfo destination", 1.0),
+        ("amp release", 0.2),
+    ];
+    let mut rig = Rig::new(&[&base[..], settings].concat())?;
+    let pedal = |value| Message::control_change(0, 64, value).ok_or("bad pedal");
+    let bend = Message::pitch_bend(0, 12_000).ok_or("bad bend")?;
+    let mut events = Vec::new();
+    for k in 0..7_u8 {
+        let at = usize::from(k) * 1_000;
+        events.push((at, on(48 + 5 * k, 40 + 12 * k)?));
+        if k % 2 == 0 {
+            events.push((at + 700, off(48 + 5 * k)?));
+        }
+    }
+    events.extend([
+        (2_500, pedal(127)?),
+        (4_200, bend),
+        (6_100, pedal(0)?),
+        (8_000, off(53)?),
+        (8_000, off(63)?),
+        (8_000, off(73)?),
+    ]);
+    events.sort_by_key(|&(at, _)| at);
+    Ok(fnv(&rig.render(24 * 1_024, &events)?))
+}
+
+/// What [`passage_hash`] gave on the synth before it had a noise chain, in a debug build on
+/// macOS (the CI platform) with the pinned toolchain. Optimisation and the toolchain change the
+/// float bits, so a release build skips the comparison.
+const PASSAGE_HASH: u64 = 7_405_122_753_940_154_866;
+
+#[test]
+#[cfg_attr(not(debug_assertions), ignore = "the hash is of a debug build")]
+fn test_passage_plays_as_before_the_noise_chain() -> TestResult {
+    assert_eq!(passage_hash(&[])?, PASSAGE_HASH);
+    Ok(())
+}
+
+/// Every noise parameter off its default except the level.
+const NOISE_MOVED: &[(&str, f32)] = &[
+    ("noise type", 2.0),
+    ("noise filter octave", 2.0),
+    ("noise filter gain", -6.0),
+    ("noise filter q", 4.0),
+    ("noise filter envelope amount", 3.0),
+    ("noise filter attack", 0.1),
+    ("noise filter release", 2.0),
+    ("noise amp attack", 0.05),
+    ("noise amp sustain", 0.5),
+    ("noise amp release", 5.0),
+    ("noise amp velocity", 0.0),
+    ("noise lfo rate", 9.0),
+    ("noise lfo shape", 5.0),
+    ("noise lfo destination", 2.0),
+    ("noise lfo depth", 1.0),
+];
+
+#[test]
+#[cfg_attr(not(debug_assertions), ignore = "the hash is of a debug build")]
+fn test_noise_at_level_zero_plays_as_before_whatever_its_settings() -> TestResult {
+    assert_eq!(passage_hash(NOISE_MOVED)?, PASSAGE_HASH);
+    assert_ne!(
+        passage_hash(&[NOISE_MOVED, &[("noise level", 0.5)]].concat())?,
+        PASSAGE_HASH
+    );
+    Ok(())
+}
+
+#[test]
+fn test_noise_outlasts_the_amp_envelope_then_falls_silent() -> TestResult {
+    // The oscillators silent: only the noise sounds, released over 0.5 s against the amp's 50 ms.
+    let noise = |level| {
+        Rig::new(
+            &[
+                PLAIN,
+                &[
+                    ("osc 1 level", 0.0),
+                    ("noise level", level),
+                    ("noise amp release", 0.5),
+                    ("voices", 1.0),
+                ],
+            ]
+            .concat(),
+        )
+    };
+    let mut rig = noise(1.0)?;
+    let out = rig.render(4_096 + 48_000, &[(0, on(60, 100)?), (4_096, off(60)?)])?;
+    assert!(
+        rms(&out[1_024..4_096]) > 0.05,
+        "{}",
+        rms(&out[1_024..4_096])
+    );
+    // 200 ms after the note-off the amp envelope has long ended; the voice still plays noise.
+    let late = 4_096 + 9_600;
+    assert!(rms(&out[late..late + 1_024]) > 1e-3, "voice freed early");
+    let after = rig.render(48_000, &[])?;
+    assert!(peak(&after[24_000..]) < 1e-4, "{}", peak(&after[24_000..]));
+    // At level 0 nothing sounds at all.
+    let mut quiet = noise(0.0)?;
+    let out = quiet.render(8_192, &[(0, on(60, 100)?), (4_096, off(60)?)])?;
+    assert_eq!(peak(&out), 0.0);
+    Ok(())
+}
+
+#[test]
+fn test_render_matches_the_live_synth_with_noise() -> TestResult {
+    let settings = [
+        ("noise level", 0.7),
+        ("noise type", 1.0),
+        ("noise filter envelope amount", 2.0),
+        ("noise amp release", 0.3),
+        ("noise lfo depth", 0.5),
+        ("noise lfo shape", 5.0),
+        ("noise lfo destination", 1.0),
+        ("voices", 3.0),
+        ("noise amp velocity", 0.2),
+    ];
+    let curve = note_curve("synth", &values(&settings)?, RATE).ok_or("no curve")?;
+    let note = curve.render();
+    let samples = note.samples();
+    // Under a second at 48 kHz.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let gate_off = (curve.gate_off() * RATE as f32).round() as usize;
+    let mut rig = Rig::new(&settings)?;
+    let frames = samples.len().div_ceil(BLOCK) * BLOCK;
+    let out = rig.render(frames, &[(0, on(69, 127)?), (gate_off, off(69)?)])?;
+    assert!(peak(samples) > 0.01);
+    assert_eq!(&out[..samples.len()], samples);
+    Ok(())
+}
